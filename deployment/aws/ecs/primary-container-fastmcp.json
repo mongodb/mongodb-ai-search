@@ -1,0 +1,13 @@
+{
+  "image": "<ACCOUNT_ID>.dkr.ecr.<REGION>.amazonaws.com/searchaas:latest",
+  "containerPort": 8001,
+  "command": ["python", "-m", "searchaas.mcp_server.server"],
+  "environment": [
+    { "name": "PYTHONUNBUFFERED", "value": "1" },
+    { "name": "PYTHONPATH", "value": "/app" },
+    { "name": "SEARCHAAS_CONFIG", "value": "/app/searchaas/config/searchaas.yaml" },
+    { "name": "ATLAS_URI", "value": "<ATLAS_URI>" },
+    { "name": "ATLAS_DB", "value": "<ATLAS_DB>" },
+    { "name": "SEARCHAAS_CORS_ORIGINS", "value": "<CORS_ORIGINS>" }
+  ]
+}

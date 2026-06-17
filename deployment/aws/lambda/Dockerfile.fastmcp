@@ -1,0 +1,55 @@
+# =============================================================================
+# SearchaaS — FastMCP (streamable-http) on AWS Lambda
+#
+# FastMCP's `streamable-http` transport returns chunked / SSE responses, which
+# require the Function URL response-streaming invoke mode. We achieve this by:
+#   1. Setting AWS_LWA_INVOKE_MODE=response_stream so the Lambda Web Adapter
+#      streams bytes from the upstream HTTP server to the Function URL caller.
+#   2. Creating the Function URL with --invoke-mode RESPONSE_STREAM (see
+#      deploy.sh).
+#
+# Note: response-streaming Function URLs have a soft cap of 20 MB per response
+# and the standard 15-minute Lambda timeout.
+# =============================================================================
+
+# ---- Stage 1: builder ------------------------------------------------------
+FROM python:3.11-slim AS builder
+
+WORKDIR /build
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        build-essential curl \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY requirements.txt .
+RUN pip install --upgrade pip \
+ && pip install --prefix=/install --no-cache-dir --no-warn-script-location \
+        -r requirements.txt
+
+# ---- Stage 2: runtime ------------------------------------------------------
+FROM python:3.11-slim AS runtime
+
+COPY --from=public.ecr.aws/awsguru/aws-lambda-adapter:0.9.0 \
+     /lambda-adapter /opt/extensions/lambda-adapter
+
+COPY --from=builder /install /usr/local
+
+WORKDIR /var/task
+COPY searchaas/ ./searchaas/
+
+# ---- LWA configuration -----------------------------------------------------
+# The FastMCP server in searchaas/mcp_server/server.py:main() already adds
+# /healthz (line 190) — LWA hits that for readiness.
+#
+# PORT must match server.mcp_port in searchaas/config/searchaas.yaml (8001).
+ENV PORT=8001 \
+    AWS_LWA_INVOKE_MODE=response_stream \
+    AWS_LWA_READINESS_CHECK_PATH=/healthz \
+    AWS_LWA_ASYNC_INIT=true \
+    PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONPATH=/var/task
+
+EXPOSE 8001
+
+# Boot the FastMCP server exactly as the ECS image does.
+CMD ["python", "-m", "searchaas.mcp_server.server"]

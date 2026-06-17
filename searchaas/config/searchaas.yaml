@@ -1,0 +1,154 @@
+# =============================================================================
+# SearchaaS Phase 1 Configuration
+# -----------------------------------------------------------------------------
+# All providers, models, indexes, and runtime options are supplied here.
+# Switching an embedding model, LLM, or retrieval strategy is a config change,
+# NOT a code change. Environment variables are referenced via ${VAR_NAME}.
+# =============================================================================
+
+# ---- Vector Search index ----------------------------------------------------
+# MUST match an existing Atlas Vector Search index on the collection above.
+#
+# Two supported embedding modes:
+#
+#   (A) Client-side embeddings  (embeddings.provider != "auto")
+#       - The client embeds the query (e.g. via Voyage / OpenAI / Cohere…).
+#       - `embedding_key` MUST equal the `path` declared in the index AND the
+#         field name used at ingestion time.
+#       - `dimensions` MUST equal the index's `numDimensions` and the
+#         embedder's output size.
+#       - `relevance_score_fn` is the similarity used at query time.
+#       - Index field type: `vector`.
+#
+#   (B) Server-side AutoEmbeddings  (embeddings.provider: auto)  *** ACTIVE ***
+#       - Atlas embeds the query and the document text INTERNALLY using the
+#         model declared in the index's `autoEmbed` field.
+#       - `embedding_key`      MUST be `null`.
+#       - `dimensions`         MUST be `-1`.
+#       - `relevance_score_fn` MUST be `null`.
+#       - Index field type: `autoEmbed`, with `path` = atlas.text_key and a
+#         `model` declaration that matches embeddings.config.model.
+# -----------------------------------------------------------------------------
+#
+# Current target (Mode B, server-side AutoEmbeddings):
+#   index name : autoembed_index
+#   path       : text                  (== atlas.text_key)
+#   type       : autoEmbed
+#   model      : voyage-4              (== embeddings.config.model)
+#
+# To switch to Mode A (client-side Voyage embeddings on `voyage_vector_index`),
+# comment the ACTIVE Mode B blocks below and uncomment the Mode A blocks.
+# The bootstrap layer (`searchaas/app/bootstrap.py`) cross-validates the
+# embeddings provider against the live index type and refuses to start on
+# mismatch (e.g. `provider: voyageai` + an autoEmbed index, or
+# `provider: auto` + a non-autoEmbed index).
+
+atlas:
+  uri: ${ATLAS_URI}                        # mongodb+srv://... (resolved from env)
+  database: ${ATLAS_DB:-amazon}
+  collection: pdf_multimodal_chunks
+
+  # ---- Mode B: server-side AutoEmbeddings (ACTIVE) --------------------------
+  vector_index:   vector_index            # Atlas Vector Search index (type=autoEmbed)
+  search_index:   default                    # Atlas Search (Lucene) index for fulltext/hybrid
+  text_key:       raw_text                       # MUST equal the `path` of the autoEmbed field
+  embedding_key:  null                       # MUST be null for AutoEmbeddings
+  relevance_score_fn: null                   # MUST be null for AutoEmbeddings
+  dimensions:     -1                         # MUST be -1 for AutoEmbeddings
+
+  vector_index_definition:
+    fields:
+      - type: autoEmbed
+        path: raw_text                           # MUST equal atlas.text_key
+        model: voyage-4                      # MUST equal embeddings.config.model
+      # - type: filter
+      #   path: file_name
+      # - type: filter
+      #   path: page_number
+
+  # ---- Mode A: client-side Voyage embeddings (commented alternative) --------
+  # vector_index:   voyage_vector_index      # Atlas Vector Search index (type=vector)
+  # search_index:   default
+  # text_key:       text                     # field holding the raw text
+  # embedding_key:  embedding-vectors        # MUST equal the `path` in the vector index
+  # relevance_score_fn: cosine               # similarity used at query time
+  # dimensions:     512                      # MUST equal index numDimensions AND embedder output_dimension
+  
+  # vector_index_definition:
+  #   fields:
+  #     - type: vector
+  #       path: embedding-vectors
+  #       numDimensions: 512
+  #       similarity: cosine
+
+  # search_index_definition:
+  #   mappings:
+  #     dynamic: true
+
+# -----------------------------------------------------------------------------
+# Embedding provider for QUERY embeddings.
+# Supported: auto | azure_openai | openai | voyageai | cohere | huggingface
+#            gemini | bedrock_titan
+# -----------------------------------------------------------------------------
+
+# ---- Mode B: server-side AutoEmbeddings (ACTIVE) ----------------------------
+embeddings:
+  provider: auto
+  config:
+    model: voyage-4                          # MUST equal the `model` in the autoEmbed index field
+
+# ---- Mode A: client-side Voyage embeddings (commented alternative) ----------
+# embeddings:
+#   provider: voyageai
+#   config:
+#     model: voyage-4
+#     voyage_api_key: ${VOYAGE_API_KEY}
+#     output_dimension: 512                  # MUST equal atlas.dimensions
+
+# ---- Other client-side examples ---------------------------------------------
+# embeddings:
+#   provider: gemini
+#   config:
+#     model: models/text-embedding-004
+#     google_api_key: ${GOOGLE_API_KEY}
+#
+# embeddings:
+#   provider: bedrock_titan
+#   config:
+#     model_id: amazon.titan-embed-text-v2:0
+#     region_name: us-east-1
+#     credentials_profile_name: default
+
+# -----------------------------------------------------------------------------
+# LLM used by the Query Understanding Layer and Retrieval Planner
+# Supported: azure_openai | openai | gemini | anthropic | bedrock
+# -----------------------------------------------------------------------------
+planner:
+  llm_provider: gemini
+  config:
+    model: gemini-2.5-flash
+    google_api_key: ${GOOGLE_API_KEY}
+    temperature: 0.1
+  default_top_k: 20
+
+# -----------------------------------------------------------------------------
+# Retrieval Strategies
+# -----------------------------------------------------------------------------
+retrieval:
+  default_strategy: hybrid                  # vector | fulltext | hybrid | graph | parent_doc
+  hybrid:
+    vector_weight: 0.6
+    fulltext_weight: 0.4
+  vector:
+    num_candidates: 200
+
+# -----------------------------------------------------------------------------
+# Server
+# -----------------------------------------------------------------------------
+server:
+  host: 0.0.0.0
+  port: 8000
+  mcp_host: 0.0.0.0
+  mcp_port: 8001
+  mcp_transport: streamable-http
+  log_level: info

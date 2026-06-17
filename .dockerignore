@@ -1,0 +1,46 @@
+# Python
+venv/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.egg-info/
+.eggs/
+dist/
+build/
+.pytest_cache/
+
+
+# Legacy Streamlit UI — never needed in any image
+searchaas/ui/
+
+# Exclude heavy generated directories inside ui_react that are never COPYed.
+# Do NOT exclude the whole ui_react/ directory — scripts/Dockerfile.frontend
+# needs the source files; the API/MCP Dockerfiles simply don't COPY it.
+searchaas/ui_react/node_modules/
+searchaas/ui_react/dist/
+
+# Docs / markdown
+*.md
+*.txt
+!requirements.txt
+
+# Git
+.git/
+.gitignore
+
+# IDE
+.vscode/
+.idea/
+*.swp
+
+.claude/
+.codegraph/
+venv/
+
+# Never bake secrets into the image. Cloud Run / docker run provide env at
+# runtime via --set-secrets / --env-file. The image carries searchaas.yaml
+# (with ${VAR} placeholders) — values are resolved from the container env.
+.env
+.env.*
+!.env.example

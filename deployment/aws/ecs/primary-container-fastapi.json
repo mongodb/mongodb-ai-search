@@ -1,0 +1,18 @@
+{
+  "image": "<ACCOUNT_ID>.dkr.ecr.<REGION>.amazonaws.com/searchaas:latest",
+  "containerPort": 8000,
+  "command": [
+    "uvicorn",
+    "searchaas.api.app:app",
+    "--host", "0.0.0.0",
+    "--port", "8000"
+  ],
+  "environment": [
+    { "name": "PYTHONUNBUFFERED", "value": "1" },
+    { "name": "PYTHONPATH", "value": "/app" },
+    { "name": "SEARCHAAS_CONFIG", "value": "/app/searchaas/config/searchaas.yaml" },
+    { "name": "ATLAS_URI", "value": "<ATLAS_URI>" },
+    { "name": "ATLAS_DB", "value": "<ATLAS_DB>" },
+    { "name": "SEARCHAAS_CORS_ORIGINS", "value": "<CORS_ORIGINS>" }
+  ]
+}

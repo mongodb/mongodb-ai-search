@@ -1,0 +1,392 @@
+{
+  "description": "Test prompts for evaluating Voyage multimodal-3.5 retrieval over the data/ corpus (arXiv papers, AWS earnings, MongoDB earnings, MongoDB whitepapers). Each prompt is annotated with the source folder it should retrieve from and the retrieval skill it stresses (text, table, chart, diagram, cross-document, temporal).",
+  "corpus": {
+    "arXiv": "AI/ML research papers (May 2026)",
+    "aws_quaterly_results": "Amazon (AMZN) earnings releases Q2-2021 through Q1-2026",
+    "mongodb_earnings": "MongoDB Inc. quarterly earnings releases and earnings-call announcements",
+    "mongodb_papers": "MongoDB whitepapers, datasheets and industry briefs (security, GenAI, modernization, FSI, telco, retail)"
+  },
+  "retrieval_types": {
+    "text": "Pure text/semantic match",
+    "table": "Answer lives in a tabular layout (financial statements, benchmark tables)",
+    "chart": "Answer lives in a chart/graph/visualization",
+    "diagram": "Answer lives in an architecture or workflow diagram",
+    "cross_document": "Answer requires retrieving from multiple files",
+    "temporal": "Answer requires comparing values across time periods",
+    "negative": "Should return low-confidence or no relevant result"
+  },
+  "prompts": [
+    {
+      "id": "aws-01",
+      "query": "What were Amazon's net sales for Q1 2024?",
+      "expected_folder": "aws_quaterly_results",
+      "expected_files": ["AMZN-Q1-2024-Earnings-Release.pdf"],
+      "retrieval_type": "table",
+      "notes": "Tests reading a value from the Consolidated Statements of Operations table."
+    },
+    {
+      "id": "aws-02",
+      "query": "How much did AWS segment revenue grow year-over-year in Q3 2023?",
+      "expected_folder": "aws_quaterly_results",
+      "expected_files": ["AMZN-Q3-2023-Earnings-Release.pdf"],
+      "retrieval_type": "table",
+      "notes": "AWS segment financials are reported in a dedicated section/table."
+    },
+    {
+      "id": "aws-03",
+      "query": "Show me Amazon's operating income trend across all four quarters of 2022.",
+      "expected_folder": "aws_quaterly_results",
+      "expected_files": [
+        "AMZN-Q1-2022-Earnings-Release.pdf",
+        "AMZN-Q2-2022-Earnings-Release.pdf",
+        "AMZN-Q3-2022-Earnings-Release.pdf",
+        "AMZN-Q4-2022-Earnings-Release.pdf"
+      ],
+      "retrieval_type": "temporal",
+      "notes": "Multi-document temporal stitch across one fiscal year."
+    },
+    {
+      "id": "aws-04",
+      "query": "What was Amazon's free cash flow for the trailing twelve months ending Q2 2025?",
+      "expected_folder": "aws_quaterly_results",
+      "expected_files": ["AMZN-Q2-2025-Earnings-Release.pdf"],
+      "retrieval_type": "table",
+      "notes": "TTM cash-flow metric typically presented in the supplemental schedules."
+    },
+    {
+      "id": "aws-05",
+      "query": "Find the segment information table showing North America, International, and AWS revenue split.",
+      "expected_folder": "aws_quaterly_results",
+      "expected_files": [],
+      "retrieval_type": "table",
+      "notes": "Pure layout-driven retrieval; any Amazon ER works."
+    },
+    {
+      "id": "aws-06",
+      "query": "Compare AWS operating margin between Q4 2023 and Q4 2024.",
+      "expected_folder": "aws_quaterly_results",
+      "expected_files": [
+        "AMZN-Q4-2023-Earnings-Release.pdf",
+        "AMZN-Q4-2024-Earnings-Release.pdf"
+      ],
+      "retrieval_type": "cross_document",
+      "notes": "Cross-year comparison; should retrieve both releases."
+    },
+    {
+      "id": "aws-07",
+      "query": "What was Andy Jassy's quoted commentary on AI demand in the most recent earnings release?",
+      "expected_folder": "aws_quaterly_results",
+      "expected_files": ["AMZN-Q1-2026-Earnings-Release.pdf"],
+      "retrieval_type": "text",
+      "notes": "Tests retrieval of the CEO quote block which is text-heavy."
+    },
+
+    {
+      "id": "mdbearn-01",
+      "query": "What were MongoDB's total revenue and Atlas revenue in Q2 FY2026?",
+      "expected_folder": "mongodb_earnings",
+      "expected_files": ["MongoDB_Inc._Announces_Second_Quarter_Fiscal_2026_Financial_Results.pdf"],
+      "retrieval_type": "table",
+      "notes": "Headline revenue figures in financial results PR."
+    },
+    {
+      "id": "mdbearn-02",
+      "query": "When is MongoDB's Q1 FY2027 earnings call scheduled?",
+      "expected_folder": "mongodb_earnings",
+      "expected_files": ["MongoDB_Inc._Announces_Date_of_First_Quarter_Fiscal_2027_Earnings_Call.pdf"],
+      "retrieval_type": "text",
+      "notes": "Date-of-call announcement; pure text retrieval."
+    },
+    {
+      "id": "mdbearn-03",
+      "query": "What was MongoDB's non-GAAP operating income for the fourth quarter of fiscal 2026?",
+      "expected_folder": "mongodb_earnings",
+      "expected_files": ["MongoDB_Inc._Announces_Fourth_Quarter_Fiscal_2026_Financial_Results.pdf"],
+      "retrieval_type": "table",
+      "notes": "GAAP-to-non-GAAP reconciliation table."
+    },
+    {
+      "id": "mdbearn-04",
+      "query": "How has MongoDB's customer count grown across fiscal years 2023 through 2026?",
+      "expected_folder": "mongodb_earnings",
+      "expected_files": [],
+      "retrieval_type": "temporal",
+      "notes": "Should pull customer-count callouts from multiple quarterly releases."
+    },
+    {
+      "id": "mdbearn-05",
+      "query": "What guidance did MongoDB provide for full-year fiscal 2025 revenue?",
+      "expected_folder": "mongodb_earnings",
+      "expected_files": ["MongoDB_Inc._Announces_Second_Quarter_Fiscal_2025_Financial_Results.pdf"],
+      "retrieval_type": "text",
+      "notes": "Outlook/guidance section."
+    },
+
+    {
+      "id": "mdbpaper-01",
+      "query": "Show me the MongoDB Atlas security architecture diagram.",
+      "expected_folder": "mongodb_papers",
+      "expected_files": [
+        "22_Mar24_WP_Atlas_Security_Controls6.pdf",
+        "18_Apr23_WP_MDB_Security_Architecture.pdf"
+      ],
+      "retrieval_type": "diagram",
+      "notes": "Architecture-diagram retrieval; key multimodal test."
+    },
+    {
+      "id": "mdbpaper-02",
+      "query": "Explain the zero-trust security model in MongoDB Atlas.",
+      "expected_folder": "mongodb_papers",
+      "expected_files": ["MongoDB-and-Zero-Trust-whitepaper.pdf"],
+      "retrieval_type": "text",
+      "notes": "Conceptual text retrieval."
+    },
+    {
+      "id": "mdbpaper-03",
+      "query": "What are the steps to migrate from a relational database to MongoDB?",
+      "expected_folder": "mongodb_papers",
+      "expected_files": ["2025_RDBMS_to_MongoDB_Migration_Guide.pdf"],
+      "retrieval_type": "text",
+      "notes": "How-to / process-driven content."
+    },
+    {
+      "id": "mdbpaper-04",
+      "query": "Find the reference architecture for a RAG application on MongoDB Atlas.",
+      "expected_folder": "mongodb_papers",
+      "expected_files": [
+        "TWIMLAI_RAG_Beyond_the_Chatbot_R6.pdf",
+        "ljybtwsye0gzyeq9z-Embedding-GenAI-with-MongoDB.pdf",
+        "26_Aug24_WP_Generative_AI_and_Creating_the_Art_of_the_Possible.pdf"
+      ],
+      "retrieval_type": "diagram",
+      "notes": "RAG architecture diagrams are common in GenAI whitepapers."
+    },
+    {
+      "id": "mdbpaper-05",
+      "query": "How does MongoDB Atlas Search transform application development?",
+      "expected_folder": "mongodb_papers",
+      "expected_files": ["MongoDB_Atlas_Search_Transforming.pdf"],
+      "retrieval_type": "text",
+      "notes": "Direct title match — sanity check."
+    },
+    {
+      "id": "mdbpaper-06",
+      "query": "What are MongoDB's recommendations for financial services modernization?",
+      "expected_folder": "mongodb_papers",
+      "expected_files": [
+        "Financial_Services_MongoDB_White_Paper_FINAL.pdf",
+        "Transforming_Financial_Services__Industry_Guide.pdf",
+        "AI_white_paper_FS.pdf"
+      ],
+      "retrieval_type": "cross_document",
+      "notes": "Multiple FSI papers should be surfaced."
+    },
+    {
+      "id": "mdbpaper-07",
+      "query": "Show the operational data layer reference architecture.",
+      "expected_folder": "mongodb_papers",
+      "expected_files": [
+        "The-Operational-Data-Layer_WhitePaper.pdf",
+        "Implementing-Operational-Layer-Product-Catalog-Modernization.pdf",
+        "Unleash_Telco_Transformation_with_an_Operational_Data_Layer.pdf"
+      ],
+      "retrieval_type": "diagram",
+      "notes": "ODL diagrams appear across several papers."
+    },
+    {
+      "id": "mdbpaper-08",
+      "query": "What use cases does MongoDB support for the retail industry?",
+      "expected_folder": "mongodb_papers",
+      "expected_files": ["MongoDB-for-Retail.pdf"],
+      "retrieval_type": "text",
+      "notes": "Industry-vertical retrieval."
+    },
+    {
+      "id": "mdbpaper-09",
+      "query": "Explain MongoDB's approach to predictive maintenance with generative AI.",
+      "expected_folder": "mongodb_papers",
+      "expected_files": ["Generative_AI_in_Predictive_Maintenance.pdf"],
+      "retrieval_type": "text",
+      "notes": "Narrow-topic retrieval."
+    },
+    {
+      "id": "mdbpaper-10",
+      "query": "What scalability features does MongoDB Atlas offer?",
+      "expected_folder": "mongodb_papers",
+      "expected_files": ["MongoDB-Scalability-with-Atlas.pdf"],
+      "retrieval_type": "text",
+      "notes": "Title-aligned text retrieval."
+    },
+    {
+      "id": "mdbpaper-11",
+      "query": "Find a comparison chart of relational vs document data models.",
+      "expected_folder": "mongodb_papers",
+      "expected_files": ["2025_RDBMS_to_MongoDB_Migration_Guide.pdf"],
+      "retrieval_type": "chart",
+      "notes": "Side-by-side visual comparison."
+    },
+    {
+      "id": "mdbpaper-12",
+      "query": "What are the best practices for sharding a MongoDB cluster?",
+      "expected_folder": "mongodb_papers",
+      "expected_files": ["MongoDB_Best_Practices_Guide.pdf"],
+      "retrieval_type": "text",
+      "notes": "Operational best-practice content."
+    },
+    {
+      "id": "mdbpaper-13",
+      "query": "How does MongoDB integrate with Microsoft Azure?",
+      "expected_folder": "mongodb_papers",
+      "expected_files": ["Azure_and_MongoDB_Atlas_EBook.pdf"],
+      "retrieval_type": "text",
+      "notes": "Cloud-partner integration content."
+    },
+    {
+      "id": "mdbpaper-14",
+      "query": "Show me Forrester's findings on next-generation data platforms.",
+      "expected_folder": "mongodb_papers",
+      "expected_files": ["Forrester-Next-Generation-Data-Platform-Adoption_.pdf"],
+      "retrieval_type": "chart",
+      "notes": "Analyst reports tend to include survey charts."
+    },
+    {
+      "id": "mdbpaper-15",
+      "query": "What is MongoDB's recommendation for instant payments architectures?",
+      "expected_folder": "mongodb_papers",
+      "expected_files": ["ljo0zz1tpg7hy0tyw-Instant_Payments_with_MongoDB_White_Paper.pdf"],
+      "retrieval_type": "diagram",
+      "notes": "Payments flow diagrams expected."
+    },
+    {
+      "id": "mdbpaper-16",
+      "query": "Describe secure edge sync for disconnected environments.",
+      "expected_folder": "mongodb_papers",
+      "expected_files": ["White_Paper__Secure_Edge_Sync_for_Disconnected_and_Classified_Environments_V2.pdf"],
+      "retrieval_type": "text",
+      "notes": "Niche topic, distinctive vocabulary."
+    },
+
+    {
+      "id": "arxiv-01",
+      "query": "Which paper proposes a benchmark for LLM agents on long-context ICU data?",
+      "expected_folder": "arXiv",
+      "expected_files": ["2605.13542v1_RealICU_Do_LLM_Agents_Understand_Long-Context_ICU_Data_A_Benchmark_Beyond_Behavi.pdf"],
+      "retrieval_type": "text",
+      "notes": "Direct title-aligned retrieval."
+    },
+    {
+      "id": "arxiv-02",
+      "query": "Find research on step-level hallucination detection using hidden-state analysis.",
+      "expected_folder": "arXiv",
+      "expected_files": ["2605.13772v1_Where_Does_Reasoning_Break_Step-Level_Hallucination_Detection_via_Hidden-State_T.pdf"],
+      "retrieval_type": "text",
+      "notes": "Paraphrased title query."
+    },
+    {
+      "id": "arxiv-03",
+      "query": "Show the training pipeline figure from the contrastive PPO self-supervised RL paper.",
+      "expected_folder": "arXiv",
+      "expected_files": ["2605.13554v1_Self-Supervised_On-Policy_Reinforcement_Learning_via_Contrastive_Proximal_Policy.pdf"],
+      "retrieval_type": "diagram",
+      "notes": "Figure/pipeline retrieval inside a specific paper."
+    },
+    {
+      "id": "arxiv-04",
+      "query": "Which papers address end-to-end autonomous driving?",
+      "expected_folder": "arXiv",
+      "expected_files": ["2605.13646v1_Causality-Aware_End-to-End_Autonomous_Driving_via_Ego-Centric_Joint_Scene_Modeli.pdf"],
+      "retrieval_type": "text",
+      "notes": "Topic-level retrieval."
+    },
+    {
+      "id": "arxiv-05",
+      "query": "Find benchmark result tables on voice agent evaluation.",
+      "expected_folder": "arXiv",
+      "expected_files": ["2605.13841v1_EVA-Bench_A_New_End-to-end_Framework_for_Evaluating_Voice_Agents.pdf"],
+      "retrieval_type": "table",
+      "notes": "Tables of metrics inside benchmark papers."
+    },
+    {
+      "id": "arxiv-06",
+      "query": "What does the paper on training and serving millions of LLMs at scale propose?",
+      "expected_folder": "arXiv",
+      "expected_files": ["2605.13779v1_MinT_Managed_Infrastructure_for_Training_and_Serving_Millions_of_LLMs.pdf"],
+      "retrieval_type": "text",
+      "notes": "Infrastructure-systems paper."
+    },
+    {
+      "id": "arxiv-07",
+      "query": "Show me figures comparing diffusion-based indoor scene generation results.",
+      "expected_folder": "arXiv",
+      "expected_files": ["2605.13586v1_HetScene_Heterogeneity-Aware_Diffusion_for_Dense_Indoor_Scene_Generation.pdf"],
+      "retrieval_type": "chart",
+      "notes": "Qualitative result grids are visual-heavy."
+    },
+    {
+      "id": "arxiv-08",
+      "query": "Which paper studies hypergraph neural network expressivity hierarchies?",
+      "expected_folder": "arXiv",
+      "expected_files": ["2605.13690v1_The_WidthWall_A_Strict_Expressivity_Hierarchy_for_Hypergraph_Neural_Networks.pdf"],
+      "retrieval_type": "text",
+      "notes": "Theoretical-ML topic."
+    },
+    {
+      "id": "arxiv-09",
+      "query": "Find research on KV cache compression for disaggregated LLM serving.",
+      "expected_folder": "arXiv",
+      "expected_files": ["2605.13734v1_KVServe_Service-Aware_KV_Cache_Compression_for_Communication-Efficient_Disaggreg.pdf"],
+      "retrieval_type": "text",
+      "notes": "Systems-for-ML paper."
+    },
+    {
+      "id": "arxiv-10",
+      "query": "Which paper discusses negation handling failures in language models?",
+      "expected_folder": "arXiv",
+      "expected_files": ["2605.13829v1_Negation_Neglect_When_models_fail_to_learn_negations_in_training.pdf"],
+      "retrieval_type": "text",
+      "notes": "Linguistic-phenomenon retrieval."
+    },
+    {
+      "id": "arxiv-11",
+      "query": "Find architecture diagrams of training-free neuro-auditory attentive models.",
+      "expected_folder": "arXiv",
+      "expected_files": ["2605.13651v1_NAACA_Training-Free_NeuroAuditory_Attentive_Cognitive_Architecture_with_Oscillat.pdf"],
+      "retrieval_type": "diagram",
+      "notes": "Stresses combined diagram + niche vocabulary."
+    },
+
+    {
+      "id": "xdoc-01",
+      "query": "Compare AWS cloud revenue growth with MongoDB Atlas revenue growth over the last two years.",
+      "expected_folder": null,
+      "expected_files": [],
+      "retrieval_type": "cross_document",
+      "notes": "Should span aws_quaterly_results and mongodb_earnings simultaneously."
+    },
+    {
+      "id": "xdoc-02",
+      "query": "How is generative AI being applied by both Amazon (as commented in earnings) and MongoDB (in whitepapers)?",
+      "expected_folder": null,
+      "expected_files": [],
+      "retrieval_type": "cross_document",
+      "notes": "Mixes earnings-call commentary with technical whitepapers."
+    },
+
+    {
+      "id": "neg-01",
+      "query": "What was Google Cloud's revenue in Q3 2024?",
+      "expected_folder": null,
+      "expected_files": [],
+      "retrieval_type": "negative",
+      "notes": "Google is not in the corpus — system should return low-score / no answer."
+    },
+    {
+      "id": "neg-02",
+      "query": "Best chocolate chip cookie recipe.",
+      "expected_folder": null,
+      "expected_files": [],
+      "retrieval_type": "negative",
+      "notes": "Completely off-domain; sanity check for confidence thresholds."
+    }
+  ]
+}

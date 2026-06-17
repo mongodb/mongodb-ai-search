@@ -1,0 +1,96 @@
+# =============================================================================
+# SearchaaS — Combined Single-Container Image
+#
+# All three surfaces in one image:
+#   • React SPA          served by nginx on port 8080
+#   • FastAPI REST        proxied by nginx at /retrieve /health /diagnose /docs
+#   • FastMCP             proxied by nginx at /mcp
+#
+# nginx (8080) is the only exposed port.
+# uvicorn and the MCP server bind to 127.0.0.1 only (not reachable externally).
+# supervisord manages all three processes.
+#
+# Build (from repo root):
+#   docker buildx build --platform linux/amd64 \
+#     -f deployment/google/Dockerfile.combined \
+#     -t searchaas-combined .
+#
+# Run locally:
+#   docker run --env-file .env -p 8080:8080 searchaas-combined
+#
+# Then open http://localhost:8080
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# Stage 1 — node-builder: compile the Vite/React SPA
+# -----------------------------------------------------------------------------
+FROM node:20-slim AS node-builder
+
+WORKDIR /app
+COPY searchaas/ui_react/package*.json ./
+RUN npm ci --prefer-offline
+COPY searchaas/ui_react/ ./
+RUN npm run build
+
+# -----------------------------------------------------------------------------
+# Stage 2 — py-builder: install Python dependencies
+# -----------------------------------------------------------------------------
+FROM python:3.11-slim AS py-builder
+
+WORKDIR /build
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        build-essential \
+        curl \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY requirements.txt .
+RUN pip install --upgrade pip \
+ && pip install \
+        --prefix=/install \
+        --no-cache-dir \
+        --no-warn-script-location \
+        -r requirements.txt
+
+# -----------------------------------------------------------------------------
+# Stage 3 — runtime: nginx + Python + supervisord
+# -----------------------------------------------------------------------------
+FROM python:3.11-slim AS runtime
+
+# Install nginx
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        nginx \
+    && rm -rf /var/lib/apt/lists/*
+
+# Python packages from builder
+COPY --from=py-builder /install /usr/local
+
+# React build output
+COPY --from=node-builder /app/dist /usr/share/nginx/html
+
+# Application source — includes searchaas/config/searchaas.yaml which is the
+# single source of truth for non-secret config (collection, indexes, weights,
+# default_top_k, etc.). ${VAR} placeholders in the YAML are resolved at
+# load time from the container's environment (Cloud Run --set-secrets +
+# --set-env-vars). The image MUST NOT carry an .env file — see .dockerignore.
+WORKDIR /app
+COPY searchaas/ ./searchaas/
+
+
+# nginx config — replaces the default site
+COPY deployment/google/nginx-combined.conf /etc/nginx/conf.d/default.conf
+
+# Container entrypoint
+COPY deployment/google/docker-entrypoint-combined.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
+
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONPATH=/app \
+    # Pin the YAML path so `load_config()` is unambiguous about which file
+    # is the source of truth in the deployed container.
+    SEARCHAAS_CONFIG=/app/searchaas/config/searchaas.yaml
+
+# Only port 8080 is exposed — all other traffic is internal via 127.0.0.1
+EXPOSE 8080
+
+ENTRYPOINT ["/entrypoint.sh"]
