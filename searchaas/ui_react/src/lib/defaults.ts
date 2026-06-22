@@ -59,62 +59,44 @@ export const DEFAULT_CONFIG: AppConfig = {
 };
 
 /* ─────────────────────────────────────────────────────────────────────────
-   Build an AppConfig strictly from the backend GET /settings response.
+   Merge the backend's GET /settings response into an AppConfig.
 
-   The backend is the single source of truth — `searchaas.yaml` + .env are
-   the only inputs to the UI's runtime config. We intentionally do NOT
-   blend in DEFAULT_CONFIG values here: any field the backend doesn't return
-   stays empty/null on the UI side, surfacing the gap instead of silently
-   pretending a value exists.
-
-   Notes:
-     - `null` values from the backend are PRESERVED (they're meaningful —
-       e.g. `embedding_key: null` + `dimensions: -1` signal AutoEmbed mode
-       to ConfigPane).
-     - Missing sub-sections (rare) fall back to the typed scaffold from
-       DEFAULT_CONFIG so the form keeps rendering; we log a warning so the
-       gap is visible in dev tools.
+   Why we need this:
+     - The backend returns the live `searchaas.yaml` (secrets redacted), but
+       AutoEmbeddings mode sends `embedding_key: null`, `relevance_score_fn: null`,
+       and `dimensions: -1` — fields the UI form still needs to render.
+     - We start from DEFAULT_CONFIG (which has UI-friendly defaults) and
+       overlay every non-null backend value on top. Null backend values are
+       kept as-is from the backend (they're meaningful — they tell the UI
+       to render the auto-embed banner instead of the embedding inputs).
    ───────────────────────────────────────────────────────────────────────── */
 function isPlainObject(v: unknown): v is Record<string, unknown> {
   return typeof v === "object" && v !== null && !Array.isArray(v);
 }
 
-/** Replace each top-level section of `scaffold` with the section from `live`
- *  if present. Within a section, every key from `live` REPLACES the scaffold —
- *  no deep-merge, so stale scaffold values can't leak through. */
-function pickBackendSections(
-  scaffold: AppConfig,
-  live: Record<string, unknown>,
-): AppConfig {
-  const out: Record<string, unknown> = { ...(scaffold as unknown as Record<string, unknown>) };
-  const missing: string[] = [];
-  for (const section of ["atlas", "embeddings", "planner", "retrieval", "server"] as const) {
-    const v = live[section];
-    if (isPlainObject(v)) {
-      out[section] = v;
+/** Deep-merge `patch` into `base`, returning a new object.
+ *  - Plain objects are merged key-by-key.
+ *  - Arrays / primitives / nulls in `patch` REPLACE the value in `base`.
+ *  - Keys present in `patch` but `undefined` are ignored. */
+function deepMerge<T>(base: T, patch: unknown): T {
+  if (!isPlainObject(patch)) return base;
+  if (!isPlainObject(base)) return patch as T;
+  const out: Record<string, unknown> = { ...(base as Record<string, unknown>) };
+  for (const [k, v] of Object.entries(patch)) {
+    if (v === undefined) continue;
+    if (isPlainObject(v) && isPlainObject(out[k])) {
+      out[k] = deepMerge(out[k], v);
     } else {
-      missing.push(section);
+      out[k] = v;
     }
   }
-  if (missing.length > 0) {
-    // eslint-disable-next-line no-console
-    console.warn(
-      `[searchaas] GET /settings returned without these sections: ${missing.join(", ")}. ` +
-      `UI will render an empty form for them; verify searchaas.yaml.`,
-    );
-  }
-  // Two-step cast: `out` is typed as a generic record because we built it
-  // index-by-index from a backend response. We've verified each section is a
-  // plain object above, and the scaffold guarantees every required key is
-  // present, so the runtime shape satisfies AppConfig — TS just can't prove
-  // the structural overlap from the index-signature type.
-  return out as unknown as AppConfig;
+  return out as T;
 }
 
-/** Build the live AppConfig from the backend /settings response. */
+/** Merge what the backend GET /settings returned on top of DEFAULT_CONFIG. */
 export function mergeBackendSettings(
   backend: Record<string, unknown> | null | undefined,
 ): AppConfig {
   if (!backend) return DEFAULT_CONFIG;
-  return pickBackendSections(DEFAULT_CONFIG, backend);
+  return deepMerge(DEFAULT_CONFIG, backend);
 }

@@ -24,7 +24,8 @@
 # -----------------------------------------------------------------------------
 # Stage 1 — node-builder: compile the Vite/React SPA
 # -----------------------------------------------------------------------------
-FROM node:20-slim AS node-builder
+ARG BASE_REGISTRY=
+FROM ${BASE_REGISTRY}node:20-slim AS node-builder
 
 WORKDIR /app
 COPY searchaas/ui_react/package*.json ./
@@ -35,7 +36,8 @@ RUN npm run build
 # -----------------------------------------------------------------------------
 # Stage 2 — py-builder: install Python dependencies
 # -----------------------------------------------------------------------------
-FROM python:3.11-slim AS py-builder
+ARG BASE_REGISTRY=
+FROM ${BASE_REGISTRY}python:3.11-slim AS py-builder
 
 WORKDIR /build
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -54,7 +56,8 @@ RUN pip install --upgrade pip \
 # -----------------------------------------------------------------------------
 # Stage 3 — runtime: nginx + Python + supervisord
 # -----------------------------------------------------------------------------
-FROM python:3.11-slim AS runtime
+ARG BASE_REGISTRY=
+FROM ${BASE_REGISTRY}python:3.11-slim AS runtime
 
 # Install nginx
 RUN apt-get update && apt-get install -y --no-install-recommends \

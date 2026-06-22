@@ -124,12 +124,13 @@ function parseSSE(text: string): any {
   return JSON.parse(t);
 }
 
-async function mcpPost(url: string, body: unknown, sessionId?: string | null) {
+async function mcpPost(url: string, body: unknown, sessionId?: string | null, apiKey?: string | null) {
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
     Accept: "application/json, text/event-stream",
   };
   if (sessionId) headers["mcp-session-id"] = sessionId;
+  if (apiKey) headers["Authorization"] = `Bearer ${apiKey}`;
   return fetch(url, { method: "POST", headers, body: JSON.stringify(body) });
 }
 
@@ -140,28 +141,29 @@ export const resetMcpSession = (url?: string) =>
 
 export const getMcpSession = (url: string) => _sessions.get(url);
 
-async function initMcp(url: string): Promise<string> {
+async function initMcp(url: string, apiKey?: string | null): Promise<string> {
   const res = await mcpPost(url, {
     jsonrpc: "2.0", id: 1, method: "initialize",
     params: {
       protocolVersion: MCP_PROTOCOL_VERSION, capabilities: {},
       clientInfo: { name: "searchaas-react", version: "0.2.0" },
     },
-  });
+  }, null, apiKey);
+  if (res.status === 401) throw new Error("MCP 401 Unauthorized — set the MCP API key in settings.");
   if (!res.ok) throw new Error(`MCP initialize failed: HTTP ${res.status}`);
   const sid = res.headers.get("mcp-session-id");
   if (!sid) throw new Error("MCP server did not return mcp-session-id header.");
-  const ack = await mcpPost(url, { jsonrpc: "2.0", method: "notifications/initialized", params: {} }, sid);
+  const ack = await mcpPost(url, { jsonrpc: "2.0", method: "notifications/initialized", params: {} }, sid, apiKey);
   if (!ack.ok) throw new Error(`MCP initialized notification failed: HTTP ${ack.status}`);
   _sessions.set(url, sid);
   return sid;
 }
 
-async function callTool(url: string, sid: string, tool: string, args: Record<string, unknown>): Promise<any> {
+async function callTool(url: string, sid: string, tool: string, args: Record<string, unknown>, apiKey?: string | null): Promise<any> {
   const res = await mcpPost(url, {
     jsonrpc: "2.0", id: 2, method: "tools/call",
     params: { name: tool, arguments: args },
-  }, sid);
+  }, sid, apiKey);
   if (!res.ok) throw new Error(`MCP tools/call failed: HTTP ${res.status} — ${(await res.text()).slice(0, 400)}`);
   const msg = parseSSE(await res.text());
   if (msg.error) throw new Error(`MCP error: ${JSON.stringify(msg.error)}`);
@@ -183,18 +185,19 @@ export async function runMcp(
   mcpUrl: string,
   strategy: Strategy,
   payload: SearchPayload,
+  apiKey?: string | null,
 ): Promise<RetrieveResponse> {
   const { mcpTool } = STRATEGY_MAP[strategy];
-  let sid = _sessions.get(mcpUrl) ?? await initMcp(mcpUrl);
+  let sid = _sessions.get(mcpUrl) ?? await initMcp(mcpUrl, apiKey);
   let raw: any;
   try {
-    raw = await callTool(mcpUrl, sid, mcpTool, payload as unknown as Record<string, unknown>);
+    raw = await callTool(mcpUrl, sid, mcpTool, payload as unknown as Record<string, unknown>, apiKey);
   } catch (err) {
     const msg = String(err);
     if (/session/i.test(msg) || /\b404\b/.test(msg)) {
       _sessions.delete(mcpUrl);
-      sid = await initMcp(mcpUrl);
-      raw = await callTool(mcpUrl, sid, mcpTool, payload as unknown as Record<string, unknown>);
+      sid = await initMcp(mcpUrl, apiKey);
+      raw = await callTool(mcpUrl, sid, mcpTool, payload as unknown as Record<string, unknown>, apiKey);
     } else throw err;
   }
   if (raw && typeof raw === "object" && "results" in raw)
@@ -214,10 +217,11 @@ export interface SearchResult {
 export async function runSearch(
   backend: Backend, endpoint: string, strategy: Strategy,
   payload: SearchPayload,
+  apiKey?: string | null,
 ): Promise<SearchResult> {
   const t0 = performance.now();
   const response = backend === "fastapi"
     ? await runFastAPI(endpoint, strategy, payload)
-    : await runMcp(endpoint, strategy, payload);
+    : await runMcp(endpoint, strategy, payload, apiKey);
   return { response, latencyMs: Math.round(performance.now() - t0) };
 }

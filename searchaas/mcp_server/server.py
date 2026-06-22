@@ -15,7 +15,7 @@ from fastmcp import FastMCP
 from searchaas.app.bootstrap import get_container
 from searchaas.config import load_config
 from searchaas.observability import configure_logging, get_logger
-from searchaas.utils import clamp_auto_strategy, serialize_docs, summarize
+from searchaas.utils import clamp_auto_strategy, filter_by_entities, serialize_docs, summarize
 
 configure_logging()
 log = get_logger("searchaas.mcp")
@@ -27,58 +27,37 @@ _EMB_KEY = load_config().atlas.embedding_key
 mcp = FastMCP("searchaas")
 
 
-def _retrieve(
-    strategy: str,
-    query: str,
-    top_k: int = 20,
-    filters: dict | None = None,
-    atlas: dict | None = None,
-    retrieval: dict | None = None,
+def _build_response(
+    plan: Any,
+    invoke_query: str,
+    uq: Any,
+    overrides: Any,
+    ret_overrides: Any,
+    planning_ms: float,
+    understanding_ms: float,
+    t_total: float,
+    label: str,
 ) -> dict[str, Any]:
-    """Run a single strategy and return a full response dict (matching auto_search shape).
-
-    Includes a best-effort AI summary so MCP clients (and the React UI) get
-    parity with the FastAPI `/retrieve/*` endpoints.
-    """
-    from searchaas.api.app import AtlasOverrides, RetrievalOverrides
+    """Shared tail: retrieve → serialize → summarize → build MCP response dict."""
     c = get_container()
-    overrides = AtlasOverrides(**{k: v for k, v in atlas.items() if v is not None}) if atlas else None
-    ret_overrides = RetrievalOverrides(**{k: v for k, v in retrieval.items() if v is not None}) if retrieval else None
-    if overrides:
-        log.info("MCP retrieve: UI atlas overrides=%s", overrides.model_dump(exclude_none=True))
-    if ret_overrides:
-        log.info("MCP retrieve: retrieval overrides=%s", ret_overrides.model_dump(exclude_none=True))
-
-    t_total = time.perf_counter()
-
-    t_plan = time.perf_counter()
-    plan = c.planner.plan_for(strategy=strategy, query=query, top_k=top_k, filters=filters or {})
-    planning_ms = round((time.perf_counter() - t_plan) * 1000, 1)
-
-    t_uq = time.perf_counter()
-    uq = c.understanding.process(query)
-    understanding_ms = round((time.perf_counter() - t_uq) * 1000, 1)
+    emb_key = (overrides and overrides.embedding_key) or _EMB_KEY
 
     t_mongo = time.perf_counter()
-    docs = c.retrievers.create(plan, overrides=overrides, retrieval_overrides=ret_overrides).invoke(query)
+    docs = c.retrievers.create(plan, overrides=overrides, retrieval_overrides=ret_overrides).invoke(invoke_query)
     mongo_ms = round((time.perf_counter() - t_mongo) * 1000, 1)
 
-    emb_key = (overrides and overrides.embedding_key) or _EMB_KEY
     results = serialize_docs(docs, emb_key, include_score=True)
+    results = filter_by_entities(results, list(uq.entities or []))
 
     t_sum = time.perf_counter()
-    summary = summarize(c.llm, query, results)
+    summary = summarize(c.llm, invoke_query, results)
     summarize_ms = round((time.perf_counter() - t_sum) * 1000, 1) if summary is not None else None
 
     total_ms = round((time.perf_counter() - t_total) * 1000, 1)
-
-    if summary is not None:
-        log.info("MCP %s_search: summary_chars=%s", strategy, len(summary))
     log.info(
-        "MCP %s_search: results=%s mongo_ms=%s understanding_ms=%s planning_ms=%s summarize_ms=%s total_ms=%s",
-        strategy, len(results), mongo_ms, understanding_ms, planning_ms, summarize_ms, total_ms,
+        "MCP %s: results=%s mongo_ms=%s understanding_ms=%s planning_ms=%s summarize_ms=%s total_ms=%s",
+        label, len(results), mongo_ms, understanding_ms, planning_ms, summarize_ms, total_ms,
     )
-
     return {
         "strategy": plan.strategy,
         "plan": plan.model_dump(),
@@ -100,6 +79,40 @@ def _retrieve(
             "total_ms": total_ms,
         },
     }
+
+
+def _retrieve(
+    strategy: str,
+    query: str,
+    top_k: int = 20,
+    filters: dict | None = None,
+    atlas: dict | None = None,
+    retrieval: dict | None = None,
+) -> dict[str, Any]:
+    """Run a fixed strategy and return a full MCP response dict."""
+    from searchaas.api.app import AtlasOverrides, RetrievalOverrides
+    c = get_container()
+    overrides = AtlasOverrides(**{k: v for k, v in atlas.items() if v is not None}) if atlas else None
+    ret_overrides = RetrievalOverrides(**{k: v for k, v in retrieval.items() if v is not None}) if retrieval else None
+    if overrides:
+        log.info("MCP retrieve: UI atlas overrides=%s", overrides.model_dump(exclude_none=True))
+    if ret_overrides:
+        log.info("MCP retrieve: retrieval overrides=%s", ret_overrides.model_dump(exclude_none=True))
+
+    t_total = time.perf_counter()
+
+    t_uq = time.perf_counter()
+    uq = c.understanding.process(query)
+    understanding_ms = round((time.perf_counter() - t_uq) * 1000, 1)
+
+    # Merge NLU-extracted metadata filters with explicit request filters.
+    merged_filters = {**(uq.metadata_filters or {}), **(filters or {})}
+
+    t_plan = time.perf_counter()
+    plan = c.planner.plan_for(strategy=strategy, query=uq.rewritten, top_k=top_k, filters=merged_filters)
+    planning_ms = round((time.perf_counter() - t_plan) * 1000, 1)
+
+    return _build_response(plan, uq.rewritten, uq, overrides, ret_overrides, planning_ms, understanding_ms, t_total, strategy)
 
 
 @mcp.tool
@@ -162,50 +175,12 @@ def auto_search(query: str, top_k: int = 20, filters: dict | None = None, atlas:
     if plan.strategy != original:
         log.info("auto_search: clamped %r -> %r (intent=%s)", original, plan.strategy, uq.intent)
 
-    if top_k:
+    if top_k is not None:
         plan.top_k = top_k
     if filters:
         plan.filters = {**plan.filters, **filters}
 
-    t_mongo = time.perf_counter()
-    docs = c.retrievers.create(plan, overrides=overrides, retrieval_overrides=ret_overrides).invoke(uq.rewritten)
-    mongo_ms = round((time.perf_counter() - t_mongo) * 1000, 1)
-
-    emb_key = (overrides and overrides.embedding_key) or _EMB_KEY
-    results = serialize_docs(docs, emb_key, include_score=False)
-
-    t_sum = time.perf_counter()
-    summary = summarize(c.llm, uq.rewritten, results)
-    summarize_ms = round((time.perf_counter() - t_sum) * 1000, 1)
-
-    total_ms = round((time.perf_counter() - t_total) * 1000, 1)
-
-    log.info(
-        "MCP auto_search: results=%s mongo_ms=%s understanding_ms=%s planning_ms=%s summarize_ms=%s total_ms=%s",
-        len(results), mongo_ms, understanding_ms, planning_ms, summarize_ms, total_ms,
-    )
-
-    return {
-        "strategy": plan.strategy,
-        "plan": plan.model_dump(),
-        "results": results,
-        "understood_query": {
-            "raw": uq.raw,
-            "corrected": uq.corrected,
-            "rewritten": uq.rewritten,
-            "entities": list(uq.entities or []),
-            "metadata_filters": dict(uq.metadata_filters or {}),
-            "intent": uq.intent,
-        },
-        "summary": summary,
-        "timings": {
-            "mongo_ms": mongo_ms,
-            "planning_ms": planning_ms,
-            "understanding_ms": understanding_ms,
-            "summarize_ms": summarize_ms,
-            "total_ms": total_ms,
-        },
-    }
+    return _build_response(plan, uq.rewritten, uq, overrides, ret_overrides, planning_ms, understanding_ms, t_total, "auto_search")
 
 
 def main() -> None:

@@ -24,7 +24,7 @@ from searchaas.app.bootstrap import get_container, reset_container
 from searchaas.config import AppConfig, load_config
 from searchaas.infrastructure import AtlasFactory
 from searchaas.observability import configure_logging, get_logger
-from searchaas.utils import clamp_auto_strategy, serialize_docs, summarize
+from searchaas.utils import clamp_auto_strategy, filter_by_entities, serialize_docs, summarize
 
 configure_logging()
 log = get_logger("searchaas.api")
@@ -295,6 +295,69 @@ def _merge_config(current: AppConfig, update: SettingsUpdate) -> AppConfig:
 # --------------------------------------------------------------------- helpers
 
 
+def _uq_dict(uq: Any) -> dict[str, Any]:
+    return {
+        "raw": uq.raw,
+        "corrected": uq.corrected,
+        "rewritten": uq.rewritten,
+        "entities": list(uq.entities or []),
+        "metadata_filters": dict(uq.metadata_filters or {}),
+        "intent": uq.intent,
+    }
+
+
+def _execute_plan(
+    req: RetrieveRequest,
+    plan: Any,
+    invoke_query: str,
+    uq: Any,
+    planning_ms: float,
+    understanding_ms: float,
+    t_total: float,
+) -> RetrieveResponse:
+    """Shared tail: retrieve → serialize → summarize → build response."""
+    c = get_container()
+    emb_key = (req.atlas and req.atlas.embedding_key) or _EMB_KEY
+    try:
+        t0 = time.perf_counter()
+        docs = c.retrievers.create(
+            plan, overrides=req.atlas, retrieval_overrides=req.retrieval,
+        ).invoke(invoke_query)
+        mongo_ms = round((time.perf_counter() - t0) * 1000, 1)
+    except Exception as exc:
+        log.exception("Retrieval failed (%s)", plan.strategy)
+        raise HTTPException(status_code=500, detail=f"retrieval failed: {exc}") from exc
+
+    serialized = serialize_docs(docs, emb_key, include_score=True)
+    serialized = filter_by_entities(serialized, list(uq.entities or []))
+
+    t_sum = time.perf_counter()
+    summary = summarize(c.llm, invoke_query, serialized)
+    summarize_ms = round((time.perf_counter() - t_sum) * 1000, 1) if summary is not None else None
+
+    total_ms = round((time.perf_counter() - t_total) * 1000, 1)
+    log.info(
+        "retrieve strategy=%s results=%s mongo_ms=%s understanding_ms=%s "
+        "planning_ms=%s summarize_ms=%s total_ms=%s",
+        plan.strategy, len(serialized), mongo_ms, understanding_ms,
+        planning_ms, summarize_ms, total_ms,
+    )
+    return RetrieveResponse(
+        strategy=plan.strategy,
+        plan=plan.model_dump(),
+        results=serialized,
+        understood_query=_uq_dict(uq),
+        summary=summary,
+        timings=Timings(
+            mongo_ms=mongo_ms,
+            planning_ms=planning_ms,
+            understanding_ms=understanding_ms,
+            summarize_ms=summarize_ms,
+            total_ms=total_ms,
+        ),
+    )
+
+
 def _run(strategy: str, req: RetrieveRequest) -> RetrieveResponse:
     c = get_container()
     if req.atlas:
@@ -306,69 +369,23 @@ def _run(strategy: str, req: RetrieveRequest) -> RetrieveResponse:
     uq = c.understanding.process(req.query)
     understanding_ms = round((time.perf_counter() - t_uq) * 1000, 1)
 
+    # Merge NLU-extracted metadata filters with explicit request filters.
+    # Request filters take precedence so users can always override NLU results.
+    merged_filters = {**(uq.metadata_filters or {}), **req.filters}
+
     t_plan = time.perf_counter()
     plan = c.planner.plan_for(
         strategy=strategy,
-        query=req.query,
+        query=uq.rewritten,
         top_k=req.top_k,
-        filters=req.filters,
+        filters=merged_filters,
     )
     planning_ms = round((time.perf_counter() - t_plan) * 1000, 1)
     log.info(
-        "retrieve strategy=%s top_k=%s filters=%s query=%r",
-        plan.strategy, plan.top_k, plan.filters, req.query[:120],
+        "retrieve strategy=%s top_k=%s filters=%s query=%r rewritten=%r",
+        plan.strategy, plan.top_k, plan.filters, req.query[:80], uq.rewritten[:80],
     )
-    emb_key = (req.atlas and req.atlas.embedding_key) or _EMB_KEY
-    try:
-        t0 = time.perf_counter()
-        docs = c.retrievers.create(
-            plan, overrides=req.atlas, retrieval_overrides=req.retrieval,
-        ).invoke(req.query)
-        mongo_ms = round((time.perf_counter() - t0) * 1000, 1)
-        log.info(
-            "retrieve strategy=%s results=%s mongo_ms=%s planning_ms=%s understanding_ms=%s",
-            plan.strategy, len(docs), mongo_ms, planning_ms, understanding_ms,
-        )
-    except Exception as exc:
-        log.exception("Retrieval failed (%s)", strategy)
-        raise HTTPException(status_code=500, detail=f"retrieval failed: {exc}") from exc
-
-    serialized = serialize_docs(docs, emb_key, include_score=True)
-
-    # AI summary for every strategy — best-effort, never raises. Skipped when
-    # there are no results, no LLM is configured, or the client opts out via
-    # `summarize=false` on the request (room for a flag if you add one later).
-    t_sum = time.perf_counter()
-    summary = summarize(c.llm, req.query, serialized)
-    summarize_ms = round((time.perf_counter() - t_sum) * 1000, 1) if summary is not None else None
-    if summary is not None:
-        log.info(
-            "retrieve strategy=%s summarize_ms=%s summary_chars=%s",
-            plan.strategy, summarize_ms, len(summary),
-        )
-
-    total_ms = round((time.perf_counter() - t_total) * 1000, 1)
-    return RetrieveResponse(
-        strategy=plan.strategy,
-        plan=plan.model_dump(),
-        results=serialized,
-        understood_query={
-            "raw": uq.raw,
-            "corrected": uq.corrected,
-            "rewritten": uq.rewritten,
-            "entities": list(uq.entities or []),
-            "metadata_filters": dict(uq.metadata_filters or {}),
-            "intent": uq.intent,
-        },
-        summary=summary,
-        timings=Timings(
-            mongo_ms=mongo_ms,
-            planning_ms=planning_ms,
-            understanding_ms=understanding_ms,
-            summarize_ms=summarize_ms,
-            total_ms=total_ms,
-        ),
-    )
+    return _execute_plan(req, plan, uq.rewritten, uq, planning_ms, understanding_ms, t_total)
 
 
 # --------------------------------------------------------------------- routes
@@ -546,56 +563,12 @@ def retrieve_auto(req: RetrieveRequest) -> RetrieveResponse:
             original, plan.strategy, uq.intent,
         )
 
-    if req.top_k:
+    if req.top_k is not None:
         plan.top_k = req.top_k
-    if req.filters:
-        plan.filters = {**plan.filters, **req.filters}
+    # Merge all filter sources: metadata_filters (NLU) < plan filters (LLM planner) < request filters (user)
+    plan.filters = {**(uq.metadata_filters or {}), **plan.filters, **(req.filters or {})}
 
-    emb_key = (req.atlas and req.atlas.embedding_key) or _EMB_KEY
-    try:
-        t_mongo = time.perf_counter()
-        docs = c.retrievers.create(
-            plan, overrides=req.atlas, retrieval_overrides=req.retrieval,
-        ).invoke(uq.rewritten)
-        mongo_ms = round((time.perf_counter() - t_mongo) * 1000, 1)
-    except Exception as exc:
-        log.exception("Auto retrieval failed")
-        raise HTTPException(status_code=500, detail=f"retrieval failed: {exc}") from exc
-
-    serialized = serialize_docs(docs, emb_key, include_score=True)
-
-    t_sum = time.perf_counter()
-    summary = summarize(c.llm, uq.rewritten, serialized)
-    summarize_ms = round((time.perf_counter() - t_sum) * 1000, 1)
-
-    total_ms = round((time.perf_counter() - t_total) * 1000, 1)
-    log.info(
-        "retrieve auto: strategy=%s results=%s mongo_ms=%s understanding_ms=%s "
-        "planning_ms=%s summarize_ms=%s total_ms=%s",
-        plan.strategy, len(serialized), mongo_ms, understanding_ms,
-        planning_ms, summarize_ms, total_ms,
-    )
-    return RetrieveResponse(
-        strategy=plan.strategy,
-        plan=plan.model_dump(),
-        results=serialized,
-        understood_query={
-            "raw": uq.raw,
-            "corrected": uq.corrected,
-            "rewritten": uq.rewritten,
-            "entities": list(uq.entities or []),
-            "metadata_filters": dict(uq.metadata_filters or {}),
-            "intent": uq.intent,
-        },
-        summary=summary,
-        timings=Timings(
-            mongo_ms=mongo_ms,
-            planning_ms=planning_ms,
-            understanding_ms=understanding_ms,
-            summarize_ms=summarize_ms,
-            total_ms=total_ms,
-        ),
-    )
+    return _execute_plan(req, plan, uq.rewritten, uq, planning_ms, understanding_ms, t_total)
 
 
 @app.post("/query")

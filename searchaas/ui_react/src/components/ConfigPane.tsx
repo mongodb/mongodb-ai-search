@@ -400,7 +400,7 @@ export default function ConfigPane({
                     ...config.retrieval,
                     default_strategy: e.target.value as AppConfig["retrieval"]["default_strategy"],
                   })}
-                options={["vector","fulltext","hybrid","graph","parent_doc"]}
+                options={["vector","fulltext","hybrid","graph","parent-doc"]}
               />
             </Field>
             <Field label={`hybrid.vector_weight  (${config.retrieval.hybrid.vector_weight.toFixed(2)})`}>

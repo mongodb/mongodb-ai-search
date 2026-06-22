@@ -130,6 +130,59 @@ def _make_voyageai(cfg: dict[str, Any]) -> Embeddings:
     return _VoyageEmbeddingsWithExtras(base, **extras)
 
 
+class _VoyageMultimodalEmbeddings(Embeddings):
+    """
+    Query embedder for Voyage AI **multimodal** models (e.g.
+    `voyage-multimodal-3.5`). These models are NOT served by the regular text
+    `embed` endpoint — they require `multimodal_embed`, which takes inputs as a
+    list of content-segment lists. We embed text-only queries here so they land
+    in the SAME vector space as documents that were ingested with the multimodal
+    model (critical for vector/hybrid retrieval to work).
+    """
+
+    def __init__(self, model: str, api_key: str | None = None,
+                 output_dimension: int | None = None, **_: Any) -> None:
+        import voyageai
+        self._model = model
+        self._dim = output_dimension
+        self._client = voyageai.Client(api_key=api_key) if api_key else voyageai.Client()
+
+    @property
+    def model(self) -> str:
+        return self._model
+
+    def _embed(self, text: str, input_type: str) -> list[float]:
+        kwargs: dict[str, Any] = {"model": self._model, "input_type": input_type}
+        if self._dim:
+            kwargs["output_dimension"] = self._dim
+        resp = self._client.multimodal_embed(inputs=[[text]], **kwargs)
+        return resp.embeddings[0]
+
+    def embed_query(self, text: str) -> list[float]:
+        return self._embed(text, "query")
+
+    def embed_documents(self, texts: list[str]) -> list[list[float]]:
+        return [self._embed(t, "document") for t in texts]
+
+
+def _make_voyage_multimodal(cfg: dict[str, Any]) -> Embeddings:
+    """
+    Voyage AI multimodal embeddings (text-query path).
+
+    Config keys:
+        model            : e.g. "voyage-multimodal-3.5"
+        voyage_api_key   : API key (resolved from env in YAML)
+        output_dimension : optional, must match the Atlas index numDimensions
+    """
+    cfg = dict(cfg)
+    api_key = cfg.pop("voyage_api_key", None) or cfg.pop("api_key", None)
+    model = cfg.pop("model", "voyage-multimodal-3.5")
+    output_dimension = cfg.pop("output_dimension", None)
+    return _VoyageMultimodalEmbeddings(
+        model=model, api_key=api_key, output_dimension=output_dimension
+    )
+
+
 def _make_cohere(cfg: dict[str, Any]) -> Embeddings:
     from langchain_cohere import CohereEmbeddings
     return CohereEmbeddings(**cfg)
@@ -182,14 +235,15 @@ class EmbeddingFactory:
     """Create QUERY embedders by provider name + config dict."""
 
     _registry: dict[str, Callable[[dict[str, Any]], Embeddings]] = {
-        "auto":          _make_auto,
-        "azure_openai":  _make_azure_openai,
-        "openai":        _make_openai,
-        "voyageai":      _make_voyageai,
-        "cohere":        _make_cohere,
-        "huggingface":   _make_huggingface,
-        "gemini":        _make_gemini,
-        "bedrock_titan": _make_bedrock_titan,
+        "auto":              _make_auto,
+        "azure_openai":      _make_azure_openai,
+        "openai":            _make_openai,
+        "voyageai":          _make_voyageai,
+        "voyage_multimodal": _make_voyage_multimodal,
+        "cohere":            _make_cohere,
+        "huggingface":       _make_huggingface,
+        "gemini":            _make_gemini,
+        "bedrock_titan":     _make_bedrock_titan,
     }
 
     @classmethod

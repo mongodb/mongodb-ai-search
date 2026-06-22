@@ -134,6 +134,13 @@ class AtlasConfig(BaseModel):
             )
         return v.strip()
 
+    @field_validator("embedding_key", "relevance_score_fn", mode="before")
+    @classmethod
+    def _empty_or_null_to_none(cls, v: Any) -> Any:
+        if isinstance(v, str) and v.strip().lower() in {"", "null", "none"}:
+            return None
+        return v
+
 
 class ProviderBlock(BaseModel):
     provider: str

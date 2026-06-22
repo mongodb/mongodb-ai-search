@@ -152,6 +152,33 @@ def serialize_docs(
 
 
 # ---------------------------------------------------------------------------
+# Entity-based post-filter (shared by FastAPI and FastMCP surfaces)
+# ---------------------------------------------------------------------------
+
+def filter_by_entities(
+    docs: list[dict[str, Any]],
+    entities: list[str],
+) -> list[dict[str, Any]]:
+    """Post-filter: keep docs whose content contains at least one extracted entity.
+
+    Entities shorter than 3 characters are skipped to avoid false negatives
+    from stop-word fragments. Falls back to all docs when nothing matches so
+    callers never receive an empty result set due to over-filtering.
+    """
+    if not entities or not docs:
+        return docs
+    terms = [e.lower() for e in entities if len(e.strip()) >= 3]
+    if not terms:
+        return docs
+    kept = [d for d in docs if any(t in (d.get("content") or "").lower() for t in terms)]
+    if not kept:
+        log.debug("entity post-filter: no docs matched %s; returning all %d", terms, len(docs))
+        return docs
+    log.debug("entity post-filter: %d/%d docs passed for %s", len(kept), len(docs), terms)
+    return kept
+
+
+# ---------------------------------------------------------------------------
 # Config scrubbing (shared by EmbeddingFactory and LLMFactory log output)
 # ---------------------------------------------------------------------------
 def redact_cfg(cfg: dict[str, Any]) -> dict[str, Any]:

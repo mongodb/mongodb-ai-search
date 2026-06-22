@@ -32,7 +32,6 @@ export const STRATEGY_COLOR: Record<string, string> = {
   hybrid:     "green",
   graph:      "amber",
   "parent-doc": "gray",
-  parent_doc:   "gray",
 };
 
 export const REQUIRED_ATLAS_FIELDS: Record<Strategy, string[]> = {
@@ -57,7 +56,7 @@ export interface AppConfig {
   embeddings: { provider: string; config: Record<string, unknown> };
   planner: { llm_provider: string; config: Record<string, unknown>; default_top_k: number };
   retrieval: {
-    default_strategy: "vector" | "fulltext" | "hybrid" | "graph" | "parent_doc";
+    default_strategy: "vector" | "fulltext" | "hybrid" | "graph" | "parent-doc";
     hybrid: { vector_weight: number; fulltext_weight: number };
     vector: { num_candidates: number };
   };

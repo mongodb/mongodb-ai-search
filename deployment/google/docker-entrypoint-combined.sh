@@ -22,9 +22,12 @@ cd /app
 # ── 1. Write runtime config ───────────────────────────────────────────────────
 cat > /usr/share/nginx/html/config.js <<'EOF'
 // Auto-generated at container start — do not edit manually.
-// Empty string = same origin; nginx proxies /retrieve*, /health, /mcp, etc.
-window.SEARCHAAS_API_URL = "";
-window.SEARCHAAS_MCP_URL = "/mcp";
+// Empty FASTAPI_URL = same origin; nginx proxies /retrieve*, /health, /settings, /mcp, etc.
+window.__SEARCHAAS_CONFIG__ = {
+  FASTAPI_URL: "",
+  MCP_URL: "/mcp",
+  MCP_API_KEY: null
+};
 EOF
 echo "[searchaas] config.js written"
 

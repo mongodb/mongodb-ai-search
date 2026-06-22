@@ -25,14 +25,18 @@ export default function App() {
   const [rightCollapsed, setRightCollapsed] = useState(false);
 
   // Backend connection — defaults can be overridden at runtime via /config.js
-  // (injected by the Docker/Cloud Run entrypoint as window.SEARCHAAS_API_URL etc.)
+  // (injected by the Docker/Cloud Run entrypoint as window.__SEARCHAAS_CONFIG__)
+  const runtimeCfg = (typeof window !== "undefined"
+    ? (window as unknown as { __SEARCHAAS_CONFIG__?: { FASTAPI_URL?: string; MCP_URL?: string; MCP_API_KEY?: string } }).__SEARCHAAS_CONFIG__
+    : undefined) || {};
   const [backend, setBackend] = useState<Backend>("fastapi");
   const [fastapiUrl, setFastapiUrl] = useState(
-    (window as any).SEARCHAAS_API_URL ?? "http://localhost:8000",
+    runtimeCfg.FASTAPI_URL ?? (window as any).SEARCHAAS_API_URL ?? "http://localhost:8000",
   );
   const [mcpUrl, setMcpUrl] = useState(
-    (window as any).SEARCHAAS_MCP_URL ?? "http://localhost:8001/mcp",
+    runtimeCfg.MCP_URL ?? (window as any).SEARCHAAS_MCP_URL ?? "http://localhost:8001/mcp",
   );
+  const [mcpApiKey, setMcpApiKey] = useState(runtimeCfg.MCP_API_KEY || "");
   const [showUrlPopup, setShowUrlPopup] = useState(false);
 
   // Query controls
@@ -131,7 +135,7 @@ export default function App() {
         filters:   parsedFilters,
         atlas:     toAtlasOverrides(config.atlas, config.embeddings.provider),
         retrieval: toRetrievalOverrides(config.retrieval),
-      });
+      }, mcpApiKey);
       const turn: SearchTurn = {
         id: Date.now().toString(),
         query: q,
@@ -229,6 +233,14 @@ export default function App() {
                   value={mcpUrl}
                   onChange={e => setMcpUrl(e.target.value)}
                   placeholder="http://localhost:8001/mcp"
+                />
+              </Field>
+              <Field label="MCP API Key (Bearer)">
+                <TextInput
+                  type="password"
+                  value={mcpApiKey}
+                  onChange={e => setMcpApiKey(e.target.value)}
+                  placeholder="required for authenticated MCP endpoint"
                 />
               </Field>
             </div>
@@ -332,7 +344,13 @@ function DetailsPane({
   const pipeline = useMemo(
     () =>
       turn
-        ? buildPipeline(effective, config, turn.query, turn.topK, turn.filters)
+        ? buildPipeline(
+            effective,
+            config,
+            turn.response.understood_query?.rewritten ?? turn.query,
+            turn.topK,
+            turn.filters,
+          )
         : null,
     [turn, effective, config],
   );
@@ -437,7 +455,8 @@ function TimingsPanel({
   wallMs: number | undefined;
 }) {
   // Empty state — server didn't return timings (older backend).
-  if (!timings || (timings.mongo_ms == null && timings.total_ms == null && timings.planning_ms == null && timings.understanding_ms == null)) {
+  const hasAnyTiming = timings != null && Object.values(timings).some(v => v != null);
+  if (!hasAnyTiming) {
     return (
       <div className="details-empty" style={{ padding: "12px 0" }}>
         <p>No server timings reported for this query.</p>

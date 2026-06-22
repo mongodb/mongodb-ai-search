@@ -3,7 +3,15 @@
 # -----------------------------------------------------------------------------
 # All providers, models, indexes, and runtime options are supplied here.
 # Switching an embedding model, LLM, or retrieval strategy is a config change,
-# NOT a code change. Environment variables are referenced via ${VAR_NAME}.
+# NOT a code change.
+#
+# Every value below is overridable at runtime via an environment variable using
+# `${VAR:-default}` syntax. This means you can change collections, indexes,
+# dimensions, providers, models, or strategy WITHOUT rebuilding the image —
+# just update the Container App env vars (or .env locally) and restart.
+#
+# Secrets (ATLAS_URI, VOYAGE_API_KEY, GOOGLE_API_KEY) are injected from the
+# environment / Container Apps secrets and never baked into the image.
 # =============================================================================
 
 # ---- Vector Search index ----------------------------------------------------
@@ -44,46 +52,25 @@
 # `provider: auto` + a non-autoEmbed index).
 
 atlas:
-  uri: ${ATLAS_URI}                        # mongodb+srv://... (resolved from env)
+  uri: ${ATLAS_URI}                                      # mongodb+srv://... (secret, from env)
   database: ${ATLAS_DB:-amazon}
-  collection: pdf_multimodal_chunks
+  collection: ${ATLAS_COLLECTION:-pdf_multimodal_chunks}
 
-  # ---- Mode B: server-side AutoEmbeddings (ACTIVE) --------------------------
-  vector_index:   vector_index            # Atlas Vector Search index (type=autoEmbed)
-  search_index:   default                    # Atlas Search (Lucene) index for fulltext/hybrid
-  text_key:       raw_text                       # MUST equal the `path` of the autoEmbed field
-  embedding_key:  null                       # MUST be null for AutoEmbeddings
-  relevance_score_fn: null                   # MUST be null for AutoEmbeddings
-  dimensions:     -1                         # MUST be -1 for AutoEmbeddings
+  # ---- Mode B: server-side AutoEmbeddings (ACTIVE default) ------------------
+  vector_index:       ${ATLAS_VECTOR_INDEX:-vector_index}
+  search_index:       ${ATLAS_SEARCH_INDEX:-default}     # Atlas Search (Lucene) index for fulltext/hybrid
+  text_key:           ${ATLAS_TEXT_KEY:-raw_text}            # MUST match the autoEmbed path
+  embedding_key:      ${ATLAS_EMBEDDING_KEY:-}          # Auto default empty -> None; set for client mode
+  relevance_score_fn: ${ATLAS_RELEVANCE_FN:-}           # Auto default empty -> None; set for client mode
+  dimensions:         ${ATLAS_DIMENSIONS:--1}           # -1 for auto; set real dims for client mode
 
-  vector_index_definition:
-    fields:
-      - type: autoEmbed
-        path: raw_text                           # MUST equal atlas.text_key
-        model: voyage-4                      # MUST equal embeddings.config.model
-      # - type: filter
-      #   path: file_name
-      # - type: filter
-      #   path: page_number
-
-  # ---- Mode A: client-side Voyage embeddings (commented alternative) --------
-  # vector_index:   voyage_vector_index      # Atlas Vector Search index (type=vector)
-  # search_index:   default
-  # text_key:       text                     # field holding the raw text
-  # embedding_key:  embedding-vectors        # MUST equal the `path` in the vector index
-  # relevance_score_fn: cosine               # similarity used at query time
-  # dimensions:     512                      # MUST equal index numDimensions AND embedder output_dimension
-  
-  # vector_index_definition:
-  #   fields:
-  #     - type: vector
-  #       path: embedding-vectors
-  #       numDimensions: 512
-  #       similarity: cosine
-
-  # search_index_definition:
-  #   mappings:
-  #     dynamic: true
+  # ---- Mode A: client-side Voyage embeddings (alternative) ------------------
+  # vector_index:       ${ATLAS_VECTOR_INDEX:-voyage_vector_index}
+  # search_index:       ${ATLAS_SEARCH_INDEX:-default}
+  # text_key:           ${ATLAS_TEXT_KEY:-text}
+  # embedding_key:      ${ATLAS_EMBEDDING_KEY:-embedding-vectors}
+  # relevance_score_fn: ${ATLAS_RELEVANCE_FN:-cosine}
+  # dimensions:         ${ATLAS_DIMENSIONS:-512}
 
 # -----------------------------------------------------------------------------
 # Embedding provider for QUERY embeddings.
@@ -93,17 +80,19 @@ atlas:
 
 # ---- Mode B: server-side AutoEmbeddings (ACTIVE) ----------------------------
 embeddings:
-  provider: auto
+  provider: ${EMBEDDINGS_PROVIDER:-auto}
   config:
-    model: voyage-4                          # MUST equal the `model` in the autoEmbed index field
+    model: ${EMBEDDINGS_MODEL:-voyage-4}
+    voyage_api_key: ${VOYAGE_API_KEY}                   # ignored in auto mode; used in voyageai mode
+    output_dimension: ${EMBEDDINGS_OUTPUT_DIMENSION:-512}
 
-# ---- Mode A: client-side Voyage embeddings (commented alternative) ----------
+# ---- Mode A: client-side Voyage embeddings (alternative) --------------------
 # embeddings:
-#   provider: voyageai
+#   provider: ${EMBEDDINGS_PROVIDER:-voyageai}
 #   config:
-#     model: voyage-4
+#     model: ${EMBEDDINGS_MODEL:-voyage-4}
 #     voyage_api_key: ${VOYAGE_API_KEY}
-#     output_dimension: 512                  # MUST equal atlas.dimensions
+#     output_dimension: ${EMBEDDINGS_OUTPUT_DIMENSION:-512}  # MUST match atlas.dimensions
 
 # ---- Other client-side examples ---------------------------------------------
 # embeddings:
@@ -124,31 +113,44 @@ embeddings:
 # Supported: azure_openai | openai | gemini | anthropic | bedrock
 # -----------------------------------------------------------------------------
 planner:
-  llm_provider: gemini
+  llm_provider: ${PLANNER_LLM_PROVIDER:-gemini}
   config:
-    model: gemini-2.5-flash
-    google_api_key: ${GOOGLE_API_KEY}
-    temperature: 0.1
-  default_top_k: 20
+    model: ${PLANNER_MODEL:-gemini-2.5-flash}
+    temperature: ${PLANNER_TEMPERATURE:-0.1}
+    # Provider-specific credentials/endpoints. Only the fields matching the
+    # active provider need values — the LLMFactory strips empty entries and
+    # drops fields foreign to the chosen provider, so unused keys are ignored.
+    # Switch providers via PLANNER_LLM_PROVIDER without editing this block.
+    #
+    # --- azure_openai (default) ---
+    azure_endpoint:     ${AZURE_OPENAI_ENDPOINT:-}
+    azure_deployment:   ${AZURE_OPENAI_DEPLOYMENT:-gpt-4o}
+    openai_api_version: ${AZURE_OPENAI_API_VERSION:-2024-08-01-preview}
+    azure_api_key:      ${AZURE_OPENAI_API_KEY:-}
+    # --- openai ---
+    api_key:            ${OPENAI_API_KEY:-}
+    # --- gemini ---
+    google_api_key:     ${GOOGLE_API_KEY:-}
+  default_top_k: ${PLANNER_DEFAULT_TOP_K:-20}
 
 # -----------------------------------------------------------------------------
 # Retrieval Strategies
 # -----------------------------------------------------------------------------
 retrieval:
-  default_strategy: hybrid                  # vector | fulltext | hybrid | graph | parent_doc
+  default_strategy: ${RETRIEVAL_DEFAULT_STRATEGY:-hybrid}  # vector | fulltext | hybrid | graph | parent_doc
   hybrid:
-    vector_weight: 0.6
-    fulltext_weight: 0.4
+    vector_weight: ${RETRIEVAL_HYBRID_VECTOR_WEIGHT:-0.6}
+    fulltext_weight: ${RETRIEVAL_HYBRID_FULLTEXT_WEIGHT:-0.4}
   vector:
-    num_candidates: 200
+    num_candidates: ${RETRIEVAL_VECTOR_NUM_CANDIDATES:-200}
 
 # -----------------------------------------------------------------------------
 # Server
 # -----------------------------------------------------------------------------
 server:
-  host: 0.0.0.0
-  port: 8000
-  mcp_host: 0.0.0.0
-  mcp_port: 8001
-  mcp_transport: streamable-http
-  log_level: info
+  host: ${SERVER_HOST:-0.0.0.0}
+  port: ${SERVER_PORT:-8000}
+  mcp_host: ${MCP_HOST:-0.0.0.0}
+  mcp_port: ${MCP_PORT:-8001}
+  mcp_transport: ${MCP_TRANSPORT:-streamable-http}
+  log_level: ${LOG_LEVEL:-info}

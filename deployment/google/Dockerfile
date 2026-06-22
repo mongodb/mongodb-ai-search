@@ -18,7 +18,8 @@
 # -----------------------------------------------------------------------------
 # Stage 1 — builder: install Python dependencies into an isolated prefix
 # -----------------------------------------------------------------------------
-FROM python:3.11-slim AS builder
+ARG BASE_REGISTRY=
+FROM ${BASE_REGISTRY}python:3.11-slim AS builder
 
 WORKDIR /build
 
@@ -40,7 +41,8 @@ RUN pip install --upgrade pip \
 # -----------------------------------------------------------------------------
 # Stage 2 — runtime: minimal image with no build tools
 # -----------------------------------------------------------------------------
-FROM python:3.11-slim AS runtime
+ARG BASE_REGISTRY=
+FROM ${BASE_REGISTRY}python:3.11-slim AS runtime
 
 # curl is needed for ECS container healthchecks
 RUN apt-get update && apt-get install -y --no-install-recommends curl \
