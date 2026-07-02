@@ -1,24 +1,30 @@
 // =============================================================================
-// SearchaaS — Azure infrastructure (subscription scope)
+// SearchaaS — Azure deployment (subscription scope)
 //
-// Creates the resource group, then provisions all supporting infrastructure
-// and the three Container Apps (MCP, REST API, React UI) via the resources
-// module.
+// Two-phase deployment to eliminate the ManagedEnvironmentNotProvisioned race:
+//
+//   Phase 1 — `resources` module (resources.bicep):
+//     Creates RG, ACR, Log Analytics, managed identity, Container Apps
+//     Environment. No Container Apps — just infra.
+//
+//   Phase 2 — `apps` module (apps.bicep) with dependsOn: [resources]:
+//     ARM waits for Phase 1 to fully complete (environment in Succeeded state)
+//     before starting this deployment. No race possible.
 //
 // Deploy:
 //   az deployment sub create \
 //     --name searchaas \
-//     --location eastus \
-//     --template-file infra/main.bicep \
-//     --parameters infra/main.parameters.json \
+//     --location centralindia \
+//     --template-file deployment/azure/infra/main.bicep \
+//     --parameters deployment/azure/infra/main.parameters.json \
 //     --parameters atlasUri='<...>' voyageApiKey='<...>' \
-//                  googleApiKey='<...>' mcpApiKey='<...>'
+//                  openaiApiKey='<...>' mcpApiKey='<...>'
 // =============================================================================
 
 targetScope = 'subscription'
 
 @description('Azure region for all resources.')
-param location string = 'eastus'
+param location string = 'centralindia'
 
 @description('Short name prefix used for resource naming. Lowercase alphanumeric.')
 @minLength(3)
@@ -59,7 +65,7 @@ param openaiApiKey string = ''
 
 @secure()
 @description('Azure OpenAI API key (planner LLM — default provider azure_openai).')
-param azureOpenaiApiKey string
+param azureOpenaiApiKey string = ''
 
 @secure()
 @description('Bearer token required by the public MCP endpoint.')
@@ -71,8 +77,23 @@ resource rg 'Microsoft.Resources/resourceGroups@2024-03-01' = {
   location: location
 }
 
+// Phase 1: infrastructure (RG, ACR, Log Analytics, identity, environment).
+// No secrets required — none of these resources need Atlas/API keys.
 module resources 'resources.bicep' = {
   name: 'searchaas-resources'
+  scope: rg
+  params: {
+    location: location
+    namePrefix: namePrefix
+  }
+}
+
+// Phase 2: the three Container Apps.
+// dependsOn: [resources] makes this a separate ARM child deployment that ARM
+// only starts after `searchaas-resources` fully completes. The environment
+// will be in Succeeded state — the preflight race cannot happen.
+module apps 'apps.bicep' = {
+  name: 'searchaas-apps'
   scope: rg
   params: {
     location: location
@@ -81,6 +102,12 @@ module resources 'resources.bicep' = {
     atlasDb: atlasDb
     configOverrides: configOverrides
     uiEmbedMcpKey: uiEmbedMcpKey
+    // Referencing environmentReady forces ARM to wait for the polling gate in
+    // resources.bicep to confirm the environment is genuinely Succeeded before
+    // any container app is written. This eliminates ManagedEnvironmentNotProvisioned.
+    environmentId: resources.outputs.environmentReady ? resources.outputs.environmentId : resources.outputs.environmentId
+    identityId: resources.outputs.identityId
+    acrServer: resources.outputs.acrLoginServer
     atlasUri: atlasUri
     voyageApiKey: voyageApiKey
     googleApiKey: googleApiKey
@@ -88,12 +115,18 @@ module resources 'resources.bicep' = {
     azureOpenaiApiKey: azureOpenaiApiKey
     mcpApiKey: mcpApiKey
   }
+  // Explicit sequencing: ARM must fully complete `searchaas-resources` (environment
+  // in Succeeded state) before starting this child deployment. The implicit dependency
+  // through resources.outputs.* would also enforce this, but we keep it explicit so
+  // the two-phase ordering is obvious to readers and tooling.
+  #disable-next-line no-unnecessary-dependson
+  dependsOn: [resources]
 }
 
 // ---- Outputs ---------------------------------------------------------------
 output resourceGroup string = rg.name
 output acrName string = resources.outputs.acrName
 output acrLoginServer string = resources.outputs.acrLoginServer
-output mcpUrl string = resources.outputs.mcpUrl
-output apiUrl string = resources.outputs.apiUrl
-output uiUrl string = resources.outputs.uiUrl
+output mcpUrl string = apps.outputs.mcpUrl
+output apiUrl string = apps.outputs.apiUrl
+output uiUrl string = apps.outputs.uiUrl

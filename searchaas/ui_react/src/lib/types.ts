@@ -92,6 +92,13 @@ export interface Timings {
   total_ms?: number | null;
 }
 
+/** The actual Atlas aggregation captured from the executed query. */
+export interface PipelineDoc {
+  collection?: string;
+  database?: string;
+  pipeline: unknown[];
+}
+
 export interface RetrieveResponse {
   strategy: string;
   plan: Record<string, unknown>;
@@ -99,6 +106,8 @@ export interface RetrieveResponse {
   understood_query?: UnderstoodQuery | null;
   summary?: string | null;
   timings?: Timings | null;
+  /** Real pipeline captured server-side; null when the UI must reconstruct. */
+  pipeline?: PipelineDoc | null;
   latencyMs?: number;
 }
 

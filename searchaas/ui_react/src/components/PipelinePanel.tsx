@@ -1,10 +1,13 @@
 import { Button, CodeBlock } from "./UI";
 
 export default function PipelinePanel({
-  pipeline, effectiveStrategy,
+  pipeline, effectiveStrategy, actual = false,
 }: {
   pipeline: unknown;
   effectiveStrategy: string;
+  /** True when this is the real pipeline captured from the executed query
+   *  (vs. a client-side reconstruction fallback). */
+  actual?: boolean;
 }) {
   const text = JSON.stringify(pipeline, null, 2);
 
@@ -22,7 +25,9 @@ export default function PipelinePanel({
     <div>
       <div className="flex-between" style={{ marginBottom: 8 }}>
         <p className="muted" style={{ margin: 0 }}>
-          Reconstructed aggregation for <b>{effectiveStrategy}</b> — copy into Compass or <code>mongosh</code>.
+          {actual
+            ? <>Actual aggregation executed for <b>{effectiveStrategy}</b> — copy into Compass or <code>mongosh</code>.</>
+            : <>Reconstructed (approximate) aggregation for <b>{effectiveStrategy}</b> — copy into Compass or <code>mongosh</code>.</>}
         </p>
         <Button size="sm" onClick={download}>⬇ Download JSON</Button>
       </div>

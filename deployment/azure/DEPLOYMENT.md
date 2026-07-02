@@ -13,6 +13,19 @@ Infrastructure (resource group, ACR, Log Analytics, Container Apps Environment,
 managed identity, three Container Apps) is provisioned by Bicep at
 **subscription scope** — the resource group is created for you.
 
+The deployment is structured to be reliable and repeatable:
+
+- **Step 1** creates the resource group + ACR only (no secrets needed).
+- **Step 2** builds and pushes images into ACR.
+- **Step 3** deploys everything in one `az deployment sub create`. Internally
+  `main.bicep` runs two ARM child deployments in sequence — first infra
+  (environment, ACR, identity), then Container Apps. A deployment-script
+  readiness gate (`searchaas-env-ready`) polls the Container Apps Environment
+  until its `provisioningState` is genuinely `Succeeded`; the apps module
+  depends on that gate's output, so apps never start while the environment is
+  still `Updating`. This eliminates the intermittent
+  `ManagedEnvironmentNotProvisioned` error.
+
 ---
 
 ## Prerequisites
@@ -33,20 +46,18 @@ managed identity, three Container Apps) is provisioned by Bicep at
   echo "MCP_API_KEY=$MCP_API_KEY"   # save this — Foundry needs it
   ```
 
-> The container images must exist in ACR **before** the Container Apps start
-> cleanly, so we deploy in two steps: (1) create RG + ACR, (2) build & push
-> images, (3) deploy the apps.
-
 ---
 
 ## Step 1 — Create the resource group + ACR
 
+Make any changes required to `main.parameters.json` (location, namePrefix, atlasDb, configOverrides) before running this step.
+
 ```bash
 az deployment sub create \
   --name searchaas-acr \
-  --location eastus \
-  --template-file infra/acr.bicep \
-  --parameters infra/main.parameters.json
+  --location centralindia \
+  --template-file deployment/azure/infra/acr.bicep \
+  --parameters deployment/azure/infra/main.parameters.json
 
 ACR_NAME=$(az deployment sub show -n searchaas-acr \
   --query properties.outputs.acrName.value -o tsv)
@@ -55,29 +66,48 @@ echo "ACR: $ACR_NAME"
 
 ## Step 2 — Build & push all three images (server-side in ACR)
 
+The script automatically imports the required base images (`python:3.11-slim`,
+`node:20-alpine`, `nginx:alpine`) into ACR on first run and skips them on
+subsequent runs. To avoid Docker Hub anonymous pull rate limits, provide a
+free Docker Hub account's credentials:
+
 ```bash
-./scripts/build-and-push.sh "$ACR_NAME" latest
+export DOCKER_HUB_USERNAME="your-dockerhub-username"
+export DOCKER_HUB_TOKEN="your-dockerhub-access-token"   # hub.docker.com → Account Settings → Personal Access Tokens
+```
+
+Then build and push:
+
+```bash
+./deployment/azure/scripts/build-and-push.sh "$ACR_NAME" latest
 ```
 
 This runs `az acr build` for `searchaas-mcp`, `searchaas-api`, and
 `searchaas-ui`. Builds happen in ACR, so no local Docker or matching CPU
 architecture is needed.
 
-## Step 3 — Deploy the full stack (Container Apps)
+## Step 3 — Deploy infrastructure + Container Apps
+
+This single command runs two ARM deployments in sequence under the hood:
+`searchaas-resources` (infra) completes first, then `searchaas-apps` starts
+once the Container Apps Environment is in `Succeeded` state.
 
 ```bash
 az deployment sub create \
   --name searchaas \
-  --location eastus \
-  --template-file infra/main.bicep \
-  --parameters infra/main.parameters.json \
+  --location centralindia \
+  --template-file deployment/azure/infra/main.bicep \
+  --parameters deployment/azure/infra/main.parameters.json \
   --parameters \
       atlasUri="$ATLAS_URI" \
       voyageApiKey="$VOYAGE_API_KEY" \
       openaiApiKey="$OPENAI_API_KEY" \
-      googleApiKey="$GOOGLE_API_KEY" \
+      googleApiKey="${GOOGLE_API_KEY:-}" \
       mcpApiKey="$MCP_API_KEY"
 ```
+
+> `GOOGLE_API_KEY` and `AZURE_OPENAI_API_KEY` are optional. Omit or pass empty
+> if you are not using those providers.
 
 Grab the URLs:
 
@@ -128,20 +158,17 @@ Open the `uiUrl` in a browser. In the UI's connection settings, point it at:
 - **MCP URL** → the `mcpUrl`
 
 (The UI sends requests from the browser, so the apps' CORS is set to allow any
-origin. Tighten `allowedOrigins` in `infra/resources.bicep` for production.)
+origin. Tighten `allowedOrigins` in `deployment/azure/infra/resources.bicep` for production.)
 
 ---
 
 ## Step 6 — Create an AI Foundry agent backed by the MCP server
 
-**This deployment's live values:**
+Use the URLs from Step 3's output:
 
-| | |
-|--|--|
-| MCP URL | `https://searchaas-mcp.delightfulwater-e493d0b4.eastus.azurecontainerapps.io/mcp` |
-| API URL | `https://searchaas-api.delightfulwater-e493d0b4.eastus.azurecontainerapps.io` |
-| UI URL  | `https://searchaas-ui.delightfulwater-e493d0b4.eastus.azurecontainerapps.io` |
-| Auth header | `Authorization: Bearer <MCP_API_KEY>` (key generated at deploy; rotate via `az containerapp secret set`) |
+```bash
+az deployment sub show -n searchaas --query 'properties.outputs.{mcp:mcpUrl.value,api:apiUrl.value,ui:uiUrl.value}' -o json
+```
 
 1. In the **AI Foundry** portal, open your project and create/edit an agent.
 2. Add a tool of type **MCP** (Model Context Protocol).
@@ -204,7 +231,7 @@ rebuild required.**
 | `RETRIEVAL_HYBRID_FULLTEXT_WEIGHT` | hybrid fulltext weight | `0.4` |
 | `RETRIEVAL_VECTOR_NUM_CANDIDATES` | vector candidate pool | `200` |
 
-Edit the `configOverrides` block in `infra/main.parameters.json` (or pass
+Edit the `configOverrides` block in `deployment/azure/infra/main.parameters.json` (or pass
 `--parameters configOverrides='{...}'`) and rerun the Step 3 deploy command.
 Only non-empty entries are injected; everything else uses the yaml default.
 
@@ -214,21 +241,23 @@ Only non-empty entries are injected; everything else uses the yaml default.
 
 ```bash
 # rebuild & push with a new tag
-./scripts/build-and-push.sh "$ACR_NAME" v2
+./deployment/azure/scripts/build-and-push.sh "$ACR_NAME" v2
 
-# roll the apps to the new tag
+# roll the apps to the new tag (same command as Step 3, just add imageTag=v2)
 az deployment sub create \
   --name searchaas \
-  --location eastus \
-  --template-file infra/main.bicep \
-  --parameters infra/main.parameters.json \
+  --location centralindia \
+  --template-file deployment/azure/infra/main.bicep \
+  --parameters deployment/azure/infra/main.parameters.json \
   --parameters imageTag=v2 \
       atlasUri="$ATLAS_URI" voyageApiKey="$VOYAGE_API_KEY" \
-      openaiApiKey="$OPENAI_API_KEY" googleApiKey="$GOOGLE_API_KEY" \
+      openaiApiKey="$OPENAI_API_KEY" googleApiKey="${GOOGLE_API_KEY:-}" \
       mcpApiKey="$MCP_API_KEY"
 ```
 
-Container Apps creates a new revision and shifts traffic to it.
+Container Apps creates a new revision and shifts traffic to it. The infra
+phase is a no-op when nothing has changed (ARM is idempotent), so only the
+apps deployment actually updates.
 
 ---
 
@@ -241,8 +270,57 @@ Container Apps creates a new revision and shifts traffic to it.
   YAML loader already supports `${VAR}` expansion, so migrating to **Azure Key
   Vault** later (via managed identity + secret references) requires no code
   change — only Bicep updates.
-- **Tighten CORS** for production by replacing `*` in `infra/resources.bicep`
+- **Tighten CORS** for production by replacing `*` in `deployment/azure/infra/resources.bicep`
   (`corsPolicy.allowedOrigins` and the MCP `ALLOWED_ORIGINS` env) with the
   exact UI FQDN.
 - **Auth hardening**: for enterprise use, consider fronting the MCP app with
   Entra ID / OAuth2 instead of (or in addition to) the static Bearer key.
+
+---
+
+## Troubleshooting
+
+### `ManagedEnvironmentNotProvisioned` during Step 3
+
+The Container Apps Environment reports ARM success before its backend has
+finished provisioning, and any re-PUT bounces it into `Updating`. If apps are
+written during that window they fail with `ManagedEnvironmentNotProvisioned`.
+The `searchaas-env-ready` deployment-script gate now prevents this in fresh
+runs. If you still hit it (e.g. on an older template or a partially-failed RG):
+
+1. Wait for the environment to settle to `Succeeded`:
+
+   ```bash
+   az resource show -g rg-searchaas -n searchaas-env \
+     --resource-type Microsoft.App/managedEnvironments \
+     --query "properties.provisioningState" -o tsv
+   ```
+
+2. Deploy **only** the apps module against the ready environment (no env re-PUT):
+
+   ```bash
+   ENV_ID=$(az deployment group show -g rg-searchaas -n searchaas-resources \
+     --query "properties.outputs.environmentId.value" -o tsv)
+   ID_ID=$(az deployment group show -g rg-searchaas -n searchaas-resources \
+     --query "properties.outputs.identityId.value" -o tsv)
+   ACR=$(az deployment group show -g rg-searchaas -n searchaas-resources \
+     --query "properties.outputs.acrLoginServer.value" -o tsv)
+
+   az deployment group create \
+     --resource-group rg-searchaas \
+     --name searchaas-apps-only \
+     --template-file deployment/azure/infra/apps.bicep \
+     --parameters location=centralindia namePrefix=searchaas imageTag=latest \
+         atlasDb=sample_mflix uiEmbedMcpKey=true \
+         environmentId="$ENV_ID" identityId="$ID_ID" acrServer="$ACR" \
+         atlasUri="$ATLAS_URI" voyageApiKey="$VOYAGE_API_KEY" \
+         openaiApiKey="$OPENAI_API_KEY" googleApiKey="${GOOGLE_API_KEY:-}" \
+         azureOpenaiApiKey="${AZURE_OPENAI_API_KEY:-}" mcpApiKey="$MCP_API_KEY"
+   ```
+
+### `InvalidDeploymentLocation` — deployment already exists in another region
+
+A subscription-scope deployment's metadata location is immutable. If a prior
+run created the deployment in a different region, use a **new `--name`** (the
+`--location` only stores deployment metadata; resources still deploy to the
+region in `main.parameters.json`).

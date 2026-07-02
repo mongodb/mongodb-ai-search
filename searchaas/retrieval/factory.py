@@ -53,6 +53,20 @@ log = get_logger("searchaas.retrieval")
 # it here as Any to avoid a circular import.  Type checkers see it as Any.
 _Overrides = Any  # AtlasOverrides | None
 
+# A pre_filter is applied *during* ANN search, so it thins the approximate
+# candidate pool — recall degrades when the filter is selective. Widen the pool
+# when a filter is present (Atlas guidance). Capped at the $vectorSearch max.
+_FILTER_NUMCANDIDATES_BOOST = 3
+_MAX_NUM_CANDIDATES = 10000
+
+
+def _oversampling_factor(k: int, num_cands: int, has_filter: bool) -> int:
+    """candidates-per-result for $vectorSearch, boosted when a filter is set."""
+    over = max(1, num_cands // max(k, 1))
+    if has_filter:
+        over = min(over * _FILTER_NUMCANDIDATES_BOOST, max(1, _MAX_NUM_CANDIDATES // max(k, 1)))
+    return over
+
 
 class RetrieverFactory:
     """Build a base retriever for the requested strategy."""
@@ -433,7 +447,7 @@ class RetrieverFactory:
 
         search_kwargs: dict[str, Any] = {
             "k": k,
-            "oversampling_factor": max(1, num_cands // max(k, 1)),
+            "oversampling_factor": _oversampling_factor(k, num_cands, bool(plan.filters)),
         }
         if plan.filters:
             search_kwargs["pre_filter"] = plan.filters
@@ -507,7 +521,7 @@ class RetrieverFactory:
 
         if is_auto:
             num_cands = (retrieval_overrides and retrieval_overrides.num_candidates) or self._vector_candidates
-            oversampling = max(1, num_cands // max(k, 1))
+            oversampling = _oversampling_factor(k, num_cands, bool(plan.filters))
             log.info(
                 "[MongoDB] $vectorSearch (autoEmbed) + $search hybrid (RRF) — "
                 "vector_index=%r search_index=%r field=%r model=%r "
@@ -566,7 +580,7 @@ class RetrieverFactory:
         text_key = (overrides and overrides.text_key)      or self._text_key
 
         if self._is_auto:
-            oversampling = max(1, self._vector_candidates // max(k, 1))
+            oversampling = _oversampling_factor(k, self._vector_candidates, bool(plan.filters))
             log.info(
                 "[MongoDB] parent-doc $vectorSearch (autoEmbed) — index=%r model=%r "
                 "limit=%s oversampling=%s pre_filter=%s",
@@ -797,12 +811,16 @@ class _AutoEmbedHybridRetriever(BaseRetriever):
         combine_pipelines(pipeline, vector_pipeline, self._col.name)
 
         # ---- Full-text channel ($search) ----------------------------------
+        # include_scores=False: RRF ranks by array-index position, not the raw
+        # Lucene searchScore, so the `$set score=$meta:searchScore` stage would
+        # only inject a dead field that rides through the union/merge unused.
         text_pipeline = text_search_stage(
             query=query,
             search_field=self._text_key,
             index_name=self._search_index,
             limit=self._k,
             filter=self._pre_filter,
+            include_scores=False,
         )
         text_pipeline.extend(
             reciprocal_rank_stage(

@@ -23,6 +23,10 @@ from pymongo.errors import (
 
 from searchaas.config import load_config
 from searchaas.observability import get_logger
+# Side-effect import: registers the global pipeline-capture CommandListener
+# BEFORE any MongoClient is constructed here, so it observes every client
+# (including the langchain vector store's separate client).
+from searchaas.observability import pipeline_capture as _pipeline_capture  # noqa: F401
 
 log = get_logger("searchaas.infrastructure.atlas")
 
@@ -31,6 +35,7 @@ log = get_logger("searchaas.infrastructure.atlas")
 COLLECTIONS: dict[str, str] = {
     "chunks":             "knowledge_chunks",
     "retrieval_policies": "retrieval_policies",
+    "query_facts":        "query_facts",
 }
 
 

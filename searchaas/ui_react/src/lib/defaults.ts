@@ -93,10 +93,47 @@ function deepMerge<T>(base: T, patch: unknown): T {
   return out as T;
 }
 
+/** Coerce a value to a number, falling back when it isn't numeric. */
+function num(v: unknown, fallback: number): number {
+  const n = typeof v === "number" ? v : Number(v);
+  return Number.isFinite(n) ? n : fallback;
+}
+
+/** Force the numeric config fields to real numbers.
+ *  The backend returns YAML env-expanded values as STRINGS (e.g. "0.6"),
+ *  which breaks UI code that calls `.toFixed()` / feeds <Slider> — most
+ *  visibly crashing the Retrieval tab to a blank page. */
+function coerceNumerics(cfg: AppConfig): AppConfig {
+  const d = DEFAULT_CONFIG;
+  return {
+    ...cfg,
+    atlas: { ...cfg.atlas, dimensions: num(cfg.atlas.dimensions, d.atlas.dimensions) },
+    planner: {
+      ...cfg.planner,
+      default_top_k: num(cfg.planner.default_top_k, d.planner.default_top_k),
+    },
+    retrieval: {
+      ...cfg.retrieval,
+      hybrid: {
+        vector_weight:   num(cfg.retrieval.hybrid?.vector_weight,   d.retrieval.hybrid.vector_weight),
+        fulltext_weight: num(cfg.retrieval.hybrid?.fulltext_weight, d.retrieval.hybrid.fulltext_weight),
+      },
+      vector: {
+        num_candidates: num(cfg.retrieval.vector?.num_candidates, d.retrieval.vector.num_candidates),
+      },
+    },
+    server: {
+      ...cfg.server,
+      port:     num(cfg.server.port, d.server.port),
+      mcp_port: num(cfg.server.mcp_port, d.server.mcp_port),
+    },
+  };
+}
+
 /** Merge what the backend GET /settings returned on top of DEFAULT_CONFIG. */
 export function mergeBackendSettings(
   backend: Record<string, unknown> | null | undefined,
 ): AppConfig {
   if (!backend) return DEFAULT_CONFIG;
-  return deepMerge(DEFAULT_CONFIG, backend);
+  return coerceNumerics(deepMerge(DEFAULT_CONFIG, backend));
 }

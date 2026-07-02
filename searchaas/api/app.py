@@ -22,8 +22,10 @@ from pydantic import BaseModel, Field
 
 from searchaas.app.bootstrap import get_container, reset_container
 from searchaas.config import AppConfig, load_config
+from searchaas.facts import apply_post_filters
 from searchaas.infrastructure import AtlasFactory
 from searchaas.observability import configure_logging, get_logger
+from searchaas.observability.pipeline_capture import capture, captured
 from searchaas.utils import clamp_auto_strategy, filter_by_entities, serialize_docs, summarize
 
 configure_logging()
@@ -32,6 +34,12 @@ log = get_logger("searchaas.api")
 # Read config once at module load — it is lru_cached and never changes per process.
 _cfg = load_config()
 _EMB_KEY = _cfg.atlas.embedding_key
+
+# When post-filters are present we fetch extra candidates so in-memory filtering
+# has headroom and doesn't starve the result set, then trim back to the user's
+# requested top_k. Capped to keep the Atlas request bounded.
+_POST_FILTER_OVERSHOOT = 3
+_MAX_RETRIEVE_K = 100
 
 
 # ---------------------------------------------------------------------------
@@ -204,6 +212,10 @@ class RetrieveResponse(BaseModel):
     understood_query: dict[str, Any] | None = None
     summary: str | None = None
     timings: Timings | None = None
+    # The ACTUAL Atlas aggregation captured from the executed query
+    # ({collection, database, pipeline}). None if nothing was captured (the UI
+    # then falls back to a client-side reconstruction).
+    pipeline: dict[str, Any] | None = None
 
 
 # ── Persistent settings update (triggers container rebuild) ───────────────────
@@ -301,7 +313,10 @@ def _uq_dict(uq: Any) -> dict[str, Any]:
         "corrected": uq.corrected,
         "rewritten": uq.rewritten,
         "entities": list(uq.entities or []),
+        "facts": [f.to_dict() for f in (getattr(uq, "facts", None) or [])],
+        # pre-filter applied in Atlas; post-filter applied in-memory after retrieval
         "metadata_filters": dict(uq.metadata_filters or {}),
+        "post_filters": [f.to_dict() for f in (getattr(uq, "post_filters", None) or [])],
         "intent": uq.intent,
     }
 
@@ -315,21 +330,46 @@ def _execute_plan(
     understanding_ms: float,
     t_total: float,
 ) -> RetrieveResponse:
-    """Shared tail: retrieve → serialize → summarize → build response."""
+    """Shared tail: retrieve → serialize → post-filter → summarize → build response."""
     c = get_container()
     emb_key = (req.atlas and req.atlas.embedding_key) or _EMB_KEY
+
+    # Non-indexed facts are applied as an in-memory post-filter. Overshoot the
+    # candidate count so post-filtering has headroom, then trim back to top_k.
+    post_filters = list(getattr(uq, "post_filters", None) or [])
+    desired_k = plan.top_k
+    if post_filters:
+        plan.top_k = min(desired_k * _POST_FILTER_OVERSHOOT, _MAX_RETRIEVE_K)
+
     try:
-        t0 = time.perf_counter()
-        docs = c.retrievers.create(
+        retriever = c.retrievers.create(
             plan, overrides=req.atlas, retrieval_overrides=req.retrieval,
-        ).invoke(invoke_query)
+        )
+        t0 = time.perf_counter()
+        # Capture the ACTUAL aggregation pipeline(s) executed during retrieval.
+        with capture():
+            docs = retriever.invoke(invoke_query)
+            caps = captured()
         mongo_ms = round((time.perf_counter() - t0) * 1000, 1)
     except Exception as exc:
         log.exception("Retrieval failed (%s)", plan.strategy)
         raise HTTPException(status_code=500, detail=f"retrieval failed: {exc}") from exc
 
+    # Prefer the aggregate on the queried collection; else the last captured one.
+    target_coll = (req.atlas and req.atlas.collection) or c.config.atlas.collection
+    pipeline_doc = next((p for p in caps if p.get("collection") == target_coll), None) \
+        or (caps[-1] if caps else None)
+
     serialized = serialize_docs(docs, emb_key, include_score=True)
     serialized = filter_by_entities(serialized, list(uq.entities or []))
+    if post_filters:
+        before = len(serialized)
+        serialized = apply_post_filters(serialized, post_filters)[:desired_k]
+        plan.top_k = desired_k  # report the user-facing top_k, not the overshoot
+        log.info(
+            "post-filter: %d -> %d docs via %s",
+            before, len(serialized), [f.to_dict() for f in post_filters],
+        )
 
     t_sum = time.perf_counter()
     summary = summarize(c.llm, invoke_query, serialized)
@@ -355,6 +395,7 @@ def _execute_plan(
             summarize_ms=summarize_ms,
             total_ms=total_ms,
         ),
+        pipeline=pipeline_doc,
     )
 
 

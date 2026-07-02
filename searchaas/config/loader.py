@@ -168,12 +168,24 @@ class ServerConfig(BaseModel):
     log_level: str = "info"
 
 
+class QueryUnderstandingConfig(BaseModel):
+    # Maps an indexed filter field -> query synonyms the LLM may encounter for
+    # it (e.g. imdb.rating -> [rating, score, stars]). Injected into the
+    # extraction prompt so a synonym resolves to the exact indexed field, with
+    # the LLM disambiguating by context. Prompt-only: not applied as a code map
+    # (a static map would misfire on ambiguous words like "stars").
+    field_aliases: dict[str, list[str]] = Field(default_factory=dict)
+
+
 class AppConfig(BaseModel):
     atlas: AtlasConfig
     embeddings: ProviderBlock
     planner: PlannerConfig
     retrieval: RetrievalConfig
     server: ServerConfig
+    query_understanding: QueryUnderstandingConfig = Field(
+        default_factory=QueryUnderstandingConfig
+    )
 
 
 def _default_config_path() -> Path:

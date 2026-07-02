@@ -3,6 +3,10 @@
 .kiro/
 .codegraph/
 venv/
+.venv/
+
+# Local planning docs (not tracked)
+MQL_Stage_Plan.md
 
 # Python
 __pycache__/

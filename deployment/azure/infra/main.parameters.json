@@ -1,0 +1,37 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentParameters.json#",
+  "contentVersion": "1.0.0.0",
+  "parameters": {
+    "location": {
+      "value": "centralindia"
+    },
+    "namePrefix": {
+      "value": "searchaas"
+    },
+    "imageTag": {
+      "value": "latest"
+    },
+    "atlasDb": {
+      "value": "sample_mflix"
+    },
+    "uiEmbedMcpKey": {
+      "value": true
+    },
+    "configOverrides": {
+      "value": {
+        "ATLAS_COLLECTION": "movies",
+        "ATLAS_VECTOR_INDEX": "vector_index",
+        "ATLAS_SEARCH_INDEX": "ai_search_index",
+        "ATLAS_TEXT_KEY": "plot",
+        "ATLAS_DIMENSIONS": "-1",
+        "EMBEDDINGS_PROVIDER": "auto",
+        "EMBEDDINGS_MODEL": "voyage-4",
+        "EMBEDDINGS_OUTPUT_DIMENSION": "512",
+        "PLANNER_LLM_PROVIDER": "openai",
+        "PLANNER_MODEL": "gpt-5.1",
+        "OPENAI_BASE_URL": "https://xxxxx.services.ai.azure.com/openai/v1",
+        "RETRIEVAL_DEFAULT_STRATEGY": "hybrid"
+      }
+    }
+  }
+}
