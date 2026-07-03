@@ -22,6 +22,7 @@ from searchaas.facts import (
     canonicalize_facts,
     compile_prefilter,
     parse_facts,
+    parse_sort,
     split_facts,
 )
 from searchaas.filtering import sanitize_filters
@@ -31,6 +32,16 @@ from searchaas.utils import extract_json
 log = get_logger("searchaas.query_understanding")
 
 _CACHE_MAXSIZE = 256   # number of distinct queries to remember per process
+_MAX_LIMIT = 100       # cap on a query-specified result count
+
+
+def _parse_limit(raw: Any) -> int | None:
+    """A positive result count named in the query, capped; else None."""
+    try:
+        n = int(raw)
+    except (TypeError, ValueError):
+        return None
+    return n if 1 <= n <= _MAX_LIMIT else None
 
 INTENTS = (
     "exact_lookup",
@@ -39,6 +50,8 @@ INTENTS = (
     "summarization",
     "troubleshooting",
     "policy_lookup",
+    "ordering",       # ranking / superlative queries ("lowest rated", "top ...")
+    "lookup",         # structured filter lookup, no semantic topic ("movies 1970-2000")
 )
 
 
@@ -55,6 +68,12 @@ class UnderstoodQuery:
     metadata_filters: dict[str, Any] = field(default_factory=dict)
     # Post-filter: facts on non-indexed fields, applied in-memory after retrieval.
     post_filters: list[Fact] = field(default_factory=list)
+    # Ordering for ranking/superlative queries, as a Mongo sort dict
+    # (e.g. {"imdb.rating": 1}). None when the query has no ordering intent.
+    sort: dict[str, int] | None = None
+    # Result count named in the query ("top 5", "3 cheapest", "10 movies").
+    # None when the query doesn't specify one (caller default then applies).
+    limit: int | None = None
     intent: str = "semantic_search"
 
 
@@ -71,8 +90,26 @@ Given a user query, produce a JSON object with EXACTLY these keys:
                      types, departments, statuses, amounts, etc. Omit a fact if
                      the query does not clearly imply it. May be empty [].
                      {filter_rule}
+  sort             : ordering for ranking / superlative queries, as
+                     {{"field": <indexed field>, "direction": 1 or -1}}
+                     (1 = ascending, -1 = descending). Use ONLY when ranking is
+                     the intent: "lowest / worst / cheapest / oldest" -> 1 on the
+                     relevant numeric field; "highest / top / best / newest" -> -1.
+                     The field MUST be one of the indexed fields above. Return
+                     null when the query has no ordering intent.
+  limit            : integer result count IF the query names one — "top 5" -> 5,
+                     "3 cheapest" -> 3, "10 movies" -> 10, "lowest rating 5
+                     movies" -> 5. Return null when no count is stated.
   metadata_filters : DEPRECATED — return {{}} and use `facts` instead.
-  intent           : one of {intents}
+  intent           : one of {intents}.
+                     Use "ordering" when the query is primarily a ranking /
+                     superlative over a field ("lowest rated", "top 5 by X").
+                     Use "lookup" when the query is FULLY answerable by the
+                     structured facts/filters above (dates, years, categories,
+                     exact field values) with NO descriptive topic — e.g.
+                     "movies between 1970 and 2000", "sci-fi from the 90s".
+                     If a real semantic topic remains after the filters (e.g.
+                     "movies about robots from the 90s"), use "semantic_search".
 
 Return ONLY the JSON object. No prose, no markdown fences.
 
@@ -141,6 +178,8 @@ class QueryUnderstandingLayer:
                 source="query understanding facts",
             ),
             post_filters=post_facts,
+            sort=parse_sort(parsed.get("sort"), self._filter_fields),
+            limit=_parse_limit(parsed.get("limit")),
             intent=parsed.get("intent") if parsed.get("intent") in INTENTS else "semantic_search",
         )
 

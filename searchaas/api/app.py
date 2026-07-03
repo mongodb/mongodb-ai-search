@@ -418,8 +418,9 @@ def _run(strategy: str, req: RetrieveRequest) -> RetrieveResponse:
     plan = c.planner.plan_for(
         strategy=strategy,
         query=uq.rewritten,
-        top_k=req.top_k,
+        top_k=uq.limit or req.top_k,  # a count named in the query wins
         filters=merged_filters,
+        sort=uq.sort,  # honoured by the metadata strategy; ignored by others
     )
     planning_ms = round((time.perf_counter() - t_plan) * 1000, 1)
     log.info(
@@ -576,6 +577,12 @@ def retrieve_parent_doc(req: RetrieveRequest) -> RetrieveResponse:
     return _run("parent_doc", req)
 
 
+@app.post("/retrieve/metadata", response_model=RetrieveResponse)
+def retrieve_metadata(req: RetrieveRequest) -> RetrieveResponse:
+    """Structured retrieval: $match/$sort/$limit for rankings & exact lookups."""
+    return _run("metadata", req)
+
+
 @app.post("/retrieve", response_model=RetrieveResponse)
 def retrieve_auto(req: RetrieveRequest) -> RetrieveResponse:
     """
@@ -604,7 +611,9 @@ def retrieve_auto(req: RetrieveRequest) -> RetrieveResponse:
             original, plan.strategy, uq.intent,
         )
 
-    if req.top_k is not None:
+    # A count named in the query (uq.limit, already applied by the planner) wins;
+    # otherwise honor an explicit request top_k.
+    if uq.limit is None and req.top_k is not None:
         plan.top_k = req.top_k
     # Merge all filter sources: metadata_filters (NLU) < plan filters (LLM planner) < request filters (user)
     plan.filters = {**(uq.metadata_filters or {}), **plan.filters, **(req.filters or {})}

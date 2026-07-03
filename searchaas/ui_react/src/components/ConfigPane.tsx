@@ -38,7 +38,13 @@ export default function ConfigPane({
   const [tab, setTab] = useState<ConfigTab>("atlas");
   const [applyState, setApplyState] = useState<"idle" | "loading" | "ok" | "error">("idle");
   const [applyError, setApplyError] = useState<string | null>(null);
-  const required = REQUIRED_ATLAS_FIELDS[strategy] ?? [];
+  // In AutoEmbeddings mode Atlas manages embedding_key / dimensions /
+  // relevance_score_fn server-side, so they are null by design and must NOT be
+  // flagged as required (otherwise auto mode always shows a false "missing").
+  const isAutoEmbed = config.embeddings.provider === "auto";
+  const required = (REQUIRED_ATLAS_FIELDS[strategy] ?? []).filter(
+    (f) => !(isAutoEmbed && ["embedding_key", "dimensions", "relevance_score_fn"].includes(f)),
+  );
   const isRequired = (f: string) => required.includes(f);
 
   const missing = useMemo(
@@ -69,9 +75,6 @@ export default function ConfigPane({
     setConfig({ ...config, [key]: value });
   const updateAtlas = (patch: Partial<AppConfig["atlas"]>) =>
     update("atlas", { ...config.atlas, ...patch });
-
-  /** True when MongoDB Atlas server-side auto-embedding is selected. */
-  const isAutoEmbed = config.embeddings.provider === "auto";
 
   /** Switch embeddings provider, resetting the config dict so stale keys
    *  (api keys, dimensions, etc.) don't bleed across provider switches. */

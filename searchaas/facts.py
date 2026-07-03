@@ -110,6 +110,34 @@ def split_facts(
     return pre, post
 
 
+def parse_sort(raw: Any, allowed_fields: list[str] | None) -> dict[str, int] | None:
+    """Validate an LLM-emitted ordering into a Mongo sort dict, or None.
+
+    Accepts ``{"field": <name>, "direction": 1|-1}`` (preferred) or a bare
+    ``{<field>: 1|-1}``. The field is canonicalized (synonym → indexed path) and
+    MUST resolve to an allowed field; direction MUST be ±1. Returns e.g.
+    ``{"imdb.rating": 1}`` — the exact shape a ``$sort`` stage expects.
+    """
+    if not isinstance(raw, dict) or not raw:
+        return None
+    if "field" in raw:
+        field, direction = raw.get("field"), raw.get("direction", -1)
+    else:  # bare {field: dir}
+        field, direction = next(iter(raw.items()))
+    if not isinstance(field, str) or not field:
+        return None
+    field = canonicalize_field(field, allowed_fields)
+    if field not in set(allowed_fields or []):
+        return None
+    try:
+        direction = int(direction)
+    except (TypeError, ValueError):
+        return None
+    if direction not in (1, -1):
+        return None
+    return {field: direction}
+
+
 def compile_prefilter(facts: list[Fact]) -> dict[str, Any]:
     """Compile pre-filterable facts into an Atlas filter dict.
 

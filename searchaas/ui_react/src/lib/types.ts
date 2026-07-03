@@ -1,8 +1,8 @@
 export type Strategy =
-  | "auto" | "vector" | "fulltext" | "hybrid" | "graph" | "parent-doc";
+  | "auto" | "vector" | "fulltext" | "hybrid" | "graph" | "parent-doc" | "metadata";
 
 export const STRATEGIES: Strategy[] = [
-  "auto", "vector", "fulltext", "hybrid", "graph", "parent-doc",
+  "auto", "vector", "fulltext", "hybrid", "graph", "parent-doc", "metadata",
 ];
 
 export const AUTO_STRATEGY_CHOICES: Strategy[] = ["hybrid", "vector", "fulltext"];
@@ -23,6 +23,7 @@ export const STRATEGY_MAP: Record<Strategy, { restPath: string; mcpTool: string 
   hybrid:       { restPath: "/retrieve/hybrid",     mcpTool: "hybrid_search" },
   graph:        { restPath: "/retrieve/graph",      mcpTool: "graph_search" },
   "parent-doc": { restPath: "/retrieve/parent-doc", mcpTool: "parent_doc_search" },
+  metadata:     { restPath: "/retrieve/metadata",   mcpTool: "metadata_search" },
 };
 
 export const STRATEGY_COLOR: Record<string, string> = {
@@ -32,6 +33,7 @@ export const STRATEGY_COLOR: Record<string, string> = {
   hybrid:     "green",
   graph:      "amber",
   "parent-doc": "gray",
+  metadata:   "cyan",
 };
 
 export const REQUIRED_ATLAS_FIELDS: Record<Strategy, string[]> = {
@@ -41,6 +43,7 @@ export const REQUIRED_ATLAS_FIELDS: Record<Strategy, string[]> = {
   hybrid:       ["uri","database","collection","vector_index","search_index","embedding_key","text_key","dimensions"],
   graph:        ["uri","database","collection","text_key","embedding_key"],
   "parent-doc": ["uri","database","collection","vector_index","embedding_key","text_key","dimensions"],
+  metadata:     ["uri","database","collection","text_key"],
 };
 
 export interface AtlasConfig {
@@ -56,7 +59,7 @@ export interface AppConfig {
   embeddings: { provider: string; config: Record<string, unknown> };
   planner: { llm_provider: string; config: Record<string, unknown>; default_top_k: number };
   retrieval: {
-    default_strategy: "vector" | "fulltext" | "hybrid" | "graph" | "parent-doc";
+    default_strategy: "vector" | "fulltext" | "hybrid" | "graph" | "parent-doc" | "metadata";
     hybrid: { vector_weight: number; fulltext_weight: number };
     vector: { num_candidates: number };
   };

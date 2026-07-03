@@ -28,10 +28,12 @@ _PLAN_CACHE_MAXSIZE = 256   # per-process plan cache size
 
 
 class RetrievalPlan(BaseModel):
-    strategy: str = "hybrid"   # vector | fulltext | hybrid | graph | parent_doc
+    strategy: str = "hybrid"   # vector | fulltext | hybrid | graph | parent_doc | metadata
     rewrite: bool = True
     filters: dict[str, Any] = Field(default_factory=dict)
     boosts: dict[str, Any] = Field(default_factory=dict)
+    # Mongo sort dict for the `metadata` strategy (e.g. {"imdb.rating": 1}).
+    sort: dict[str, int] | None = None
     top_k: int = 20
 
 
@@ -44,7 +46,8 @@ Given an analyzed user query, produce a JSON plan with EXACTLY these keys:
   boosts    : object of field -> boost weight (may be empty)
   top_k     : integer between 1 and 50
 
-Choose the strategy based on intent:
+Choose the strategy based on intent (do NOT choose "metadata" — that is routed
+automatically for structured ordering/lookup queries):
   - exact_lookup / policy_lookup -> "fulltext"
   - semantic_search / summarization -> "vector" or "hybrid"
   - analytical / troubleshooting -> "hybrid"
@@ -59,6 +62,7 @@ Analyzed query:
   rewritten        : {rewritten}
   entities         : {entities}
   metadata_filters : {meta}
+  sort             : {sort}
   intent           : {intent}
 
 Return ONLY the JSON object. No prose, no markdown fences.
@@ -86,6 +90,23 @@ class RetrievalPlanner:
         draft = self._generate_plan(uq, policy)
         if uq.metadata_filters and not draft.filters:
             draft.filters = dict(uq.metadata_filters)
+        # `sort` is authoritative from query understanding (validated there).
+        if uq.sort and not draft.sort:
+            draft.sort = dict(uq.sort)
+        # A count named in the query ("top 5") wins over the planner's guess;
+        # enforce() then clamps it to the policy's top_k bounds.
+        if uq.limit is not None:
+            draft.top_k = uq.limit
+        # Query-understanding intent is AUTHORITATIVE for the metadata route.
+        # A structured query — ranking ("ordering") or a pure filter lookup
+        # ("lookup") with something to sort/match — becomes a find/$sort. Any
+        # other query must NOT use metadata even if the planner suggested it
+        # (it has a semantic topic that needs real retrieval).
+        structured = uq.intent in ("ordering", "lookup") and (draft.sort or uq.metadata_filters)
+        if structured:
+            draft.strategy = "metadata"
+        elif draft.strategy == "metadata":
+            draft.strategy = policy.default_strategy
         return self._policies.enforce(draft, policy)
 
     def plan_for(
@@ -94,6 +115,7 @@ class RetrievalPlanner:
         query: str,
         top_k: int | None = None,
         filters: dict[str, Any] | None = None,
+        sort: dict[str, int] | None = None,
     ) -> RetrievalPlan:
         """Explicit strategy plan — used by per-strategy REST/MCP endpoints."""
         policy = self._policies.active()
@@ -101,6 +123,7 @@ class RetrievalPlanner:
             strategy=strategy,
             top_k=top_k or self._default_top_k,
             filters=filters or {},
+            sort=sort,
         )
         return self._policies.enforce(draft, policy)
 
@@ -118,6 +141,7 @@ class RetrievalPlanner:
             rewritten=uq.rewritten,
             entities=uq.entities,
             meta=uq.metadata_filters,
+            sort=uq.sort,
             intent=uq.intent,
         )
         try:
@@ -129,6 +153,9 @@ class RetrievalPlanner:
             if not data:
                 raise ValueError("empty plan")
             data.setdefault("top_k", self._default_top_k)
+            # `sort` is set authoritatively from uq.sort in plan(); ignore any
+            # (possibly malformed) sort the LLM emits so it can't break parsing.
+            data.pop("sort", None)
             # Strip any Phase-2 keys the LLM may hallucinate
             known = RetrievalPlan.model_fields.keys()
             plan = RetrievalPlan(**{k: v for k, v in data.items() if k in known})

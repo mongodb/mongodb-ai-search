@@ -146,6 +146,12 @@ def parent_doc_search(query: str, top_k: int = 20, filters: dict | None = None, 
 
 
 @mcp.tool
+def metadata_search(query: str, top_k: int = 20, filters: dict | None = None, atlas: dict | None = None, retrieval: dict | None = None) -> dict[str, Any]:
+    """Structured retrieval ($match/$sort/$limit) for rankings, superlatives, and exact lookups."""
+    return _retrieve("metadata", query, top_k, filters, atlas, retrieval)
+
+
+@mcp.tool
 def auto_search(query: str, top_k: int = 20, filters: dict | None = None, atlas: dict | None = None, retrieval: dict | None = None) -> dict[str, Any]:
     """
     Auto mode: understand the query, plan a strategy, retrieve, and summarize.

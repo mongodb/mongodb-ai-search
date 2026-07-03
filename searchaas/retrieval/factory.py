@@ -28,7 +28,9 @@ from pydantic import PrivateAttr
 from langchain_mongodb.embeddings import AutoEmbeddings
 from langchain_mongodb.retrievers import (
     MongoDBAtlasFullTextSearchRetriever,
-    MongoDBAtlasHybridSearchRetriever,
+    # Retained for the pre-8.0 portable-RRF fallback (client-side embed path);
+    # not wired into `_build_hybrid`, which now emits native `$rankFusion`.
+    MongoDBAtlasHybridSearchRetriever,  # noqa: F401
     MongoDBAtlasParentDocumentRetriever,
 )
 from langchain_mongodb.vectorstores import MongoDBAtlasVectorSearch
@@ -40,6 +42,7 @@ from pymongo_search_utils.pipeline import (
     final_hybrid_stage,
     reciprocal_rank_stage,
     text_search_stage,
+    vector_search_stage,
 )
 
 from searchaas.filtering import sanitize_filters
@@ -185,8 +188,29 @@ class RetrieverFactory:
                 text_key=(overrides and overrides.text_key) or self._text_key,
                 embedding_key=(overrides and overrides.embedding_key) or self._embedding_key,
             )
+        if s == "metadata":
+            return self._build_metadata(plan, k, overrides)
 
         raise ValueError(f"Unknown retrieval strategy: {s!r}")
+
+    # ---- Metadata (structured find/$sort) -------------------------------- #
+    def _build_metadata(self, plan, k: int, overrides: _Overrides = None) -> BaseRetriever:
+        """Structured retrieval via a $match/$sort/$limit aggregation."""
+        col = self._resolve_collection(overrides)
+        text_key = (overrides and overrides.text_key) or self._text_key
+        emb_key  = (overrides and overrides.embedding_key) or self._embedding_key
+        log.info(
+            "[MongoDB] metadata find/$sort — collection=%r filters=%s sort=%s limit=%s",
+            col.name, plan.filters or None, getattr(plan, "sort", None) or None, k,
+        )
+        return _MetadataRetriever(
+            collection=col,
+            top_k=k,
+            text_key=text_key,
+            embedding_key=emb_key,
+            filters=plan.filters or None,
+            sort=getattr(plan, "sort", None) or None,
+        )
 
     def _sanitize_for(self, strategy: str, filters: dict[str, Any] | None) -> dict[str, Any]:
         """Reduce filters to the paths the target index can filter on."""
@@ -482,24 +506,32 @@ class RetrieverFactory:
             filter=plan.filters or None,
         )
 
-    # ---- Hybrid (RRF + weights) ----------------------------------------- #
+    # ---- Hybrid (native $rankFusion) ------------------------------------ #
     def _build_hybrid(self, plan, k: int, overrides: _Overrides = None, retrieval_overrides: _Overrides = None) -> BaseRetriever:
         """
-        Fused vector + full-text retrieval using Reciprocal Rank Fusion (RRF).
+        Fused vector + full-text retrieval using the native **`$rankFusion`**
+        stage (MongoDB 8.0+). One stage does reciprocal rank fusion of the two
+        ranked input pipelines server-side, replacing the ~15-stage portable
+        RRF idiom (`$group $push $$ROOT` → `$unwind` → … → `$unionWith` → final
+        `$group`/`$sort`).
 
-            score = vector_weight   / (vector_penalty   + rank_vector)
-                  + fulltext_weight / (fulltext_penalty + rank_fulltext)
+            combination.weights = { vector: <vw>, text: <fw> }
 
-        Two implementations are dispatched based on the embedder type:
+        NOTE: no version gating — this always emits `$rankFusion`, which is
+        supported on MongoDB 8.0+ (verified on the live 8.0.26 cluster). Only a
+        pre-8.0 (7.x and older) cluster would reject the stage; the portable
+        path (`_AutoEmbedHybridRetriever` / `MongoDBAtlasHybridSearchRetriever`)
+        is retained for that case should a version-gated fallback ever be
+        needed (see RankFusionPlan.md).
 
-          * Client-side embeddings  -> `MongoDBAtlasHybridSearchRetriever`
-            (calls `embedder.embed_query(query)` and uses `queryVector` in
-            `$vectorSearch`).
+        Both embedder modes route through `_RankFusionHybridRetriever`; the only
+        difference is the *vector* input pipeline:
 
-          * AutoEmbeddings (server-side)  -> `_AutoEmbedHybridRetriever`
-            (uses `$vectorSearch.query.text` so Atlas embeds the query
-            internally — `embed_query` is NotImplemented for AutoEmbeddings
-            and would otherwise raise).
+          * AutoEmbeddings (server-side)  -> `$vectorSearch` with
+            `query.text` + `model` (Atlas embeds the query internally).
+
+          * Client-side embeddings        -> `embedder.embed_query(query)` then
+            `$vectorSearch` with `queryVector` on the embedding field.
         """
         vs           = self._resolve_vector_store(overrides)
         vi           = (overrides and overrides.vector_index)  or self._vector_index
@@ -513,6 +545,8 @@ class RetrieverFactory:
             (retrieval_overrides and retrieval_overrides.fulltext_weight) or
             self._hybrid_weights.get("fulltext_weight", 0.4)
         )
+        num_cands    = (retrieval_overrides and retrieval_overrides.num_candidates) or self._vector_candidates
+        oversampling = _oversampling_factor(k, num_cands, bool(plan.filters))
 
         # `_is_auto` is the container-level mode; a vector_store rebuilt for
         # an override would not change embedder type, so we trust the
@@ -520,22 +554,22 @@ class RetrieverFactory:
         is_auto = self._is_auto
 
         if is_auto:
-            num_cands = (retrieval_overrides and retrieval_overrides.num_candidates) or self._vector_candidates
-            oversampling = _oversampling_factor(k, num_cands, bool(plan.filters))
             log.info(
-                "[MongoDB] $vectorSearch (autoEmbed) + $search hybrid (RRF) — "
+                "[MongoDB] $rankFusion hybrid (autoEmbed) — "
                 "vector_index=%r search_index=%r field=%r model=%r "
                 "vector_weight=%s fulltext_weight=%s limit=%s "
                 "oversampling=%s pre_filter=%s",
                 vi, search_index, text_key, self._embeddings.model,
                 vw, fw, k, oversampling, plan.filters or None,
             )
-            return _AutoEmbedHybridRetriever(
+            return _RankFusionHybridRetriever(
                 collection=self._resolve_collection(overrides),
                 vector_index=vi,
                 search_index=search_index,
                 text_key=text_key,
                 model=self._embeddings.model,
+                embeddings=None,
+                embedding_key=None,
                 k=k,
                 vector_weight=vw,
                 fulltext_weight=fw,
@@ -546,19 +580,26 @@ class RetrieverFactory:
         emb_key = (overrides and overrides.embedding_key) or self._embedding_key
         dims    = (overrides and overrides.dimensions)    or self._dimensions
         log.info(
-            "[MongoDB] $vectorSearch+$search hybrid (RRF) — "
+            "[MongoDB] $rankFusion hybrid (client-side embed) — "
             "vector_index=%r search_index=%r field=%r embedding=%r "
-            "dim=%s vector_weight=%s fulltext_weight=%s limit=%s pre_filter=%s",
+            "dim=%s vector_weight=%s fulltext_weight=%s limit=%s "
+            "oversampling=%s pre_filter=%s",
             vi, search_index, text_key, emb_key, dims,
-            vw, fw, k, plan.filters or None,
+            vw, fw, k, oversampling, plan.filters or None,
         )
-        return MongoDBAtlasHybridSearchRetriever(
-            vectorstore=vs,
-            search_index_name=search_index,
+        return _RankFusionHybridRetriever(
+            collection=self._resolve_collection(overrides),
+            vector_index=vi,
+            search_index=search_index,
+            text_key=text_key,
+            model=None,
+            embeddings=getattr(vs, "embeddings", None) or self._embeddings,
+            embedding_key=emb_key,
             k=k,
             vector_weight=vw,
             fulltext_weight=fw,
             pre_filter=plan.filters or None,
+            oversampling_factor=oversampling,
         )
 
     # ---- Parent-document ------------------------------------------------- #
@@ -675,8 +716,15 @@ class _GraphRAGRetriever(BaseRetriever):
             )
             docs: list[Document] = []
             for row in self._col.aggregate(pipeline):
+                hops = row.get("connected", [])[: self._top_k]
+                # Convert BSON types (ObjectId, …) so the API can serialise them.
+                for r in (row, *hops):
+                    try:
+                        make_serializable(r)
+                    except Exception:
+                        pass
                 docs.append(self._to_document(row))
-                for hop in row.get("connected", [])[: self._top_k]:
+                for hop in hops:
                     docs.append(self._to_document(hop))
             # de-dup by content
             seen, unique = set(), []
@@ -717,8 +765,274 @@ class _GraphRAGRetriever(BaseRetriever):
 
 
 # --------------------------------------------------------------------------- #
-# AutoEmbed-compatible hybrid retriever
+# Metadata retriever — structured find/$sort (no vector/text search)
 # --------------------------------------------------------------------------- #
+class _MetadataRetriever(BaseRetriever):
+    """Answer *structured* questions with a plain `$match`/`$sort`/`$limit`.
+
+    For rankings, superlatives ("lowest rated"), and exact lookups where
+    semantic similarity is the wrong tool. Executed as an aggregation (not
+    `find`) so (a) the pipeline-capture listener records the real query and
+    (b) a numeric-type guard can drop docs whose sort field is missing/empty
+    (e.g. `imdb.rating == ""` in sample_mflix) before an ascending `$sort`.
+    """
+
+    _col: Any = PrivateAttr()
+    _top_k: int = PrivateAttr()
+    _text_key: str = PrivateAttr()
+    _embedding_key: str = PrivateAttr()
+    _filters: dict | None = PrivateAttr()
+    _sort: dict | None = PrivateAttr()
+
+    def __init__(
+        self,
+        *,
+        collection: Any,
+        top_k: int,
+        text_key: str = "content",
+        embedding_key: str = "embedding",
+        filters: dict | None = None,
+        sort: dict | None = None,
+    ) -> None:
+        super().__init__()
+        self._col = collection
+        self._top_k = top_k
+        self._text_key = text_key
+        self._embedding_key = embedding_key
+        self._filters = filters or None
+        self._sort = sort or None
+
+    def _get_relevant_documents(self, query: str, *, run_manager=None) -> list[Document]:  # type: ignore[override]
+        pipeline: list[dict] = []
+        if self._filters:
+            pipeline.append({"$match": self._filters})
+        if self._sort:
+            sort_field = next(iter(self._sort))
+            # Exclude missing / non-numeric sort values so empty strings ("") and
+            # absent fields don't sort ahead of real numbers on ascending order.
+            pipeline.append({"$match": {sort_field: {"$type": "number"}}})
+            pipeline.append({"$sort": dict(self._sort)})
+        pipeline.append({"$limit": self._top_k})
+
+        log.debug(
+            "[MongoDB] aggregate pipeline (metadata) — collection=%r stages=%s",
+            self._col.name, pipeline,
+        )
+        try:
+            docs: list[Document] = []
+            for row in self._col.aggregate(pipeline):
+                # Convert BSON types (ObjectId, Decimal128, Binary, …) to
+                # JSON-serialisable values so the API response can be encoded.
+                try:
+                    make_serializable(row)
+                except Exception:
+                    pass
+                docs.append(self._to_document(row))
+            return docs
+        except Exception as exc:
+            log.warning("Metadata retrieval failed: %s", exc)
+            return []
+
+    def _to_document(self, row: dict) -> Document:
+        meta = {k: v for k, v in row.items() if k not in (self._text_key, self._embedding_key)}
+        return Document(page_content=row.get(self._text_key, "") or "", metadata=meta)
+
+
+# --------------------------------------------------------------------------- #
+# Native $rankFusion hybrid retriever (MongoDB 8.0+)
+# --------------------------------------------------------------------------- #
+#
+# Emits a single `$rankFusion` stage that fuses two ranked input pipelines
+# (vector + full-text) server-side via reciprocal rank fusion, replacing the
+# ~15-stage portable RRF idiom. Handles BOTH embedder modes:
+#
+#   * AutoEmbeddings (server-side): the vector input pipeline is a
+#     `$vectorSearch` with `query.text` + `model` (Atlas embeds the query),
+#     pathing on `text_key`.
+#
+#   * Client-side embeddings: `embedder.embed_query(query)` is called once and
+#     the vector input pipeline is a `$vectorSearch` with `queryVector`, pathing
+#     on `embedding_key`.
+#
+# Pipeline shape:
+#
+#   { $rankFusion: {
+#       input: { pipelines: {
+#         vector: [ { $vectorSearch: {...} } ],
+#         text:   [ { $search: {...} }, { $match: <pre_filter> }?, { $limit: k } ]
+#       } },
+#       combination: { weights: { vector: <vw>, text: <fw> } },
+#       scoreDetails: true
+#   } }
+#   { $addFields: { score: {$meta: "score"}, score_details: {$meta: "scoreDetails"} } }
+#   { $limit: k }
+#
+# The pre_filter is kept on BOTH channels (as `$vectorSearch.filter` and as a
+# `$match` in the text pipeline) for parity with the portable RRF path.
+class _RankFusionHybridRetriever(BaseRetriever):
+    """Native `$rankFusion` hybrid retriever (MongoDB 8.0+), both embedder modes."""
+
+    _col: Any = PrivateAttr()
+    _vector_index: str = PrivateAttr()
+    _search_index: str = PrivateAttr()
+    _text_key: str = PrivateAttr()
+    _model: str | None = PrivateAttr()
+    _embeddings: Any = PrivateAttr()
+    _embedding_key: str | None = PrivateAttr()
+    _k: int = PrivateAttr()
+    _vw: float = PrivateAttr()
+    _fw: float = PrivateAttr()
+    _pre_filter: dict | None = PrivateAttr()
+    _oversampling: int = PrivateAttr()
+
+    def __init__(
+        self,
+        *,
+        collection: Any,
+        vector_index: str,
+        search_index: str,
+        text_key: str,
+        model: str | None,
+        embeddings: Any,
+        embedding_key: str | None,
+        k: int,
+        vector_weight: float,
+        fulltext_weight: float,
+        pre_filter: dict | None,
+        oversampling_factor: int,
+    ) -> None:
+        super().__init__()
+        self._col = collection
+        self._vector_index = vector_index
+        self._search_index = search_index
+        self._text_key = text_key
+        self._model = model
+        self._embeddings = embeddings
+        self._embedding_key = embedding_key
+        self._k = k
+        self._vw = vector_weight
+        self._fw = fulltext_weight
+        self._pre_filter = pre_filter
+        self._oversampling = max(1, oversampling_factor)
+
+    def _vector_pipeline(self, query: str) -> list[dict]:
+        """The ranked vector input pipeline for `$rankFusion` (mode-dependent)."""
+        if self._model is not None:
+            # AutoEmbeddings: Atlas embeds `query.text` with `model` server-side;
+            # the vector path is the *text* field.
+            return [
+                autoembedding_vector_search_stage(
+                    query=query,
+                    search_field=self._text_key,
+                    index_name=self._vector_index,
+                    model=self._model,
+                    top_k=self._k,
+                    filter=self._pre_filter,
+                    oversampling_factor=self._oversampling,
+                )
+            ]
+        # Client-side: embed once, then $vectorSearch on the embedding field.
+        query_vector = self._embeddings.embed_query(query)
+        return [
+            vector_search_stage(
+                query_vector=query_vector,
+                search_field=self._embedding_key or "embedding",
+                index_name=self._vector_index,
+                top_k=self._k,
+                filter=self._pre_filter,
+                oversampling_factor=self._oversampling,
+            )
+        ]
+
+    def _get_relevant_documents(self, query: str, *, run_manager=None) -> list[Document]:  # type: ignore[override]
+        # ---- Vector input pipeline (ranked by $vectorSearch) --------------
+        vector_pipeline = self._vector_pipeline(query)
+
+        # ---- Text input pipeline (ranked by $search) ----------------------
+        # include_scores=False: $rankFusion ranks by the pipeline's own output
+        # order, not a raw Lucene searchScore, so the dead `$set score` stage is
+        # omitted. text_search_stage appends `$match <filter>` when a pre_filter
+        # is present, keeping the filter on the text channel too.
+        text_pipeline = text_search_stage(
+            query=query,
+            search_field=self._text_key,
+            index_name=self._search_index,
+            limit=self._k,
+            filter=self._pre_filter,
+            include_scores=False,
+        )
+
+        pipeline: list[dict] = [
+            {
+                "$rankFusion": {
+                    "input": {
+                        "pipelines": {
+                            "vector": vector_pipeline,
+                            "text": text_pipeline,
+                        }
+                    },
+                    "combination": {"weights": {"vector": self._vw, "text": self._fw}},
+                    "scoreDetails": True,
+                }
+            },
+            {
+                "$addFields": {
+                    "score": {"$meta": "score"},
+                    "score_details": {"$meta": "scoreDetails"},
+                }
+            },
+            {"$limit": self._k},
+        ]
+
+        log.debug(
+            "[MongoDB] aggregate pipeline ($rankFusion hybrid) — collection=%r stages=%s",
+            self._col.name, len(pipeline),
+        )
+
+        # ---- Execute + format ---------------------------------------------
+        # `$rankFusion` returns each document with the fused relevance available
+        # via `{$meta: "score"}` (projected into `score` above), replacing the
+        # summed `vector_score + fulltext_score` of the portable path.
+        _make_ser = make_serializable
+        _Document = Document
+        _text_key = self._text_key
+        docs: list[Document] = []
+        for res in self._col.aggregate(pipeline):
+            if _text_key not in res:
+                continue
+            text = res.pop(_text_key)
+            doc_id = res.get("_id")
+            score = res.pop("score", 0.0)
+            try:
+                score = float(score)
+            except (TypeError, ValueError):
+                score = 0.0
+            # Make ObjectId / Decimal / etc serialisable for the API layer
+            # (also covers the nested `score_details` document).
+            try:
+                _make_ser(res)
+            except Exception:
+                pass
+            res["score"] = score
+            docs.append(_Document(
+                page_content=text,
+                metadata=res,
+                id=str(doc_id) if doc_id is not None else None,
+            ))
+        return docs
+
+
+# --------------------------------------------------------------------------- #
+# AutoEmbed-compatible hybrid retriever  —  PORTABLE RRF FALLBACK (pre-8.0)
+# --------------------------------------------------------------------------- #
+#
+# NOT wired into `_build_hybrid` anymore: `$rankFusion` (see
+# `_RankFusionHybridRetriever`) supersedes this on MongoDB 8.0+. This class is
+# retained intentionally as the portable fallback for **pre-8.0 clusters (7.x
+# and older)**, which do not support `$rankFusion`. To re-enable it, version-gate
+# `_build_hybrid` (server_version < (8, 0) → this retriever for the autoEmbed
+# path, `MongoDBAtlasHybridSearchRetriever` for the client-side path). Kept in
+# sync intentionally; do not delete without dropping pre-8.0 support.
 #
 # `MongoDBAtlasHybridSearchRetriever` from langchain-mongodb 0.11 hard-codes
 # `vectorstore._embedding.embed_query(query)` and asserts on

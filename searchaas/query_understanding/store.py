@@ -26,7 +26,7 @@ log = get_logger("searchaas.query_understanding.store")
 
 # Bump when extraction/routing logic changes so cached entries produced by an
 # older version are never served (they get new keys and are recomputed).
-_EXTRACTION_VERSION = "2"
+_EXTRACTION_VERSION = "5"  # bumped: added `sort`, `lookup` intent, and `limit`
 
 
 def _hash(query: str, namespace: str = "") -> str:
@@ -50,6 +50,8 @@ def _to_doc(query: str, uq: UnderstoodQuery, namespace: str = "") -> dict[str, A
         "facts": [f.to_dict() for f in uq.facts],
         "pre_filter": dict(uq.metadata_filters or {}),
         "post_filters": [f.to_dict() for f in uq.post_filters],
+        "sort": dict(uq.sort) if uq.sort else None,
+        "limit": uq.limit,
         "intent": uq.intent,
         "updated_at": datetime.now(timezone.utc),
     }
@@ -65,6 +67,8 @@ def _from_doc(doc: dict[str, Any]) -> UnderstoodQuery:
         facts=[Fact(**f) for f in (doc.get("facts") or []) if isinstance(f, dict)],
         metadata_filters=dict(doc.get("pre_filter") or {}),
         post_filters=[Fact(**f) for f in (doc.get("post_filters") or []) if isinstance(f, dict)],
+        sort=(doc.get("sort") or None),
+        limit=doc.get("limit"),
         intent=doc.get("intent") or "semantic_search",
     )
 
