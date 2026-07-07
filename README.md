@@ -10,30 +10,46 @@ surface, real aggregation-pipeline capture, and a React testing UI.
 Every concern is swappable through YAML — switching embeddings, LLMs, indexes,
 or retrieval strategy is a config change, not a code change.
 
-See `docs/Instructions.md` for the full architecture and Phase 2 roadmap.
+See [docs/Instructions.md](docs/Instructions.md) for the full architecture and Phase 2 roadmap.
 
 ## Layout
 
 ```
-searchaas/
-  config/              # YAML config + loader (single source of truth; ${VAR:-default} expansion)
-  infrastructure/      # AtlasFactory (Mongo client / db / collections, ping, stats)
-  domain/              # Pydantic models (Chunk, SourceRef)
-  embeddings/          # EmbeddingFactory (auto/AutoEmbeddings, Voyage, OpenAI, Gemini, Titan, Cohere, ...)
-  llm/                 # LLMFactory (Gemini, Azure/OpenAI, Anthropic, Bedrock)
-  query_understanding/ # QueryUnderstandingLayer + FactStore (rewrite, entities, typed facts, sort, intent)
-  planning/            # RetrievalPlanner + Atlas-managed PolicyStore
-  retrieval/           # RetrieverFactory (vector/fulltext/hybrid/graph/parent_doc/metadata)
-  observability/       # structured logging + pipeline_capture (real Atlas aggregation capture)
-  facts.py             # query-fact routing → Atlas pre-filters vs in-memory post-filters
-  filtering.py         # filter allowlist sanitization (drops non-indexable paths)
-  utils.py             # shared serialization / summarization helpers
-  diagnose.py          # `python -m searchaas.diagnose` self-check CLI
-  app/                 # Container / bootstrap — wires every factory from AppConfig
-  api/                 # FastAPI surface
-  mcp_server/          # FastMCP surface
-  ui_react/            # React + Vite retrieval-testing UI
-  tests/               # pytest suite
+mongodb-ai-search/
+├── README.md                 # this file
+├── requirements.txt          # Python dependencies
+├── pytest.ini                # pytest configuration
+├── .env.example              # environment-variable template (copy to .env)
+├── docs/                     # architecture & reference documentation
+│   ├── Instructions.md           # full architecture spec + Phase 2 roadmap
+│   ├── ARCHITECTURE_DIAGRAMS.md  # system/flow diagrams
+│   ├── CODEBASE_ANALYSIS.md      # module-by-module walkthrough
+│   ├── QUICK_REFERENCE.md        # cheat sheet
+│   ├── DOCUMENTATION_INDEX.md    # index of the docs
+│   └── known-issues.md           # known limitations & gotchas
+├── deployment/               # cloud deployment artifacts
+│   ├── aws/                      # S3 UI + ECS Express (default) + Bedrock AgentCore
+│   ├── azure/                    # Container Apps + AI Foundry (Bicep)
+│   └── google/                   # Cloud Run (combined or separate services)
+└── searchaas/                # application package
+    ├── config/               # YAML config + loader (single source of truth; ${VAR:-default} expansion)
+    ├── infrastructure/       # AtlasFactory (Mongo client / db / collections, ping, stats)
+    ├── domain/               # Pydantic models (Chunk, SourceRef)
+    ├── embeddings/           # EmbeddingFactory (auto/AutoEmbeddings, Voyage, OpenAI, Gemini, Titan, Cohere, ...)
+    ├── llm/                  # LLMFactory (Gemini, Azure/OpenAI, Anthropic, Bedrock)
+    ├── query_understanding/  # QueryUnderstandingLayer + FactStore (rewrite, entities, typed facts, sort, intent)
+    ├── planning/             # RetrievalPlanner + Atlas-managed PolicyStore
+    ├── retrieval/            # RetrieverFactory (vector/fulltext/hybrid/graph/parent_doc/metadata)
+    ├── observability/        # structured logging + pipeline_capture (real Atlas aggregation capture)
+    ├── app/                  # Container / bootstrap — wires every factory from AppConfig
+    ├── api/                  # FastAPI surface
+    ├── mcp_server/           # FastMCP surface
+    ├── ui_react/             # React + Vite retrieval-testing UI
+    ├── tests/                # pytest suite
+    ├── facts.py              # query-fact routing → Atlas pre-filters vs in-memory post-filters
+    ├── filtering.py          # filter allowlist sanitization (drops non-indexable paths)
+    ├── utils.py              # shared serialization / summarization helpers
+    └── diagnose.py           # `python -m searchaas.diagnose` self-check CLI
 ```
 
 ## Setup
@@ -403,19 +419,20 @@ knobs, and teardown.
 
 | Target | Folder | Guide |
 |---|---|---|
-| **AWS** | `deployment/aws/` | `deployment/aws/README.md` |
-| **Azure** | `deployment/azure/` | `deployment/azure/DEPLOYMENT.md` |
-| **Google Cloud Run** | `deployment/google/` | see below |
+| **AWS** | [`deployment/aws/`](deployment/aws/) | [deployment/aws/README.md](deployment/aws/README.md) |
+| **Azure** | [`deployment/azure/`](deployment/azure/) | [deployment/azure/DEPLOYMENT.md](deployment/azure/DEPLOYMENT.md) |
+| **Google Cloud Run** | [`deployment/google/`](deployment/google/) | see below |
 
 ### AWS
 
-Three independent pieces:
+Three independent pieces — see the [AWS deployment guide](deployment/aws/README.md)
+for full details:
 
-| # | What | Where it runs | Script | Default? |
-|---|---|---|---|---|
-| 1 | React UI | S3 static website (existing bucket) | `s3-ui/deploy.sh` | yes |
-| 2 | FastAPI + FastMCP backends | ECS **Express Mode** | `ecs/deploy.sh` | **yes** |
-| 3 | FastMCP backend (alternative) | Bedrock **AgentCore Runtime** | `agentcore/deploy.sh` | no — opt-in |
+| # | What | Where it runs | Script | Guide | Default? |
+|---|---|---|---|---|---|
+| 1 | React UI | S3 static website (existing bucket) | [`s3-ui/deploy.sh`](deployment/aws/s3-ui/deploy.sh) | [s3-ui/README.md](deployment/aws/s3-ui/README.md) | yes |
+| 2 | FastAPI + FastMCP backends | ECS **Express Mode** | [`ecs/deploy.sh`](deployment/aws/ecs/deploy.sh) | [ecs/README.md](deployment/aws/ecs/README.md) | **yes** |
+| 3 | FastMCP backend (alternative) | Bedrock **AgentCore Runtime** | [`agentcore/deploy.sh`](deployment/aws/agentcore/deploy.sh) | [agentcore/README.md](deployment/aws/agentcore/README.md) | no — opt-in |
 
 ```bash
 export AWS_REGION=us-east-1
@@ -440,7 +457,8 @@ export ATLAS_DB='your_database_name'
 Deploys the three surfaces to **Azure Container Apps** and wires the MCP
 endpoint into an **AI Foundry** agent. Infrastructure (resource group, ACR, Log
 Analytics, Container Apps Environment, managed identity, three Container Apps) is
-provisioned by subscription-scope Bicep with a readiness gate.
+provisioned by subscription-scope Bicep with a readiness gate. Full walkthrough:
+[Azure deployment guide](deployment/azure/DEPLOYMENT.md).
 
 ```bash
 # 1. Create resource group + ACR
@@ -460,9 +478,10 @@ az deployment sub create --name searchaas --location centralindia \
       openaiApiKey="$OPENAI_API_KEY" mcpApiKey="$MCP_API_KEY"
 ```
 
-The MCP endpoint is Bearer-gated (`MCP_API_KEY`). See
-`deployment/azure/DEPLOYMENT.md` for the full guide, config overrides, and AI
-Foundry agent setup.
+The MCP endpoint is Bearer-gated (`MCP_API_KEY`). See the
+[Azure deployment guide](deployment/azure/DEPLOYMENT.md) for config overrides and
+AI Foundry agent setup, and its [Bicep templates](deployment/azure/infra/) and
+[build/push script](deployment/azure/scripts/build-and-push.sh).
 
 ### Google Cloud Run
 
@@ -472,6 +491,7 @@ authenticated, Docker running, a GCP project with billing, and a populated
 
 **Option A — Single service (recommended).** One image, one URL; nginx serves
 the React SPA and proxies API/MCP traffic to internal backends (no CORS config).
+Script: [`deployment/google/deploy-combined.sh`](deployment/google/deploy-combined.sh).
 
 ```bash
 chmod +x deployment/google/deploy-combined.sh
@@ -486,6 +506,7 @@ chmod +x deployment/google/deploy-combined.sh
 
 **Option B — Separate services.** Three independent Cloud Run services, useful
 to scale the API and MCP independently from the frontend.
+Script: [`deployment/google/deploy.sh`](deployment/google/deploy.sh).
 
 ```bash
 chmod +x deployment/google/deploy.sh
