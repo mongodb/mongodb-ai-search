@@ -5,7 +5,6 @@ One service per process:
 
 - **FastAPI** → `searchaas-fastapi` → `https://searchaas-fastapi.ecs.<region>.on.aws`
 - **FastMCP** (streamable-http) → `searchaas-fastmcp` → `https://searchaas-fastmcp.ecs.<region>.on.aws`
-- **React UI** → S3 static website (separate from ECS)
 
 > Express Mode auto-provisions an internet-facing ALB + HTTPS URL per service.
 > You can't opt out of the ALB in Express Mode — if that's a blocker, drop to
@@ -44,6 +43,122 @@ What the script does (idempotent — safe to re-run):
 4. Calls `aws ecs create-express-gateway-service` (or `update-...` if the service already exists) for each one with `--monitor-resources` so you watch provisioning in real time.
 5. Prints the two `https://...ecs.<region>.on.aws` URLs.
 
+## Configuration options
+
+Everything in `searchaas/config/searchaas.yaml` uses `${VAR:-default}` syntax, so
+you configure the services purely with **environment variables** — no image
+rebuild. On ECS, `deploy.sh` only substitutes `<ATLAS_URI>`, `<ATLAS_DB>`, and
+`<CORS_ORIGINS>`. To change any other option below, add it to the `environment`
+array in **both** container payloads (they run the same image / config):
+
+- `deployment/aws/ecs/primary-container-fastapi.json`
+- `deployment/aws/ecs/primary-container-fastmcp.json`
+
+```jsonc
+// inside "environment": [ ... ]
+{ "name": "EMBEDDINGS_PROVIDER", "value": "auto" },
+{ "name": "ATLAS_VECTOR_INDEX",  "value": "autoembed_index" },
+{ "name": "ATLAS_DIMENSIONS",    "value": "-1" }
+```
+
+Anything you leave unset falls back to the default baked into
+`searchaas/config/searchaas.yaml`. Do **not** commit filled-in secret values —
+keep placeholders in git (see Caveats).
+
+> **Do not override the container wiring** already set in the JSON files:
+> `PYTHONUNBUFFERED`, `PYTHONPATH`, `SEARCHAAS_CONFIG`, and the container ports
+> (`8000` FastAPI / `8001` FastMCP). CORS is set via `SEARCHAAS_CORS_ORIGINS`
+> (see the [CORS](#cors) section).
+
+### Atlas connection & index
+
+| Env var | Default | Purpose |
+| --- | --- | --- |
+| `ATLAS_URI` | *(required, secret)* | `mongodb+srv://...` connection string |
+| `ATLAS_DB` | `amazon` | Database name |
+| `ATLAS_COLLECTION` | `pdf_multimodal_chunks` | Collection to search |
+| `ATLAS_VECTOR_INDEX` | `aisearch_vector_index` | Atlas Vector Search index name |
+| `ATLAS_SEARCH_INDEX` | `default` | Atlas Search (Lucene) index for fulltext/hybrid |
+| `ATLAS_TEXT_KEY` | `raw_text` | Field holding chunk text |
+| `ATLAS_EMBEDDING_KEY` | `embedding` | Field holding the vector (empty ⇒ null, for auto mode) |
+| `ATLAS_RELEVANCE_FN` | `cosine` | Similarity function (empty ⇒ null, for auto mode) |
+| `ATLAS_DIMENSIONS` | `1024` | Vector dimensions — must match the index and the embedder (`-1` for auto mode) |
+
+### Embedding provider (query embeddings)
+
+Set `EMBEDDINGS_PROVIDER`. This deployment documents the AWS-native and
+MongoDB/Voyage options; other providers exist in code but are omitted here.
+
+| Provider | Required / key env vars |
+| --- | --- |
+| `voyageai` *(default)* | `VOYAGE_API_KEY`, `EMBEDDINGS_MODEL` (`voyage-4`), `EMBEDDINGS_OUTPUT_DIMENSION` (`1024`) |
+| `auto` (server-side) | `EMBEDDINGS_MODEL` only — Atlas embeds internally; no API key |
+| `bedrock_titan` | `EMBEDDINGS_MODEL`/model id (e.g. `amazon.titan-embed-text-v2:0`), `BEDROCK_REGION_NAME` — uses the task role's Bedrock access |
+
+`EMBEDDINGS_OUTPUT_DIMENSION` **must equal** `ATLAS_DIMENSIONS`.
+
+For the `voyageai` provider, add `VOYAGE_API_KEY` to the `environment` arrays.
+Switch to `auto` or `bedrock_titan` and no Voyage key is needed.
+
+#### Two embedding modes (must match your Atlas index type)
+
+The container **hard-fails at startup** if the provider doesn't match the live
+index type (`ProviderIndexMismatch`). Pick one:
+
+- **Mode A — client-side embeddings** (default): the app embeds queries
+  (Voyage / Bedrock Titan). Requires a `vector`-type index. Keep
+  `ATLAS_EMBEDDING_KEY`, a real `ATLAS_DIMENSIONS`, and `ATLAS_RELEVANCE_FN` set.
+- **Mode B — server-side AutoEmbeddings**: Atlas embeds using the model declared
+  in an `autoEmbed`-type index. Set `EMBEDDINGS_PROVIDER=auto`,
+  `ATLAS_EMBEDDING_KEY=` (empty), `ATLAS_DIMENSIONS=-1`, `ATLAS_RELEVANCE_FN=`
+  (empty), and point `ATLAS_VECTOR_INDEX` at the autoEmbed index whose declared
+  `model` equals `EMBEDDINGS_MODEL`.
+
+Dev-only escape hatch: `SEARCHAAS_SKIP_PROVIDER_INDEX_CHECK=1` bypasses this
+validation. Do not use in production.
+
+### Planner LLM (query understanding + retrieval planning)
+
+Set `PLANNER_LLM_PROVIDER`. This deployment uses AWS Bedrock; other providers
+exist in code but are omitted here.
+
+| Provider | Key env vars |
+| --- | --- |
+| `bedrock` *(default)* | `BEDROCK_MODEL` (default Claude Haiku), `BEDROCK_REGION_NAME` (`us-east-1`), `BEDROCK_TEMPERATURE` (`0.1`) — no key needed if the task role grants `bedrock:InvokeModel` |
+
+`PLANNER_DEFAULT_TOP_K` (default `20`) controls default candidate count.
+
+### Retrieval strategy
+
+| Env var | Default | Options / notes |
+| --- | --- | --- |
+| `RETRIEVAL_DEFAULT_STRATEGY` | `hybrid` | `vector`, `fulltext`, `hybrid`, `graph`, `parent_doc` |
+| `RETRIEVAL_HYBRID_VECTOR_WEIGHT` | `0.6` | hybrid vector weight |
+| `RETRIEVAL_HYBRID_FULLTEXT_WEIGHT` | `0.4` | hybrid fulltext weight |
+| `RETRIEVAL_VECTOR_NUM_CANDIDATES` | `200` | vector oversampling |
+
+> `hybrid` uses native `$rankFusion`, which requires **MongoDB 8.0+**.
+
+### Logging
+
+| Env var | Default | Purpose |
+| --- | --- | --- |
+| `LOG_LEVEL` | `info` | Application log level |
+
+### Example: switch to server-side AutoEmbeddings
+
+Add these to the `environment` array in both `primary-container-*.json` files
+(no `VOYAGE_API_KEY` needed):
+
+```jsonc
+{ "name": "EMBEDDINGS_PROVIDER", "value": "auto" },
+{ "name": "EMBEDDINGS_MODEL",    "value": "voyage-4" },        // must equal the index's autoEmbed model
+{ "name": "ATLAS_VECTOR_INDEX",  "value": "autoembed_index" },
+{ "name": "ATLAS_EMBEDDING_KEY", "value": "" },                // empty ⇒ null
+{ "name": "ATLAS_RELEVANCE_FN",  "value": "" },                // empty ⇒ null
+{ "name": "ATLAS_DIMENSIONS",    "value": "-1" }
+```
+
 ## Service config (defaults set in `deploy.sh`)
 
 | Setting          | Value                       | Notes |
@@ -53,49 +168,6 @@ What the script does (idempotent — safe to re-run):
 | Health check     | `/health` (FastAPI), `/healthz` (FastMCP) | `/healthz` was added to `searchaas/mcp_server/server.py` because `/mcp` requires an SSE handshake |
 | Container port   | `8000` / `8001`             | Express Mode terminates TLS at the ALB → forwards plain HTTP to the container |
 
-## React UI on S3 (static website hosting, no CloudFront)
-
-```bash
-BUCKET=searchaas-ui-$(aws sts get-caller-identity --query Account --output text)
-REGION=$AWS_REGION
-
-# 1. Build with API + MCP base URLs pointing at the Express Mode URLs
-cd searchaas/ui_react
-VITE_API_URL="https://searchaas-fastapi.ecs.${REGION}.on.aws" \
-VITE_MCP_URL="https://searchaas-fastmcp.ecs.${REGION}.on.aws/mcp" \
-  npm run build
-
-# 2. Create the bucket and enable website hosting
-aws s3api create-bucket --bucket "$BUCKET" --region "$REGION" \
-  $( [ "$REGION" != "us-east-1" ] && echo --create-bucket-configuration LocationConstraint=$REGION )
-
-aws s3api put-public-access-block --bucket "$BUCKET" \
-  --public-access-block-configuration "BlockPublicAcls=false,IgnorePublicAcls=false,BlockPublicPolicy=false,RestrictPublicBuckets=false"
-
-aws s3 website s3://$BUCKET --index-document index.html --error-document index.html
-
-aws s3api put-bucket-policy --bucket "$BUCKET" --policy "{
-  \"Version\": \"2012-10-17\",
-  \"Statement\": [{
-    \"Sid\": \"PublicReadGetObject\",
-    \"Effect\": \"Allow\",
-    \"Principal\": \"*\",
-    \"Action\": \"s3:GetObject\",
-    \"Resource\": \"arn:aws:s3:::$BUCKET/*\"
-  }]
-}"
-
-# 3. Upload
-aws s3 sync dist/ s3://$BUCKET/ --delete
-
-echo "UI URL: http://${BUCKET}.s3-website-${REGION}.amazonaws.com"
-```
-
-> S3 website endpoints are **HTTP-only**. The Express Mode service URLs are
-> **HTTPS-only**. Modern browsers block "active mixed content" — an HTTP page
-> calling HTTPS APIs is fine, the reverse is not. Since the UI is on HTTP and
-> the APIs on HTTPS, you're good.
-
 ## CORS
 
 Both services read `SEARCHAAS_CORS_ORIGINS` (comma-separated list, or `*` for all)
@@ -103,7 +175,7 @@ in addition to the built-in localhost regex. The deploy script defaults to `*`
 during initial setup. To lock it down, re-run with your real origins:
 
 ```bash
-CORS_ORIGINS="http://searchaas-ui-123.s3-website-us-east-1.amazonaws.com,https://app.example.com" \
+CORS_ORIGINS="https://app.example.com,https://ui.example.com" \
 ATLAS_URI="..." \
 ./deployment/aws/ecs/deploy.sh
 ```

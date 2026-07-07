@@ -188,7 +188,7 @@ export default function App() {
             {/* MongoDB official logomark */}
             <img
               className="mdb-leaf"
-              src="https://storage-us-gcs.bfldr.com/6x3q9bsq4nj777n8sbbnp6/v/1069931050/original/MongoDB_Logomark_ForestGreen.png?Expires=1781031805&KeyName=gcs-bfldr-prod&Signature=9v8y6honF7fagYoVDeH1DsUn5dw="
+              src="./src/img/MongoDB_Logomark_ForestGreen.png"
               alt="MongoDB"
             />
             <span className="conn-bar-logo-text">
