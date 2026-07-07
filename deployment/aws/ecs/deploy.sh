@@ -22,9 +22,12 @@ set -euo pipefail
 # Use "*" to allow ALL origins (handy during initial setup).
 : "${CORS_ORIGINS:=*}"
 ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
-REPO=searchaas
 IMAGE_TAG=latest
-IMAGE_URI="${ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/${REPO}:${IMAGE_TAG}"
+# Two separate ECR repos — one per service image.
+FASTAPI_REPO=searchaas-fastapi
+FASTMCP_REPO=searchaas-fastmcp
+FASTAPI_IMAGE_URI="${ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/${FASTAPI_REPO}:${IMAGE_TAG}"
+FASTMCP_IMAGE_URI="${ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/${FASTMCP_REPO}:${IMAGE_TAG}"
 
 EXEC_ROLE_ARN="arn:aws:iam::${ACCOUNT_ID}:role/ecsTaskExecutionRole"
 INFRA_ROLE_ARN="arn:aws:iam::${ACCOUNT_ID}:role/ecsInfrastructureRoleForExpressServices"
@@ -75,24 +78,39 @@ aws iam put-role-policy --role-name searchaas-task-role --policy-name BedrockInv
 }' >/dev/null
 echo "    attached Bedrock policy to searchaas-task-role"
 
-# ── 2. ECR repo + image ───────────────────────────────────────────────────────
-echo "==> Ensuring ECR repo exists..."
-aws ecr describe-repositories --repository-names "$REPO" --region "$AWS_REGION" >/dev/null 2>&1 \
-  || aws ecr create-repository --repository-name "$REPO" --region "$AWS_REGION" >/dev/null
+# ── 2. ECR repos + images (one per service) ──────────────────────────────────
+echo "==> Ensuring ECR repos exist..."
+for repo in "$FASTAPI_REPO" "$FASTMCP_REPO"; do
+  aws ecr describe-repositories --repository-names "$repo" --region "$AWS_REGION" >/dev/null 2>&1 \
+    || aws ecr create-repository --repository-name "$repo" --region "$AWS_REGION" >/dev/null
+  echo "    repo $repo ready"
+done
 
 echo "==> Logging in to ECR..."
 aws ecr get-login-password --region "$AWS_REGION" \
   | docker login --username AWS --password-stdin "${ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com"
 
-echo "==> Building image for linux/amd64 (ECS Fargate runs x86_64 by default)..."
 # buildx + --push uploads the correctly-platformed image in one shot,
 # avoiding the local Docker daemon trying to load a cross-arch image.
+REPO_ROOT="$(cd "$SCRIPT_DIR/../../.." && pwd)"
+
+echo "==> Building FastAPI image for linux/amd64 -> $FASTAPI_REPO ..."
 docker buildx build \
   --platform linux/amd64 \
   --provenance=false \
-  -t "$IMAGE_URI" \
+  -f "$SCRIPT_DIR/../Dockerfile.fastapi" \
+  -t "$FASTAPI_IMAGE_URI" \
   --push \
-  "$(cd "$SCRIPT_DIR/../.." && pwd)"
+  "$REPO_ROOT"
+
+echo "==> Building FastMCP image for linux/amd64 -> $FASTMCP_REPO ..."
+docker buildx build \
+  --platform linux/amd64 \
+  --provenance=false \
+  -f "$SCRIPT_DIR/../Dockerfile.fastmcp" \
+  -t "$FASTMCP_IMAGE_URI" \
+  --push \
+  "$REPO_ROOT"
 
 # ── 3. Build --primary-container JSON payloads with placeholders filled in ───
 echo "==> Rendering primary-container payloads..."
@@ -129,7 +147,8 @@ create_or_update_service() {
       --memory 4096 \
       --health-check-path "$health_path" \
       --scaling-target '{"minTaskCount":1,"maxTaskCount":3}' \
-      --monitor-resources
+      --monitor-resources DEPLOYMENT \
+      --monitor-mode TEXT-ONLY
   else
     echo "==> Updating existing Express Mode service: $name ($arn)"
     aws ecs update-express-gateway-service \
@@ -138,7 +157,8 @@ create_or_update_service() {
       --task-role-arn "$TASK_ROLE_ARN" \
       --execution-role-arn "$EXEC_ROLE_ARN" \
       --primary-container "file://${container_json}" \
-      --monitor-resources
+      --monitor-resources DEPLOYMENT \
+      --monitor-mode TEXT-ONLY
   fi
 }
 

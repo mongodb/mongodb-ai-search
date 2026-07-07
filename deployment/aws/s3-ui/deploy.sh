@@ -1,0 +1,187 @@
+#!/usr/bin/env bash
+# -----------------------------------------------------------------------------
+# Deploy the SearchaaS React UI (searchaas/ui_react) to an EXISTING S3 bucket
+# configured for static website hosting.
+#
+# This script does NOT create a bucket. You must supply an existing bucket name
+# (the script prompts for one if you don't pass --bucket / set S3_BUCKET).
+#
+# What it does:
+#   1. Resolves the target bucket (arg / env / interactive prompt) and verifies
+#      it exists and is reachable.
+#   2. Builds the Vite React app (searchaas/ui_react).
+#   3. Generates a runtime config.js so the SPA talks to your deployed backend
+#      URLs (FastAPI + FastMCP) WITHOUT rebuilding — matches the mechanism in
+#      searchaas/ui_react/public/config.js (window.__SEARCHAAS_CONFIG__).
+#   4. Enables static website hosting on the bucket (index + SPA fallback).
+#   5. Syncs dist/ to the bucket, with long cache on hashed assets and
+#      no-cache on index.html / config.js.
+#   6. Prints the S3 website endpoint URL.
+#
+# Prereqs:
+#   - AWS CLI v2 configured (`aws configure`)
+#   - Node.js + npm (to build the UI)
+#
+# Usage:
+#   ./deployment/aws/s3-ui/deploy.sh --bucket my-existing-bucket \
+#       --api-url  https://searchaas-fastapi.ecs.us-east-1.on.aws \
+#       --mcp-url  https://searchaas-fastmcp.ecs.us-east-1.on.aws/mcp
+#
+#   # or interactively (it will prompt for the bucket):
+#   ./deployment/aws/s3-ui/deploy.sh
+# -----------------------------------------------------------------------------
+set -euo pipefail
+
+# ── Defaults / inputs ─────────────────────────────────────────────────────────
+: "${AWS_REGION:=us-east-1}"
+S3_BUCKET="${S3_BUCKET:-}"
+API_URL="${VITE_API_URL:-${API_URL:-}}"
+MCP_URL="${VITE_MCP_URL:-${MCP_URL:-}}"
+MCP_API_KEY="${MCP_API_KEY:-}"
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/../../.." && pwd)"
+UI_DIR="$REPO_ROOT/searchaas/ui_react"
+
+# ── Parse flags ───────────────────────────────────────────────────────────────
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --bucket)      S3_BUCKET="$2"; shift 2 ;;
+    --region)      AWS_REGION="$2"; shift 2 ;;
+    --api-url)     API_URL="$2"; shift 2 ;;
+    --mcp-url)     MCP_URL="$2"; shift 2 ;;
+    --mcp-api-key) MCP_API_KEY="$2"; shift 2 ;;
+    -h|--help)
+      grep '^#' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    *) echo "Unknown argument: $1" >&2; exit 1 ;;
+  esac
+done
+
+# ── 1. Resolve the bucket (never create one) ──────────────────────────────────
+if [[ -z "$S3_BUCKET" ]]; then
+  echo "No bucket supplied via --bucket / \$S3_BUCKET."
+  read -r -p "Enter the name of an EXISTING S3 bucket to deploy the UI into: " S3_BUCKET
+fi
+
+if [[ -z "$S3_BUCKET" ]]; then
+  echo "ERROR: an S3 bucket name is required. Aborting." >&2
+  exit 1
+fi
+
+echo "==> Verifying bucket '$S3_BUCKET' exists and is accessible..."
+if ! aws s3api head-bucket --bucket "$S3_BUCKET" 2>/dev/null; then
+  cat >&2 <<EOF
+ERROR: cannot access bucket '$S3_BUCKET'.
+  - It may not exist (this script will NOT create it, by design).
+  - Or your credentials lack permission, or it is in another account/region.
+
+Create the bucket yourself first, e.g.:
+  aws s3api create-bucket --bucket "$S3_BUCKET" --region "$AWS_REGION" \\
+    \$( [ "$AWS_REGION" != "us-east-1" ] && echo --create-bucket-configuration LocationConstraint=$AWS_REGION )
+
+Then re-run this script.
+EOF
+  exit 1
+fi
+
+# Detect the bucket's real region (website endpoint hostname depends on it).
+BUCKET_REGION=$(aws s3api get-bucket-location --bucket "$S3_BUCKET" \
+  --query 'LocationConstraint' --output text 2>/dev/null || echo "None")
+# us-east-1 reports as 'None'/null in the LocationConstraint field.
+if [[ "$BUCKET_REGION" == "None" || "$BUCKET_REGION" == "null" || -z "$BUCKET_REGION" ]]; then
+  BUCKET_REGION="us-east-1"
+fi
+echo "    bucket region: $BUCKET_REGION"
+
+# ── 2. Prompt for backend URLs if not provided ────────────────────────────────
+if [[ -z "$API_URL" ]]; then
+  read -r -p "FastAPI base URL (e.g. https://searchaas-fastapi.ecs.${AWS_REGION}.on.aws) [blank = localhost default]: " API_URL
+fi
+if [[ -z "$MCP_URL" ]]; then
+  read -r -p "FastMCP URL (e.g. https://searchaas-fastmcp.ecs.${AWS_REGION}.on.aws/mcp) [blank = localhost default]: " MCP_URL
+fi
+
+# ── 3. Build the React app ────────────────────────────────────────────────────
+echo "==> Building UI in $UI_DIR ..."
+cd "$UI_DIR"
+if [[ ! -d node_modules ]]; then
+  echo "    installing npm dependencies..."
+  npm ci 2>/dev/null || npm install
+fi
+npm run build
+
+DIST_DIR="$UI_DIR/dist"
+[[ -d "$DIST_DIR" ]] || { echo "ERROR: build did not produce $DIST_DIR" >&2; exit 1; }
+
+# ── 4. Generate runtime config.js (backend URLs, no rebuild required) ─────────
+# Mirrors public/config.js: window.__SEARCHAAS_CONFIG__ is read by App.tsx.
+echo "==> Writing runtime config.js with backend URLs..."
+json_or_null() { [[ -z "$1" ]] && echo "null" || printf '"%s"' "$1"; }
+cat > "$DIST_DIR/config.js" <<EOF
+// Generated by deployment/aws/s3-ui/deploy.sh — runtime backend configuration.
+window.__SEARCHAAS_CONFIG__ = {
+  FASTAPI_URL: $(json_or_null "$API_URL"),
+  MCP_URL: $(json_or_null "$MCP_URL"),
+  MCP_API_KEY: $(json_or_null "$MCP_API_KEY")
+};
+EOF
+echo "    FASTAPI_URL = ${API_URL:-<localhost default>}"
+echo "    MCP_URL     = ${MCP_URL:-<localhost default>}"
+
+# ── 5. Enable static website hosting (index + SPA fallback to index.html) ─────
+echo "==> Enabling static website hosting on $S3_BUCKET ..."
+aws s3 website "s3://$S3_BUCKET" \
+  --index-document index.html \
+  --error-document index.html
+
+# ── 6. Sync to S3 ─────────────────────────────────────────────────────────────
+echo "==> Uploading hashed assets (long cache)..."
+# Everything except the two files that must never be cached.
+aws s3 sync "$DIST_DIR" "s3://$S3_BUCKET/" \
+  --region "$BUCKET_REGION" \
+  --delete \
+  --exclude "index.html" \
+  --exclude "config.js" \
+  --cache-control "public,max-age=31536000,immutable"
+
+echo "==> Uploading index.html + config.js (no cache)..."
+aws s3 cp "$DIST_DIR/index.html" "s3://$S3_BUCKET/index.html" \
+  --region "$BUCKET_REGION" \
+  --cache-control "no-cache,no-store,must-revalidate" \
+  --content-type "text/html"
+aws s3 cp "$DIST_DIR/config.js" "s3://$S3_BUCKET/config.js" \
+  --region "$BUCKET_REGION" \
+  --cache-control "no-cache,no-store,must-revalidate" \
+  --content-type "application/javascript"
+
+# ── 7. Report the website URL ─────────────────────────────────────────────────
+if [[ "$BUCKET_REGION" == "us-east-1" ]]; then
+  WEBSITE_URL="http://${S3_BUCKET}.s3-website-us-east-1.amazonaws.com"
+else
+  WEBSITE_URL="http://${S3_BUCKET}.s3-website.${BUCKET_REGION}.amazonaws.com"
+fi
+
+echo ""
+echo "==> Done. UI deployed to:"
+echo "    $WEBSITE_URL"
+echo ""
+cat <<EOF
+Notes:
+  - S3 website endpoints are HTTP-only. Your backend URLs must be HTTPS
+    (the ECS Express Mode URLs already are) so the browser allows the calls.
+  - The bucket must permit public reads for the website to load. If objects
+    return 403, attach a public-read bucket policy, e.g.:
+
+      aws s3api put-public-access-block --bucket "$S3_BUCKET" \\
+        --public-access-block-configuration \\
+        "BlockPublicAcls=false,IgnorePublicAcls=false,BlockPublicPolicy=false,RestrictPublicBuckets=false"
+
+      aws s3api put-bucket-policy --bucket "$S3_BUCKET" --policy '{
+        "Version":"2012-10-17",
+        "Statement":[{"Sid":"PublicReadGetObject","Effect":"Allow",
+          "Principal":"*","Action":"s3:GetObject",
+          "Resource":"arn:aws:s3:::$S3_BUCKET/*"}]}'
+
+  - To point the UI at different backend URLs later WITHOUT rebuilding, just
+    re-run with new --api-url / --mcp-url (only config.js changes).
+EOF

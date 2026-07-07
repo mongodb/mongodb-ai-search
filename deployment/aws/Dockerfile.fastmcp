@@ -1,0 +1,69 @@
+# =============================================================================
+# SearchaaS — FastMCP (streamable-http) image for AWS ECS Express Mode
+#
+# Purpose-built image that serves ONLY the FastMCP surface:
+#   python -m searchaas.mcp_server.server            (port 8001)
+#
+# Pushed to ECR repo: searchaas-fastmcp
+# (FastAPI has its own image/repo — see Dockerfile.fastapi / searchaas-fastapi.)
+#
+# Build context is the REPOSITORY ROOT (deploy.sh runs
+# `docker buildx build -f deployment/aws/Dockerfile.fastmcp <repo-root>`).
+#
+# Platform note: build with `--platform linux/amd64` for ECS Fargate (x86_64).
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# Stage 1 — builder: install Python dependencies into an isolated prefix
+# -----------------------------------------------------------------------------
+FROM python:3.11-slim AS builder
+
+WORKDIR /build
+
+# Compilers for native extensions (pymongo C ext, numpy, etc.)
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        build-essential \
+        curl \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY requirements.txt .
+RUN pip install --upgrade pip \
+ && pip install \
+        --prefix=/install \
+        --no-cache-dir \
+        --no-warn-script-location \
+        -r requirements.txt
+
+# -----------------------------------------------------------------------------
+# Stage 2 — runtime: minimal image with no build tools
+# -----------------------------------------------------------------------------
+FROM python:3.11-slim AS runtime
+
+# curl is used by ECS/ALB container health probes if needed
+RUN apt-get update && apt-get install -y --no-install-recommends curl \
+    && rm -rf /var/lib/apt/lists/*
+
+# Carry installed packages over from the builder stage
+COPY --from=builder /install /usr/local
+
+WORKDIR /app
+
+# Copy only the application package (config yaml lives in searchaas/config/)
+COPY searchaas/ ./searchaas/
+
+# ── Runtime environment ──────────────────────────────────────────────────────
+# Safe non-secret defaults. Secrets (ATLAS_URI, provider keys) are injected at
+# runtime by the ECS task definition — never baked into the image.
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONPATH=/app \
+    SEARCHAAS_CONFIG=/app/searchaas/config/searchaas.yaml
+
+# FastMCP streamable-http surface.
+EXPOSE 8001
+
+# Least-privilege: run as a non-root user
+RUN useradd --no-create-home --shell /bin/false appuser
+USER appuser
+
+CMD ["python", "-m", "searchaas.mcp_server.server"]

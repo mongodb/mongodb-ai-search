@@ -22,3 +22,5 @@ __pycache__/
 
 # OS
 .DS_Store
+graphify-out/
+AWS_DEPLOYMENT.md

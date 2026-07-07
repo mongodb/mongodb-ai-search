@@ -1,5 +1,5 @@
 {
-  "image": "<ACCOUNT_ID>.dkr.ecr.<REGION>.amazonaws.com/searchaas:latest",
+  "image": "<ACCOUNT_ID>.dkr.ecr.<REGION>.amazonaws.com/searchaas-fastapi:latest",
   "containerPort": 8000,
   "command": [
     "uvicorn",
@@ -13,6 +13,9 @@
     { "name": "SEARCHAAS_CONFIG", "value": "/app/searchaas/config/searchaas.yaml" },
     { "name": "ATLAS_URI", "value": "<ATLAS_URI>" },
     { "name": "ATLAS_DB", "value": "<ATLAS_DB>" },
-    { "name": "SEARCHAAS_CORS_ORIGINS", "value": "<CORS_ORIGINS>" }
+    { "name": "SEARCHAAS_CORS_ORIGINS", "value": "<CORS_ORIGINS>" },
+    { "name": "EMBEDDINGS_PROVIDER", "value": "bedrock_titan" },
+    { "name": "EMBEDDINGS_MODEL_ID", "value": "amazon.titan-embed-text-v2:0" },
+    { "name": "BEDROCK_REGION_NAME", "value": "us-east-1" }
   ]
 }
