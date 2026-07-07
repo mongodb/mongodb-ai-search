@@ -1,27 +1,39 @@
 # SearchaaS — Phase 1
 
 MongoDB Atlas-backed retrieval platform built around the **Factory pattern**.
-Phase 1 ships: query understanding, AI-driven retrieval planning, vector /
-full-text / hybrid / graph / parent-doc retrieval, YAML configuration, a
-FastAPI REST surface, a FastMCP tool surface, and a React testing UI.
+Phase 1 ships: query understanding (rewriting, entity & typed-fact extraction,
+intent), AI-driven retrieval planning with Atlas-managed guardrails, six
+retrieval strategies (vector / full-text / hybrid / graph / parent-doc /
+metadata), YAML-driven configuration, a FastAPI REST surface, a FastMCP tool
+surface, real aggregation-pipeline capture, and a React testing UI.
 
-See `Instructions.md` for the full architecture.
+Every concern is swappable through YAML — switching embeddings, LLMs, indexes,
+or retrieval strategy is a config change, not a code change.
+
+See `docs/Instructions.md` for the full architecture and Phase 2 roadmap.
 
 ## Layout
 
 ```
 searchaas/
-  config/             # YAML config + loader (single source of truth)
-  infrastructure/     # AtlasFactory (Mongo client / db / collections)
-  domain/             # Pydantic models (Chunk, SourceRef)
-  embeddings/         # EmbeddingFactory (Gemini, Bedrock Titan, OpenAI, ...)
-  llm/                # LLMFactory (Gemini, Azure/OpenAI, Anthropic, Bedrock)
-  query_understanding/# Query rewriting, entity & metadata extraction, intent
-  planning/           # RetrievalPlanner + Atlas-managed PolicyStore
-  retrieval/          # RetrieverFactory (vector/fulltext/hybrid/graph/parent_doc)
-  app/                # build_container() — wires every factory from AppConfig
-  api/                # FastAPI surface
-  mcp_server/         # FastMCP surface
+  config/              # YAML config + loader (single source of truth; ${VAR:-default} expansion)
+  infrastructure/      # AtlasFactory (Mongo client / db / collections, ping, stats)
+  domain/              # Pydantic models (Chunk, SourceRef)
+  embeddings/          # EmbeddingFactory (auto/AutoEmbeddings, Voyage, OpenAI, Gemini, Titan, Cohere, ...)
+  llm/                 # LLMFactory (Gemini, Azure/OpenAI, Anthropic, Bedrock)
+  query_understanding/ # QueryUnderstandingLayer + FactStore (rewrite, entities, typed facts, sort, intent)
+  planning/            # RetrievalPlanner + Atlas-managed PolicyStore
+  retrieval/           # RetrieverFactory (vector/fulltext/hybrid/graph/parent_doc/metadata)
+  observability/       # structured logging + pipeline_capture (real Atlas aggregation capture)
+  facts.py             # query-fact routing → Atlas pre-filters vs in-memory post-filters
+  filtering.py         # filter allowlist sanitization (drops non-indexable paths)
+  utils.py             # shared serialization / summarization helpers
+  diagnose.py          # `python -m searchaas.diagnose` self-check CLI
+  app/                 # Container / bootstrap — wires every factory from AppConfig
+  api/                 # FastAPI surface
+  mcp_server/          # FastMCP surface
+  ui_react/            # React + Vite retrieval-testing UI
+  tests/               # pytest suite
 ```
 
 ## Setup
@@ -29,12 +41,31 @@ searchaas/
 ```bash
 python -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
-cp .env.example .env         # fill in ATLAS_URI, GOOGLE_API_KEY, ...
+cp .env.example .env         # fill in ATLAS_URI, provider keys, ...
 ```
 
-Edit `searchaas/config/searchaas.yaml` to pick providers/models. By default
-this build uses **Gemini** for both embeddings and the planner LLM; flip to
-`bedrock_titan` to use Amazon Titan embeddings.
+Edit `searchaas/config/searchaas.yaml` to pick providers/models/indexes. The
+default build runs **server-side AutoEmbeddings** (Atlas embeds the query and
+document text internally, `embeddings.provider: auto`, `voyage-4` model) with
+**Gemini** as the planner LLM. Every value is `${VAR:-default}`-driven, so you
+can retune collections, indexes, dimensions, providers, models, and strategy
+via environment variables — no image rebuild required.
+
+Two embedding modes are supported and cross-validated at startup:
+
+- **Mode B — AutoEmbeddings (active default):** `provider: auto`,
+  `embedding_key: null`, `dimensions: -1`; requires an `autoEmbed` Atlas index.
+- **Mode A — client-side embeddings:** e.g. `provider: voyageai`, with
+  `embedding_key`/`dimensions`/`relevance_score_fn` matching a `vector` index.
+
+The bootstrap layer (`searchaas/app/bootstrap.py`) refuses to start on a
+provider↔index-type mismatch.
+
+**Supported providers**
+
+- Embeddings: `auto`, `azure_openai`, `openai`, `voyageai`, `voyage_multimodal`,
+  `cohere`, `huggingface`, `gemini`, `bedrock_titan`.
+- Planner LLM: `gemini`, `azure_openai`, `openai`, `anthropic`, `bedrock`.
 
 ## Run
 
@@ -45,7 +76,76 @@ uvicorn searchaas.api.app:app --host 0.0.0.0 --port 8000
 # FastMCP server
 python -m searchaas.mcp_server.server
 
+# React UI (from searchaas/ui_react)
+npm install && npm run dev
+
+# Self-check (Atlas ping, collection stats, embedder probe)
+python -m searchaas.diagnose
 ```
+
+## REST API
+
+FastAPI surface (`searchaas/api/app.py`). Every `/retrieve*` response includes
+the chosen `strategy`, the `plan`, `results`, the `understood_query`, an LLM
+`summary`, per-stage `timings`, and the **real captured Atlas aggregation
+`pipeline`** that produced the results.
+
+| Method | Path | Description |
+|---|---|---|
+| `GET` | `/health` | Liveness; reports embeddings/LLM providers and default strategy |
+| `GET` | `/settings` | Full active config (secrets redacted) — lets the UI reflect live state |
+| `POST` | `/settings` | Apply config changes from the UI and rebuild the container |
+| `GET` | `/diagnose` | Full self-check: Atlas ping, collection stats, embedder probe |
+| `POST` | `/diagnose/vector` | Instrumented per-stage vector-search report |
+| `POST` | `/retrieve/vector` | Fixed vector (`$vectorSearch` ANN) strategy |
+| `POST` | `/retrieve/fulltext` | Fixed full-text (`$search`) strategy |
+| `POST` | `/retrieve/hybrid` | Fixed hybrid — native `$rankFusion` (MongoDB 8.0+) |
+| `POST` | `/retrieve/graph` | Fixed GraphRAG (`$graphLookup`) strategy |
+| `POST` | `/retrieve/parent-doc` | Fixed parent-document strategy |
+| `POST` | `/retrieve/metadata` | Structured `$match`/`$sort`/`$limit` (rankings, superlatives, exact lookups) |
+| `POST` | `/retrieve` | Auto mode: understand → plan → retrieve → summarize |
+| `POST` | `/query` | Alias for `/retrieve` |
+
+Request body (`RetrieveRequest`): `query`, `top_k` (1–100), optional `filters`,
+and optional per-request `atlas` / `retrieval` overrides.
+
+## Retrieval strategies
+
+`RetrieverFactory` (`searchaas/retrieval/factory.py`) dispatches on the plan's
+strategy:
+
+| Strategy | What it does |
+|---|---|
+| `vector` | `$vectorSearch` ANN with pre-filters and candidate oversampling |
+| `fulltext` | Lexical `$search` on the text field |
+| `hybrid` | Native **`$rankFusion`** fusing vector + full-text server-side (MongoDB 8.0+) |
+| `graph` | Multi-hop `$graphLookup` traversal over `entities` (GraphRAG) |
+| `parent_doc` | Child-chunk match returning the parent document |
+| `metadata` | Pure-MQL `$match` → `$sort` → `$limit` for non-semantic / superlative / ordering queries — no vector or text search |
+
+The **metadata** stage answers questions like "top-rated movies since 2015" or
+exact-value lookups entirely with structured aggregation. Query understanding
+routes to it when intent is `ordering`/`lookup` and a sort or metadata filter is
+present; a `$type: "number"` guard keeps empty/missing values from sorting ahead
+of real numbers.
+
+## Query understanding & planning
+
+- **QueryUnderstandingLayer** (`query_understanding/layer.py`) — one LLM call
+  yields rewrite, entities, typed `facts` (`{field, op, value}`), a validated
+  Mongo `sort`, a `limit`, and an `intent`. Typed facts are canonicalized to
+  indexed paths and split into fast Atlas **pre-filters** vs in-memory
+  **post-filters** (`facts.py`). L1 in-process cache + L2 persistent
+  **FactStore** (`query_facts` collection, audit log).
+- **RetrievalPlanner** (`planning/engine.py`) — proposes a draft plan, merges
+  understood-query metadata/sort/limit, forces `metadata` for structured intent,
+  then clamps via the PolicyStore.
+- **PolicyStore** (`planning/policy.py`) — Atlas-managed guardrails
+  (`retrieval_policies` collection): clamps strategy to an allowlist, `top_k` to
+  a min/max, and applies a metadata whitelist to filters.
+- **Pipeline capture** (`observability/pipeline_capture.py`) — a pymongo command
+  listener records the actual `aggregate` pipeline executed for each retrieval
+  (query vectors summarized); surfaced in the API `pipeline` field and the UI.
 
 ## Testing the MCP Server (cURL / Postman)
 
@@ -133,7 +233,7 @@ curl -N -X POST http://localhost:8001/mcp \
 ```
 
 You should see: `vector_search`, `fulltext_search`, `hybrid_search`,
-`graph_search`, `parent_doc_search`, `auto_search`.
+`graph_search`, `parent_doc_search`, `metadata_search`, `auto_search`.
 
 ### 3. Call a tool
 
@@ -156,18 +256,20 @@ curl -N -X POST http://localhost:8001/mcp \
   }'
 ```
 
-Other tools accept the same shape:
+Every tool shares the same argument signature:
 
 ```json
 { "name": "vector_search",     "arguments": { "query": "...", "top_k": 10 } }
 { "name": "fulltext_search",   "arguments": { "query": "...", "top_k": 10 } }
 { "name": "graph_search",      "arguments": { "query": "...", "top_k": 10 } }
 { "name": "parent_doc_search", "arguments": { "query": "...", "top_k": 10 } }
+{ "name": "metadata_search",   "arguments": { "query": "...", "top_k": 10 } }
 { "name": "auto_search",       "arguments": { "query": "...", "top_k": 10 } }
 ```
 
-Optional `filters` (a dict) may be passed in `arguments` to constrain
-metadata, e.g. `"filters": {"source": "docs"}`.
+Each tool also accepts optional `filters` (dict), `atlas` (per-request Atlas
+overrides), and `retrieval` (per-request retrieval overrides). For example,
+`"filters": {"source": "docs"}` constrains results by metadata.
 
 ### Using Postman
 
@@ -199,56 +301,182 @@ curl -i http://localhost:8001/mcp \
 ```
 
 A `405` or `400` response (rather than connection refused) confirms the
-server is up; MCP requires `POST` with a valid JSON-RPC body.
+server is up; MCP requires `POST` with a valid JSON-RPC body. A plain
+`GET /healthz` route is also exposed for load-balancer health checks.
+
+## React testing UI
+
+`searchaas/ui_react` is a Vite + TypeScript + React playground for both
+backends. It shows conversation turns, per-turn results, the LLM summary, an
+understood-query intent panel (rewrite, entities, filters, chosen strategy),
+latency timings, and the real captured MongoDB aggregation pipeline. Backend
+URLs are injected at runtime via `public/config.js` (so one build points at any
+backend), falling back to `http://localhost:8000` and
+`http://localhost:8001/mcp`.
+
+```bash
+cd searchaas/ui_react
+npm install
+npm run dev        # dev server
+npm run build      # production build → dist/
+```
 
 ## End-to-end flow
 
-```
-YAML  ->  AppConfig
-          |
-          +-- AtlasFactory  ---> collection
-          +-- EmbeddingFactory ---> Embeddings
-          +-- LLMFactory       ---> ChatModel
-          |
-          +-- MongoDBAtlasVectorSearch(collection, embeddings, ...)
-          |
-          +-- QueryUnderstandingLayer(llm)
-          +-- RetrievalPlanner(llm, PolicyStore)
-          +-- RetrieverFactory(vector_store, llm, collection, ...)
-          |
-          v
-FastAPI  /  FastMCP  /  React UI
+```mermaid
+flowchart TD
+    YAML["searchaas.yaml"] --> AppConfig["AppConfig (loader)"]
+    AppConfig --> AtlasFactory["AtlasFactory"]
+    AppConfig --> EmbeddingFactory["EmbeddingFactory"]
+    AppConfig --> LLMFactory["LLMFactory"]
+
+    AtlasFactory --> Collection[("Atlas collection")]
+    EmbeddingFactory --> Embeddings["Embeddings"]
+    LLMFactory --> ChatModel["ChatModel"]
+
+    Collection --> VectorStore["MongoDBAtlasVectorSearch"]
+    Embeddings --> VectorStore
+
+    ChatModel --> QUL["QueryUnderstandingLayer + FactStore"]
+    ChatModel --> Planner["RetrievalPlanner + PolicyStore"]
+    VectorStore --> RetrieverFactory["RetrieverFactory"]
+    Collection --> RetrieverFactory
+    ChatModel --> RetrieverFactory
+
+    QUL --> Surfaces
+    Planner --> Surfaces
+    RetrieverFactory --> Surfaces
+
+    subgraph Surfaces["Surfaces"]
+        FastAPI["FastAPI"]
+        FastMCP["FastMCP"]
+        UI["React UI"]
+    end
+
+    Surfaces -.->|real pipeline capture| Pipeline["Captured Atlas aggregation"]
 ```
 
-Every concern is swappable through YAML — no code changes required to
-switch embeddings, LLMs, or retrieval strategy.
+**Components**
+
+- **searchaas.yaml** — The single source of truth for providers, models,
+  indexes, and runtime options. Every value is `${VAR:-default}`-driven so the
+  deployment can be retuned via environment variables without a rebuild.
+- **AppConfig (loader)** — Parses the YAML, expands environment variables, and
+  produces the validated Pydantic config that wires the entire container.
+- **AtlasFactory** — Builds the MongoDB client, database, and collection
+  handles from the Atlas config, and exposes health/stats helpers.
+- **EmbeddingFactory** — Constructs the query-embedding provider (auto /
+  AutoEmbeddings, Voyage, OpenAI, Gemini, Titan, ...) selected in config.
+- **LLMFactory** — Constructs the chat model (Gemini, OpenAI, Anthropic,
+  Bedrock, ...) used by query understanding and planning.
+- **Atlas collection** — The MongoDB collection holding the documents/chunks
+  and their vector/search indexes that every retriever queries.
+- **Embeddings** — The concrete embedder that turns a query into a vector (or
+  defers to server-side AutoEmbeddings in auto mode).
+- **ChatModel** — The concrete LLM instance shared by the understanding and
+  planning layers for reasoning over the query.
+- **MongoDBAtlasVectorSearch** — The LangChain vector store binding the
+  collection and embeddings together for `$vectorSearch` retrieval.
+- **QueryUnderstandingLayer + FactStore** — Rewrites the query and extracts
+  entities, typed facts, sort, limit, and intent; the FactStore caches and
+  audits those results in the `query_facts` collection.
+- **RetrievalPlanner + PolicyStore** — Chooses the retrieval strategy and
+  parameters from the understood query, then clamps the plan against
+  Atlas-managed guardrails (allowed strategies, top_k bounds, filter whitelist).
+- **RetrieverFactory** — Instantiates the chosen retriever
+  (vector / fulltext / hybrid / graph / parent_doc / metadata) and runs it
+  against the vector store and collection.
+- **Surfaces (FastAPI / FastMCP / React UI)** — The REST API, MCP tool server,
+  and testing UI that expose retrieval to clients; all share the same wired
+  container.
+- **Captured Atlas aggregation** — The observability layer records the real
+  aggregation pipeline each retrieval executed and returns it in responses for
+  transparency and debugging.
 
 ---
 
-## Deploy to Google Cloud Run
+## Deployment
 
-All deployment files live under `deployment/`. Two options are available.
+Deployment artifacts live under `deployment/`. Three cloud targets are
+available; each folder has its own README/guide with full details, config
+knobs, and teardown.
 
-### Prerequisites
+| Target | Folder | Guide |
+|---|---|---|
+| **AWS** | `deployment/aws/` | `deployment/aws/README.md` |
+| **Azure** | `deployment/azure/` | `deployment/azure/DEPLOYMENT.md` |
+| **Google Cloud Run** | `deployment/google/` | see below |
 
-- [gcloud CLI](https://cloud.google.com/sdk/docs/install) installed and authenticated (`gcloud auth login`)
-- Docker installed and running
-- A GCP project with billing enabled
-- A populated `.env` file (`cp .env.example .env` then fill in secrets)
+### AWS
 
----
+Three independent pieces:
 
-### Option A — Single service (recommended)
+| # | What | Where it runs | Script | Default? |
+|---|---|---|---|---|
+| 1 | React UI | S3 static website (existing bucket) | `s3-ui/deploy.sh` | yes |
+| 2 | FastAPI + FastMCP backends | ECS **Express Mode** | `ecs/deploy.sh` | **yes** |
+| 3 | FastMCP backend (alternative) | Bedrock **AgentCore Runtime** | `agentcore/deploy.sh` | no — opt-in |
 
-One image, one Cloud Run URL. nginx serves the React SPA and proxies all API
-and MCP traffic to internal backends — no CORS configuration needed.
+```bash
+export AWS_REGION=us-east-1
+export ATLAS_URI='mongodb+srv://USER:PASS@cluster.mongodb.net/?retryWrites=true'
+export ATLAS_DB='your_database_name'
+
+# 1. Deploy the backends (default: ECS Express Mode). Prints two HTTPS URLs.
+./deployment/aws/ecs/deploy.sh
+
+# 2. Deploy the UI to your existing S3 bucket, pointing at those URLs.
+./deployment/aws/s3-ui/deploy.sh \
+  --bucket my-existing-ui-bucket \
+  --api-url "https://searchaas-fastapi.ecs.${AWS_REGION}.on.aws" \
+  --mcp-url "https://searchaas-fastmcp.ecs.${AWS_REGION}.on.aws/mcp"
+
+# Optional: FastMCP on Bedrock AgentCore (requires typed confirmation)
+./deployment/aws/agentcore/deploy.sh
+```
+
+### Azure
+
+Deploys the three surfaces to **Azure Container Apps** and wires the MCP
+endpoint into an **AI Foundry** agent. Infrastructure (resource group, ACR, Log
+Analytics, Container Apps Environment, managed identity, three Container Apps) is
+provisioned by subscription-scope Bicep with a readiness gate.
+
+```bash
+# 1. Create resource group + ACR
+az deployment sub create --name searchaas-acr --location centralindia \
+  --template-file deployment/azure/infra/acr.bicep \
+  --parameters deployment/azure/infra/main.parameters.json
+ACR_NAME=$(az deployment sub show -n searchaas-acr --query properties.outputs.acrName.value -o tsv)
+
+# 2. Build & push all three images (server-side in ACR)
+./deployment/azure/scripts/build-and-push.sh "$ACR_NAME" latest
+
+# 3. Deploy infra + Container Apps
+az deployment sub create --name searchaas --location centralindia \
+  --template-file deployment/azure/infra/main.bicep \
+  --parameters deployment/azure/infra/main.parameters.json \
+  --parameters atlasUri="$ATLAS_URI" voyageApiKey="$VOYAGE_API_KEY" \
+      openaiApiKey="$OPENAI_API_KEY" mcpApiKey="$MCP_API_KEY"
+```
+
+The MCP endpoint is Bearer-gated (`MCP_API_KEY`). See
+`deployment/azure/DEPLOYMENT.md` for the full guide, config overrides, and AI
+Foundry agent setup.
+
+### Google Cloud Run
+
+**Prerequisites:** [gcloud CLI](https://cloud.google.com/sdk/docs/install)
+authenticated, Docker running, a GCP project with billing, and a populated
+`.env`.
+
+**Option A — Single service (recommended).** One image, one URL; nginx serves
+the React SPA and proxies API/MCP traffic to internal backends (no CORS config).
 
 ```bash
 chmod +x deployment/google/deploy-combined.sh
 ./deployment/google/deploy-combined.sh --project <PROJECT_ID> --region <REGION>
 ```
-
-**What it deploys:**
 
 | Endpoint | Description |
 |---|---|
@@ -256,28 +484,13 @@ chmod +x deployment/google/deploy-combined.sh
 | `/retrieve`, `/health`, `/diagnose`, `/docs` | FastAPI REST |
 | `/mcp` | FastMCP (JSON-RPC over SSE) |
 
-**Files used:**
-
-| File | Purpose |
-|---|---|
-| `deployment/google/deploy-combined.sh` | Build, push, and deploy the combined image |
-| `deployment/google/Dockerfile.combined` | 3-stage build: Node (Vite) → Python (pip) → nginx+Python runtime |
-| `deployment/google/nginx-combined.conf` | nginx reverse-proxy config for SPA + backends |
-| `deployment/google/docker-entrypoint-combined.sh` | Starts backends, waits for `/health`, then starts nginx |
-
----
-
-### Option B — Separate services
-
-Three independent Cloud Run services — useful when you want to scale the API
-and MCP server independently from the frontend.
+**Option B — Separate services.** Three independent Cloud Run services, useful
+to scale the API and MCP independently from the frontend.
 
 ```bash
 chmod +x deployment/google/deploy.sh
 ./deployment/google/deploy.sh --project <PROJECT_ID> --region <REGION>
 ```
-
-**What it deploys:**
 
 | Cloud Run service | URL path | Description |
 |---|---|---|
@@ -285,18 +498,7 @@ chmod +x deployment/google/deploy.sh
 | `searchaas-mcp` | `/mcp` | FastMCP server |
 | `searchaas-frontend` | `/` | React SPA (pre-configured with backend URLs) |
 
-**Files used:**
-
-| File | Purpose |
-|---|---|
-| `deployment/google/deploy.sh` | Build, push, and deploy all three services |
-| `deployment/google/Dockerfile.api` | FastAPI REST server image |
-| `deployment/google/Dockerfile` | FastMCP server image |
-| `deployment/google/Dockerfile.frontend` | React SPA via nginx |
-| `deployment/google/nginx.conf` | nginx config with SPA routing and asset caching |
-| `deployment/google/docker-entrypoint-frontend.sh` | Injects backend URLs into `/config.js` at startup |
-
-**Updating the frontend backend URLs after deploy:**
+**Update frontend backend URLs after deploy:**
 
 ```bash
 gcloud run services update searchaas-frontend \
@@ -304,7 +506,7 @@ gcloud run services update searchaas-frontend \
   --update-env-vars="SEARCHAAS_API_URL=https://searchaas-api-xyz.run.app,SEARCHAAS_MCP_URL=https://searchaas-mcp-xyz.run.app/mcp"
 ```
 
-**Updating CORS allowed origins:**
+**Update CORS allowed origins:**
 
 ```bash
 gcloud run services update searchaas-api \
