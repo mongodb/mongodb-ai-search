@@ -353,8 +353,39 @@ def _execute_plan(
             caps = captured()
         mongo_ms = round((time.perf_counter() - t0) * 1000, 1)
     except Exception as exc:
-        log.exception("Retrieval failed (%s)", plan.strategy)
-        raise HTTPException(status_code=500, detail=f"retrieval failed: {exc}") from exc
+        # Atlas rejects $vectorSearch pre-filters on paths not declared as
+        # {type: filter} in the index. When this happens, evict the offending
+        # field from the runtime allowlist and retry once without any filters
+        # so the user gets results rather than a 500.
+        err_str = str(exc)
+        if "needs to be indexed as filter" in err_str and plan.filters:
+            import re as _re
+            bad_field = _re.search(r"Path '([^']+)' needs to be indexed", err_str)
+            if bad_field:
+                c.retrievers.evict_filter_field(bad_field.group(1))
+            log.warning(
+                "Pre-filter %s rejected by Atlas (field not indexed as filter) — "
+                "retrying without filters. Error: %s",
+                list(plan.filters.keys()), exc,
+            )
+            plan.filters = {}
+            try:
+                retriever = c.retrievers.create(
+                    plan, overrides=req.atlas, retrieval_overrides=req.retrieval,
+                )
+                t0 = time.perf_counter()
+                with capture():
+                    docs = retriever.invoke(invoke_query)
+                    caps = captured()
+                mongo_ms = round((time.perf_counter() - t0) * 1000, 1)
+            except Exception as retry_exc:
+                log.exception("Retrieval failed after filter retry (%s)", plan.strategy)
+                raise HTTPException(
+                    status_code=500, detail=f"retrieval failed: {retry_exc}"
+                ) from retry_exc
+        else:
+            log.exception("Retrieval failed (%s)", plan.strategy)
+            raise HTTPException(status_code=500, detail=f"retrieval failed: {exc}") from exc
 
     # Prefer the aggregate on the queried collection; else the last captured one.
     target_coll = (req.atlas and req.atlas.collection) or c.config.atlas.collection

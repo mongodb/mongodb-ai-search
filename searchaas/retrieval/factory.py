@@ -242,6 +242,23 @@ class RetrieverFactory:
             log=log, source=f"{strategy} plan",
         )
 
+    def evict_filter_field(self, field: str) -> None:
+        """Remove *field* from the runtime vector-index filter allowlist.
+
+        Called when Atlas rejects a pre-filter with "needs to be indexed as
+        filter" — meaning the YAML config and the live Atlas index are out of
+        sync. Evicting the field prevents every subsequent request from failing
+        with the same error until the index is updated or the service restarts.
+        """
+        if field in self._filter_fields:
+            self._filter_fields.remove(field)
+            log.warning(
+                "evicted %r from vector filter allowlist — Atlas index does not "
+                "have this path indexed as {type: filter}. Update the Atlas index "
+                "or remove it from atlas.vector_index_definition in searchaas.yaml.",
+                field,
+            )
+
     # ----------------------------------------------------------------- helpers
 
     def _resolve_collection(self, overrides: _Overrides):
