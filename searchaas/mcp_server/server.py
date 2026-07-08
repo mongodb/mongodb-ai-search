@@ -50,7 +50,8 @@ def _build_response(
     results = filter_by_entities(results, list(uq.entities or []))
 
     t_sum = time.perf_counter()
-    summary = summarize(c.llm, invoke_query, results)
+    _enable_sum = get_container().config.planner.enable_summarization
+    summary = summarize(c.llm, invoke_query, results) if _enable_sum else None
     summarize_ms = round((time.perf_counter() - t_sum) * 1000, 1) if summary is not None else None
 
     total_ms = round((time.perf_counter() - t_total) * 1000, 1)
@@ -225,13 +226,57 @@ def main() -> None:
         app = mcp.http_app(transport=cfg.mcp_transport, middleware=[cors])
 
         # Plain HTTP healthcheck for load balancers (Cloud Run, ALB, etc.).
-        from starlette.responses import PlainTextResponse
+        from starlette.responses import JSONResponse, PlainTextResponse
         from starlette.routing import Route
 
         async def _healthz(_request):
             return PlainTextResponse("ok")
 
-        app.router.routes.append(Route("/healthz", _healthz, methods=["GET"]))
+        async def _settings(_request):
+            """Mirror of FastAPI GET /settings — lets the UI load live config
+            when only the MCP server is running (FastAPI not started)."""
+            from searchaas.utils import redact_cfg
+            c = get_container()
+            cfg_c = c.config
+            return JSONResponse({
+                "atlas": {
+                    "uri":                "***",
+                    "database":           cfg_c.atlas.database,
+                    "collection":         cfg_c.atlas.collection,
+                    "vector_index":       cfg_c.atlas.vector_index,
+                    "search_index":       cfg_c.atlas.search_index,
+                    "text_key":           cfg_c.atlas.text_key,
+                    "embedding_key":      cfg_c.atlas.embedding_key,
+                    "relevance_score_fn": cfg_c.atlas.relevance_score_fn,
+                    "dimensions":         cfg_c.atlas.dimensions,
+                },
+                "embeddings": {
+                    "provider": cfg_c.embeddings.provider,
+                    "config":   redact_cfg(cfg_c.embeddings.config),
+                },
+                "planner": {
+                    "llm_provider":        cfg_c.planner.llm_provider,
+                    "config":              redact_cfg(cfg_c.planner.config),
+                    "default_top_k":       cfg_c.planner.default_top_k,
+                    "enable_summarization": cfg_c.planner.enable_summarization,
+                },
+                "retrieval": {
+                    "default_strategy": cfg_c.retrieval.default_strategy,
+                    "hybrid":           cfg_c.retrieval.hybrid,
+                    "vector":           cfg_c.retrieval.vector,
+                },
+                "server": {
+                    "host":          cfg_c.server.host,
+                    "port":          cfg_c.server.port,
+                    "mcp_host":      cfg_c.server.mcp_host,
+                    "mcp_port":      cfg_c.server.mcp_port,
+                    "mcp_transport": cfg_c.server.mcp_transport,
+                    "log_level":     cfg_c.server.log_level,
+                },
+            })
+
+        app.router.routes.append(Route("/healthz",  _healthz,  methods=["GET"]))
+        app.router.routes.append(Route("/settings", _settings, methods=["GET"]))
 
         # Warm the container in a background thread so uvicorn binds the port
         # immediately. Cloud Run (and any other load-balancer) health-checks the

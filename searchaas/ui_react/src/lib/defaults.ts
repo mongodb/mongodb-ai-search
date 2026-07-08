@@ -42,6 +42,7 @@ export const DEFAULT_CONFIG: AppConfig = {
       temperature: 0.1,
     },
     default_top_k: 20,
+    enable_summarization: true,
   },
   retrieval: {
     default_strategy: "hybrid",
@@ -111,6 +112,10 @@ function coerceNumerics(cfg: AppConfig): AppConfig {
     planner: {
       ...cfg.planner,
       default_top_k: num(cfg.planner.default_top_k, d.planner.default_top_k),
+      enable_summarization: cfg.planner.enable_summarization === false ||
+        String(cfg.planner.enable_summarization).toLowerCase() === "false"
+          ? false
+          : true,
     },
     retrieval: {
       ...cfg.retrieval,

@@ -57,7 +57,7 @@ export interface AtlasConfig {
 export interface AppConfig {
   atlas: AtlasConfig;
   embeddings: { provider: string; config: Record<string, unknown> };
-  planner: { llm_provider: string; config: Record<string, unknown>; default_top_k: number };
+  planner: { llm_provider: string; config: Record<string, unknown>; default_top_k: number; enable_summarization: boolean };
   retrieval: {
     default_strategy: "vector" | "fulltext" | "hybrid" | "graph" | "parent-doc" | "metadata";
     hybrid: { vector_weight: number; fulltext_weight: number };

@@ -7,7 +7,7 @@ import { useMemo, useState } from "react";
 import { dump as yamlDump, load as yamlLoad } from "js-yaml";
 import {
   Banner, Button, Chip, CodeBlock, Disclosure, Field, NumberInput,
-  Select, Slider, Tabs, TextArea, TextInput,
+  Select, Slider, Tabs, TextArea, TextInput, Toggle,
 } from "./UI";
 import type { AppConfig, Strategy } from "../lib/types";
 import { REQUIRED_ATLAS_FIELDS } from "../lib/types";
@@ -115,9 +115,10 @@ export default function ConfigPane({
           config:   config.embeddings.config   || undefined,
         },
         planner: {
-          llm_provider:  config.planner.llm_provider  || undefined,
-          config:        config.planner.config        || undefined,
-          default_top_k: config.planner.default_top_k || undefined,
+          llm_provider:         config.planner.llm_provider         || undefined,
+          config:               config.planner.config               || undefined,
+          default_top_k:        config.planner.default_top_k        || undefined,
+          enable_summarization: config.planner.enable_summarization,
         },
         retrieval: {
           default_strategy: config.retrieval.default_strategy || undefined,
@@ -372,6 +373,15 @@ export default function ConfigPane({
                     ...config.planner,
                     default_top_k: Number(e.target.value) || 20,
                   })} />
+            </Field>
+            <Field label="enable_summarization"
+                   hint="When enabled, the LLM generates a summary of retrieved results. Disable to reduce latency and LLM cost.">
+              <Toggle
+                checked={config.planner.enable_summarization}
+                onChange={(val) =>
+                  update("planner", { ...config.planner, enable_summarization: val })}
+                label={config.planner.enable_summarization ? "Enabled" : "Disabled"}
+              />
             </Field>
             <Field label="config (YAML)">
               <TextArea

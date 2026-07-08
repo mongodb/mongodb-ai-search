@@ -1234,3 +1234,22 @@ details.disc > .disc-body { padding: 8px 10px; }
 /* ── Row grid utility ────────────────────────────────────────────────────── */
 .row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
 .row.three { grid-template-columns: 1fr 1fr 1fr; }
+
+/* ── Toggle ──────────────────────────────────────────────────────────────── */
+.toggle-label { display: inline-flex; align-items: center; gap: 8px; cursor: pointer; user-select: none; }
+.toggle-track {
+  display: inline-flex; align-items: center;
+  width: 36px; height: 20px; border-radius: 10px;
+  padding: 2px; transition: background 0.2s; outline: none;
+  cursor: pointer;
+}
+.toggle-track:focus-visible { box-shadow: 0 0 0 2px var(--accent); }
+.toggle-on  { background: var(--accent); }
+.toggle-off { background: var(--border); }
+.toggle-thumb {
+  width: 16px; height: 16px; border-radius: 50%; background: #fff;
+  transition: transform 0.2s; box-shadow: 0 1px 3px rgba(0,0,0,0.2);
+}
+.toggle-on  .toggle-thumb { transform: translateX(16px); }
+.toggle-off .toggle-thumb { transform: translateX(0); }
+.toggle-text { font-size: 13px; color: var(--text-2); }

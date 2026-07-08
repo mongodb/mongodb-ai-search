@@ -328,9 +328,14 @@ def _build_vector_store(config: AppConfig, embeddings: Any, collection: Any) -> 
         dimensions_arg = config.atlas.dimensions
         relevance_score_fn_arg = config.atlas.relevance_score_fn
 
-    vs = MongoDBAtlasVectorSearch.from_connection_string(
-        connection_string=config.atlas.uri,
-        namespace=namespace,
+    # Reuse the AtlasFactory-managed MongoClient (which already has
+    # connection-pool tuning, appname, and serverSelectionTimeoutMS set)
+    # instead of letting MongoDBAtlasVectorSearch open a second bare
+    # MongoClient to the same cluster via from_connection_string().
+    # This halves the number of connection pools held against Atlas.
+    existing_collection = AtlasFactory.chunks_collection()
+    vs = MongoDBAtlasVectorSearch(
+        collection=existing_collection,
         embedding=embeddings,
         index_name=config.atlas.vector_index,
         text_key=config.atlas.text_key,
@@ -409,6 +414,7 @@ def build_container(config: AppConfig | None = None) -> Container:
         vector_num_candidates=int((cfg.retrieval.vector or {}).get("num_candidates", 200)),
         filter_fields=cfg.atlas.filter_fields,
         fulltext_filter_fields=cfg.atlas.search_filter_fields,
+        max_time_ms=cfg.retrieval.effective_max_time_ms,
     )
 
     return Container(
