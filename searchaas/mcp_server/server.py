@@ -192,13 +192,8 @@ def auto_search(query: str, top_k: int = 20, filters: dict | None = None, atlas:
 def main() -> None:
     cfg = load_config().server
 
-    # Warm the container before accepting connections so the first MCP call
-    # pays no cold-start penalty.
-    log.info("MCP: warming container…")
-    get_container()
-    log.info("MCP: container ready")
-
     if cfg.mcp_transport in ("streamable-http", "http", "sse"):
+        import threading
         import uvicorn
         from starlette.middleware import Middleware
         from starlette.middleware.cors import CORSMiddleware as StarlettesCORS
@@ -226,11 +221,10 @@ def main() -> None:
                 allow_headers=["*"],
                 expose_headers=["mcp-session-id"],
             )
+
         app = mcp.http_app(transport=cfg.mcp_transport, middleware=[cors])
 
-        # Plain HTTP healthcheck for load balancers (ECS Express Mode ALB,
-        # ALB target groups, etc.). The MCP endpoint itself requires an SSE
-        # handshake and won't return 200 on a plain GET.
+        # Plain HTTP healthcheck for load balancers (Cloud Run, ALB, etc.).
         from starlette.responses import PlainTextResponse
         from starlette.routing import Route
 
@@ -239,9 +233,31 @@ def main() -> None:
 
         app.router.routes.append(Route("/healthz", _healthz, methods=["GET"]))
 
+        # Warm the container in a background thread so uvicorn binds the port
+        # immediately. Cloud Run (and any other load-balancer) health-checks the
+        # port as soon as the process starts; blocking on get_container() before
+        # uvicorn.run() causes the "container failed to start" timeout.
+        # get_container() is thread-safe (uses a lock + global singleton), so
+        # concurrent requests that arrive before warmup completes will block
+        # inside get_container() rather than trigger a double-init.
+        def _warmup():
+            log.info("MCP: warming container in background…")
+            try:
+                get_container()
+                log.info("MCP: container ready")
+            except Exception:
+                log.exception("MCP: container warmup failed")
+
+        threading.Thread(target=_warmup, daemon=True).start()
+
         uvicorn.run(app, host=cfg.mcp_host, port=cfg.mcp_port,
                     log_level=cfg.log_level)
     else:
+        # Stdio / non-HTTP transports: warm synchronously then hand off to
+        # FastMCP's own transport loop (no port binding involved).
+        log.info("MCP: warming container…")
+        get_container()
+        log.info("MCP: container ready")
         mcp.run(transport=cfg.mcp_transport, host=cfg.mcp_host, port=cfg.mcp_port)
 
 

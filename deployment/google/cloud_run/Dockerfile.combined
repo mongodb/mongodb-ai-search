@@ -8,11 +8,12 @@
 #
 # nginx (8080) is the only exposed port.
 # uvicorn and the MCP server bind to 127.0.0.1 only (not reachable externally).
-# supervisord manages all three processes.
+# The entrypoint script manages startup sequencing (FastAPI health gate before
+# nginx starts) with auto-restart on crash.
 #
 # Build (from repo root):
 #   docker buildx build --platform linux/amd64 \
-#     -f deployment/google/Dockerfile.combined \
+#     -f deployment/google/cloud_run/Dockerfile.combined \
 #     -t searchaas-combined .
 #
 # Run locally:
@@ -54,7 +55,7 @@ RUN pip install --upgrade pip \
         -r requirements.txt
 
 # -----------------------------------------------------------------------------
-# Stage 3 — runtime: nginx + Python + supervisord
+# Stage 3 — runtime: nginx + Python + entrypoint
 # -----------------------------------------------------------------------------
 ARG BASE_REGISTRY=
 FROM ${BASE_REGISTRY}python:3.11-slim AS runtime
@@ -70,27 +71,20 @@ COPY --from=py-builder /install /usr/local
 # React build output
 COPY --from=node-builder /app/dist /usr/share/nginx/html
 
-# Application source — includes searchaas/config/searchaas.yaml which is the
-# single source of truth for non-secret config (collection, indexes, weights,
-# default_top_k, etc.). ${VAR} placeholders in the YAML are resolved at
-# load time from the container's environment (Cloud Run --set-secrets +
-# --set-env-vars). The image MUST NOT carry an .env file — see .dockerignore.
+# Application source
 WORKDIR /app
 COPY searchaas/ ./searchaas/
 
-
 # nginx config — replaces the default site
-COPY deployment/google/nginx-combined.conf /etc/nginx/conf.d/default.conf
+COPY deployment/google/cloud_run/nginx-combined.conf /etc/nginx/conf.d/default.conf
 
 # Container entrypoint
-COPY deployment/google/docker-entrypoint-combined.sh /entrypoint.sh
+COPY deployment/google/cloud_run/docker-entrypoint-combined.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
 
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
     PYTHONPATH=/app \
-    # Pin the YAML path so `load_config()` is unambiguous about which file
-    # is the source of truth in the deployed container.
     SEARCHAAS_CONFIG=/app/searchaas/config/searchaas.yaml
 
 # Only port 8080 is exposed — all other traffic is internal via 127.0.0.1

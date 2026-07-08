@@ -1,17 +1,19 @@
 # =============================================================================
-# SearchaaS — FastAPI REST Server
-# Exposes the REST API at http://0.0.0.0:8000
+# SearchaaS — FastMCP Server
+# Exposes the MCP endpoint at http://0.0.0.0:8001/mcp  (streamable-http)
 #
-# Build:
-#   docker build -f Dockerfile.api -t searchaas-api .
+# Build (from repo root):
+#   docker buildx build --platform linux/amd64 \
+#       -f deployment/google/cloud_run/Dockerfile -t searchaas-mcp .
 #
 # Run:
-#   docker run --env-file .env -p 8000:8000 searchaas-api
+#   docker run --env-file .env -p 8001:8001 searchaas-mcp
 #
 # With a custom config file:
 #   docker run --env-file .env \
-#              -v /path/to/searchaas.yaml:/app/searchaas/config/searchaas.yaml:ro \
-#              -p 8000:8000 searchaas-api
+#              -v /path/to/searchaas.yaml:/app/config/searchaas.yaml:ro \
+#              -e SEARCHAAS_CONFIG=/app/config/searchaas.yaml \
+#              -p 8001:8001 searchaas-mcp
 # =============================================================================
 
 # -----------------------------------------------------------------------------
@@ -43,6 +45,10 @@ RUN pip install --upgrade pip \
 ARG BASE_REGISTRY=
 FROM ${BASE_REGISTRY}python:3.11-slim AS runtime
 
+# curl is needed for healthchecks
+RUN apt-get update && apt-get install -y --no-install-recommends curl \
+    && rm -rf /var/lib/apt/lists/*
+
 # Carry installed packages over from builder
 COPY --from=builder /install /usr/local
 
@@ -52,27 +58,16 @@ WORKDIR /app
 COPY searchaas/ ./searchaas/
 
 # ── Runtime environment ──────────────────────────────────────────────────────
-# These are safe defaults. Override sensitive values at runtime via --env-file
-# or individual -e flags — do NOT bake secrets into the image.
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
     PYTHONPATH=/app \
-    # Source of truth for non-secret config. ${VAR} placeholders are
-    # resolved from the container env at load_config() time.
     SEARCHAAS_CONFIG=/app/searchaas/config/searchaas.yaml
 
-# REST API port — must match server.port in searchaas.yaml (default 8000)
-EXPOSE 8000
+# FastMCP on 8001
+EXPOSE 8001
 
 # Non-root user for least-privilege execution
-RUN useradd --no-create-home --shell /bin/false api
-USER api
+RUN useradd --no-create-home --shell /bin/false mcp
+USER mcp
 
-# Start the FastAPI server via uvicorn.
-# Workers are kept at 1 to share the bootstrap singleton (get_container) cleanly.
-# Scale horizontally with multiple containers rather than multiple workers.
-CMD ["uvicorn", "searchaas.api.app:app", \
-     "--host", "0.0.0.0", \
-     "--port", "8000", \
-     "--workers", "1", \
-     "--log-level", "info"]
+CMD ["python", "-m", "searchaas.mcp_server.server"]
