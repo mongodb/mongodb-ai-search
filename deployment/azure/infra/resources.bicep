@@ -1,14 +1,16 @@
 // =============================================================================
-// SearchaaS — supporting resources + Container Apps (resource-group scope)
+// SearchaaS — supporting infrastructure (resource-group scope)
 //
 // Provisions:
 //   - Log Analytics workspace        (Container Apps logs)
 //   - Azure Container Registry        (image storage)
 //   - User-assigned managed identity  (+ AcrPull role on the registry)
 //   - Container Apps Environment
-//   - searchaas-mcp  Container App    (external, :8001, /mcp, Bearer-gated)
-//   - searchaas-api  Container App    (external, :8000)
-//   - searchaas-ui   Container App    (external, :80)
+//
+// Container Apps are NOT deployed here. They live in apps.bicep, called from
+// main.bicep with `dependsOn: [resources]`. That makes apps a separate ARM
+// child deployment that only starts after this one fully completes (environment
+// in Succeeded state), eliminating the ManagedEnvironmentNotProvisioned race.
 // =============================================================================
 
 @description('Azure region for all resources.')
@@ -16,31 +18,6 @@ param location string
 
 @description('Short name prefix used for resource naming.')
 param namePrefix string
-
-@description('Container image tag to deploy.')
-param imageTag string
-
-@description('Atlas DB name (non-secret).')
-param atlasDb string
-
-@description('Optional non-secret config overrides injected as env vars. Empty values fall back to searchaas.yaml defaults — no image rebuild required to change them.')
-param configOverrides object = {}
-
-@description('If true, the MCP Bearer key is embedded in the UI\'s client-side config.js so the playground UI can call the authenticated MCP endpoint. NOTE: this exposes the key to anyone who can load the UI. Leave false for production; users can paste the key in the UI settings instead.')
-param uiEmbedMcpKey bool = false
-
-@secure()
-param atlasUri string
-@secure()
-param voyageApiKey string
-@secure()
-param googleApiKey string = ''
-@secure()
-param openaiApiKey string = ''
-@secure()
-param azureOpenaiApiKey string
-@secure()
-param mcpApiKey string
 
 // A short deterministic suffix keeps globally-unique names (ACR) collision-free.
 var suffix = uniqueString(resourceGroup().id)
@@ -117,39 +94,77 @@ resource env 'Microsoft.App/managedEnvironments@2024-03-01' = {
 }
 
 // ---------------------------------------------------------------------------
-// Apps module — deployed AFTER the environment is fully provisioned. Splitting
-// the apps into their own module forces ARM to complete the environment (and
-// its listKeys-driven update) before any Container App write, eliminating the
-// intermittent `ManagedEnvironmentNotProvisioned` race.
+// Environment readiness gate
+//
+// A managed environment's ARM resource reports success the moment its PUT
+// returns, but the Container Apps backend keeps provisioning asynchronously
+// afterwards (and re-PUTs bounce it into `Updating`). `dependsOn` alone does
+// NOT wait for that, which is why apps intermittently hit
+// `ManagedEnvironmentNotProvisioned`.
+//
+// This deployment script polls the environment until provisioningState is
+// genuinely `Succeeded`. The apps module depends on its output, so ARM cannot
+// start the apps until the environment is truly ready.
 // ---------------------------------------------------------------------------
-module apps 'apps.bicep' = {
-  name: 'searchaas-apps'
-  params: {
-    location: location
-    namePrefix: namePrefix
-    imageTag: imageTag
-    atlasDb: atlasDb
-    configOverrides: configOverrides
-    uiEmbedMcpKey: uiEmbedMcpKey
-    environmentId: env.id
-    identityId: identity.id
-    acrServer: acr.properties.loginServer
-    atlasUri: atlasUri
-    voyageApiKey: voyageApiKey
-    googleApiKey: googleApiKey
-    openaiApiKey: openaiApiKey
-    azureOpenaiApiKey: azureOpenaiApiKey
-    mcpApiKey: mcpApiKey
+resource envReady 'Microsoft.Resources/deploymentScripts@2023-08-01' = {
+  name: '${namePrefix}-env-ready'
+  location: location
+  kind: 'AzureCLI'
+  identity: {
+    type: 'UserAssigned'
+    userAssignedIdentities: {
+      '${identity.id}': {}
+    }
   }
-  dependsOn: [
-    env
-    acrPull
-  ]
+  properties: {
+    azCliVersion: '2.61.0'
+    retentionInterval: 'PT1H'
+    timeout: 'PT30M'
+    cleanupPreference: 'OnSuccess'
+    environmentVariables: [
+      { name: 'RG', value: resourceGroup().name }
+      { name: 'ENV_NAME', value: env.name }
+    ]
+    scriptContent: '''
+      set -e
+      for i in $(seq 1 120); do
+        state=$(az resource show -g "$RG" -n "$ENV_NAME" \
+          --resource-type Microsoft.App/managedEnvironments \
+          --query "properties.provisioningState" -o tsv)
+        echo "attempt $i: $state"
+        if [ "$state" = "Succeeded" ]; then
+          echo '{"ready":true}' > "$AZ_SCRIPTS_OUTPUT_PATH"
+          exit 0
+        fi
+        if [ "$state" = "Failed" ] || [ "$state" = "Canceled" ]; then
+          echo "environment provisioning $state" >&2
+          exit 1
+        fi
+        sleep 15
+      done
+      echo "timed out waiting for environment" >&2
+      exit 1
+    '''
+  }
 }
 
-// ---- Outputs ---------------------------------------------------------------
+// The deployment script's managed identity needs read access to poll the env.
+var readerRoleId = 'acdd72a7-3385-48ef-bd42-f606fba81ae7'
+resource envReadyReader 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
+  name: guid(env.id, identity.id, readerRoleId)
+  scope: env
+  properties: {
+    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', readerRoleId)
+    principalId: identity.properties.principalId
+    principalType: 'ServicePrincipal'
+  }
+}
+
+// ---- Outputs (consumed by the apps module in main.bicep) -------------------
 output acrName string = acr.name
 output acrLoginServer string = acr.properties.loginServer
-output mcpUrl string = apps.outputs.mcpUrl
-output apiUrl string = apps.outputs.apiUrl
-output uiUrl string = apps.outputs.uiUrl
+output environmentId string = env.id
+output identityId string = identity.id
+// Truthy only after the environment is genuinely Succeeded. The apps module
+// references this so ARM gates the apps behind real environment readiness.
+output environmentReady bool = envReady.properties.outputs.ready

@@ -188,7 +188,7 @@ export default function App() {
             {/* MongoDB official logomark */}
             <img
               className="mdb-leaf"
-              src="https://storage-us-gcs.bfldr.com/6x3q9bsq4nj777n8sbbnp6/v/1069931050/original/MongoDB_Logomark_ForestGreen.png?Expires=1781031805&KeyName=gcs-bfldr-prod&Signature=9v8y6honF7fagYoVDeH1DsUn5dw="
+              src="./src/img/MongoDB_Logomark_ForestGreen.png"
               alt="MongoDB"
             />
             <span className="conn-bar-logo-text">
@@ -341,17 +341,28 @@ function DetailsPane({
 }) {
   const effective = turn?.response.strategy.replace(/_/g, "-") ?? "";
 
-  const pipeline = useMemo(
-    () =>
-      turn
-        ? buildPipeline(
-            effective,
-            config,
-            turn.response.understood_query?.rewritten ?? turn.query,
-            turn.topK,
-            turn.filters,
-          )
-        : null,
+  const { pipeline, pipelineIsActual } = useMemo(
+    () => {
+      if (!turn) return { pipeline: null as unknown, pipelineIsActual: false };
+      // Prefer the ACTUAL pipeline captured by the backend from the executed
+      // query. Fall back to a client-side reconstruction only if absent (older
+      // backend, MCP without pipeline, or a path that ran no aggregate).
+      const actual = turn.response.pipeline;
+      if (actual && Array.isArray(actual.pipeline)) {
+        return { pipeline: actual as unknown, pipelineIsActual: true };
+      }
+      const plan = turn.response.plan as { filters?: Record<string, unknown>; top_k?: number } | undefined;
+      const planFilters =
+        plan?.filters ?? turn.response.understood_query?.metadata_filters ?? turn.filters;
+      const reconstructed = buildPipeline(
+        effective,
+        config,
+        turn.response.understood_query?.rewritten ?? turn.query,
+        plan?.top_k ?? turn.topK,
+        planFilters,
+      );
+      return { pipeline: reconstructed as unknown, pipelineIsActual: false };
+    },
     [turn, effective, config],
   );
 
@@ -422,7 +433,7 @@ function DetailsPane({
             {pipeline && (
               <div className="details-section">
                 <div className="details-section-title">📜 MongoDB Pipeline — {effective}</div>
-                <PipelinePanel pipeline={pipeline} effectiveStrategy={effective} />
+                <PipelinePanel pipeline={pipeline} effectiveStrategy={effective} actual={pipelineIsActual} />
               </div>
             )}
 

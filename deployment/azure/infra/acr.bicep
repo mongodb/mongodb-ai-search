@@ -16,7 +16,7 @@
 
 targetScope = 'subscription'
 
-param location string = 'eastus'
+param location string = 'centralindia'
 
 @minLength(3)
 @maxLength(20)
@@ -26,8 +26,14 @@ param resourceGroupName string = 'rg-${namePrefix}'
 
 // Unused here but accepted so the shared main.parameters.json file applies
 // cleanly to this template too.
+#disable-next-line no-unused-params
 param imageTag string = 'latest'
+#disable-next-line no-unused-params
 param atlasDb string = 'amazon'
+#disable-next-line no-unused-params
+param uiEmbedMcpKey bool = false
+#disable-next-line no-unused-params
+param configOverrides object = {}
 
 resource rg 'Microsoft.Resources/resourceGroups@2024-03-01' = {
   name: resourceGroupName

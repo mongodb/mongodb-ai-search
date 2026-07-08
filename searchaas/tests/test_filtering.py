@@ -145,16 +145,14 @@ def test_search_filter_fields_empty_when_no_definition():
 def test_shipped_config_filter_fields_match_yaml(monkeypatch):
     """`atlas.filter_fields` is derived from `vector_index_definition`.
 
-    The shipped YAML currently uses Mode A (client-side voyageai) and does
-    NOT declare any `type: filter` fields (the examples are commented out).
-    This test guards against accidental drift between the YAML and the
-    `filter_fields` property — if the YAML adds filter paths, update this
-    expectation to match.
+    The shipped YAML declares the sample_mflix.movies filter facets under
+    `atlas.vector_index_definition`. This test guards against accidental drift
+    between the YAML and the `filter_fields` property — if the YAML changes its
+    filter paths, update this expectation to match.
     """
     monkeypatch.setenv("ATLAS_URI", _URI)
     monkeypatch.setenv("ATLAS_DB", "searchaas")
     load_config.cache_clear()
     cfg = load_config()
     load_config.cache_clear()
-    # Mode A YAML declares only the `type: vector` field; no filters.
-    assert cfg.atlas.filter_fields == []
+    assert cfg.atlas.filter_fields == ["imdb.rating", "year", "genres"]

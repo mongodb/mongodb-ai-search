@@ -15,7 +15,8 @@
 #     /mcp             → FastMCP on 127.0.0.1:8001
 #
 # Usage:
-#   ./deployment/deploy-combined.sh [--project PROJECT_ID] [--region REGION] [--repo REPO]
+#   ./deployment/google/cloud_run/deploy-combined.sh \
+#       [--project PROJECT_ID] [--region REGION] [--repo REPO]
 #
 # All flags are optional — the script prompts for any missing values.
 # =============================================================================
@@ -33,8 +34,24 @@ step()    { echo -e "\n${BOLD}==> $*${RESET}"; }
 
 # ── Resolve repo root ─────────────────────────────────────────────────────────
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
+REPO_ROOT="$(cd "${SCRIPT_DIR}/../../.." && pwd)"
 cd "${REPO_ROOT}"
+
+# ── Load .env early so all variables are available without manual export ──────
+# Variables already set in the environment take precedence (env > .env).
+if [[ -f "${REPO_ROOT}/.env" ]]; then
+  while IFS= read -r _line || [[ -n "${_line}" ]]; do
+    _line="${_line%$'\r'}"
+    [[ -z "${_line// }" ]] && continue
+    [[ "${_line#\#}" != "${_line}" ]] && continue
+    _key="${_line%%=*}"
+    _val="${_line#*=}"
+    [[ "${_key}" == "${_line}" ]] && continue
+    if [[ "${_val:0:1}" == "'" && "${_val: -1}" == "'" ]]; then _val="${_val:1:${#_val}-2}"; fi
+    if [[ "${_val:0:1}" == '"' && "${_val: -1}" == '"' ]]; then _val="${_val:1:${#_val}-2}"; fi
+    [[ -z "${!_key+x}" ]] && export "${_key}=${_val}"
+  done < "${REPO_ROOT}/.env"
+fi
 
 # ── Parse CLI flags ───────────────────────────────────────────────────────────
 PROJECT_ID=""
@@ -46,6 +63,7 @@ while [[ $# -gt 0 ]]; do
     --project) PROJECT_ID="$2"; shift 2 ;;
     --region)  REGION="$2";     shift 2 ;;
     --repo)    REPO_NAME="$2";  shift 2 ;;
+    -h|--help) grep '^#' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) error "Unknown flag: $1" ;;
   esac
 done
@@ -54,7 +72,11 @@ done
 step "Checking prerequisites"
 command -v gcloud  >/dev/null 2>&1 || error "gcloud CLI not found. Install: https://cloud.google.com/sdk/docs/install"
 command -v docker  >/dev/null 2>&1 || error "Docker not found. Install: https://docs.docker.com/get-docker/"
-[[ -f "${REPO_ROOT}/.env" ]] || error ".env not found. Run: cp .env.example .env  then fill in secrets."
+if [[ -f "${REPO_ROOT}/.env" ]]; then
+  success ".env found at ${REPO_ROOT}/.env"
+else
+  warn ".env not found — relying on exported environment variables. Run: cp .env.example .env  to create one."
+fi
 success "Prerequisites OK"
 
 # ── Resolve project / region / repo ──────────────────────────────────────────
@@ -114,16 +136,6 @@ success "Docker auth configured"
 # ── Store every .env key in Secret Manager ───────────────────────────────────
 step "Storing every key from .env in Secret Manager"
 
-# Drive Secret Manager from the .env file so the deploy mirrors what
-# `load_config()` sees locally. Every non-comment KEY=VALUE pair becomes a
-# secret; the YAML's `${KEY}` placeholders are resolved against these at
-# container start. Empty values are skipped (Secret Manager rejects empty
-# payloads).
-#
-# Note: we use two parallel indexed arrays (ENV_KEYS / ENV_VALUES) instead of
-# an associative array because macOS still ships bash 3.2, which doesn't
-# support `declare -A`. The dedup loop is O(n) but n is tiny (.env has
-# < 100 keys in practice).
 ENV_KEYS=()
 ENV_VALUES=()
 _load_env_file() {
@@ -131,20 +143,18 @@ _load_env_file() {
   [[ -f "${file}" ]] || error "Env file not found: ${file}"
   local line key val
   while IFS= read -r line || [[ -n "${line}" ]]; do
-    line="${line%$'\r'}"                       # strip CR (CRLF safety)
-    [[ -z "${line// }" ]] && continue          # blank line
-    [[ "${line#\#}" != "${line}" ]] && continue  # comment line
+    line="${line%$'\r'}"
+    [[ -z "${line// }" ]] && continue
+    [[ "${line#\#}" != "${line}" ]] && continue
     key="${line%%=*}"
     val="${line#*=}"
-    [[ "${key}" == "${line}" ]] && continue    # no '=' separator
-    # Strip a matched pair of surrounding quotes from the value.
+    [[ "${key}" == "${line}" ]] && continue
     if [[ "${val:0:1}" == "'" && "${val: -1}" == "'" ]]; then
       val="${val:1:${#val}-2}"
     elif [[ "${val:0:1}" == '"' && "${val: -1}" == '"' ]]; then
       val="${val:1:${#val}-2}"
     fi
     [[ -z "${val}" ]] && { warn "Skipping ${key} (empty value)"; continue; }
-    # Dedup: first definition wins (matches `source .env` semantics)
     local existing="" i
     for ((i=0; i<${#ENV_KEYS[@]}; i++)); do
       if [[ "${ENV_KEYS[i]}" == "${key}" ]]; then existing="1"; break; fi
@@ -189,15 +199,13 @@ success "IAM binding set"
 step "Building combined image (linux/amd64) → ${IMAGE}"
 docker buildx build \
   --platform linux/amd64 \
-  -f deployment/google/Dockerfile.combined \
+  -f deployment/google/cloud_run/Dockerfile.combined \
   -t "${IMAGE}" \
   --push \
   .
 success "Image built and pushed"
 
-# ── Build a single --set-secrets flag for every key we pushed above ──────────
-# Single flag with comma-separated pairs is faster than N individual flags and
-# fits inside Cloud Run's command-line length limit.
+# ── Build a single --set-secrets flag ────────────────────────────────────────
 _secret_pairs=""
 for key in "${ENV_KEYS[@]}"; do
   _secret_pairs+="${key}=${key}:latest,"
@@ -219,7 +227,7 @@ gcloud run deploy "${SVC}" \
   --allow-unauthenticated \
   --port=8080 \
   --cpu=2 \
-  --memory=4Gi \
+  --memory=5Gi \
   --min-instances=0 \
   --max-instances=5 \
   --set-env-vars="PYTHONUNBUFFERED=1,SEARCHAAS_CONFIG=/app/searchaas/config/searchaas.yaml" \
@@ -232,13 +240,8 @@ SERVICE_URL=$(gcloud run services describe "${SVC}" \
 success "Deployed → ${SERVICE_URL}"
 
 # ── Post-deploy verification ──────────────────────────────────────────────────
-# Hit /settings on the live service and confirm the backend resolved the
-# YAML's ${ATLAS_URI}/${ATLAS_DB}/${GOOGLE_API_KEY} placeholders from the
-# Secret Manager bindings. If the response is missing the collection or
-# database, the secrets didn't reach the container — fail loudly so the
-# operator sees it instead of debugging an empty UI later.
 step "Verifying live /settings reflects searchaas.yaml + .env"
-sleep 4   # let the Cloud Run revision finish ramping
+sleep 4
 _live_settings=$(curl -sS --max-time 20 "${SERVICE_URL}/settings" || true)
 if [[ -z "${_live_settings}" ]]; then
   warn "Could not reach ${SERVICE_URL}/settings (cold start?). Skipping verification."

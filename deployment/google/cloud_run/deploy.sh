@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # =============================================================================
-# SearchaaS — Google Cloud Run Deployment Script
+# SearchaaS — Google Cloud Run Deployment (three-service mode)
 #
-# Deploys three services to Cloud Run:
+# Deploys three separate Cloud Run services:
 #   1. searchaas-api      FastAPI REST server   (port 8000)
 #   2. searchaas-mcp      FastMCP server        (port 8001)
 #   3. searchaas-frontend React SPA via nginx   (port 8080)
@@ -10,23 +10,39 @@
 # Prerequisites:
 #   - gcloud CLI installed and authenticated (gcloud auth login)
 #   - Docker installed and running
-#   - A populated .env file (copy from .env.example)
+#   - A populated .env file at the repo root (copy from .env.example)
 #   - Billing enabled on the GCP project
 #
 # Usage:
-#   ./scripts/deploy.sh [--project PROJECT_ID] [--region REGION] [--repo REPO_NAME]
-#
-# Run from the repo root or from scripts/ — the script resolves the repo root
-# automatically and all docker build / gcloud commands run from there.
+#   ./deployment/google/cloud_run/deploy.sh [--project PROJECT_ID] \
+#       [--region REGION] [--repo REPO_NAME]
 #
 # All flags are optional — the script will prompt for any missing values.
+# Run from the repo root OR from within this directory; the script resolves
+# the repo root automatically.
 # =============================================================================
 set -euo pipefail
 
-# ── Resolve repo root (parent of the directory this script lives in) ──────────
+# ── Resolve repo root ─────────────────────────────────────────────────────────
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
+REPO_ROOT="$(cd "${SCRIPT_DIR}/../../.." && pwd)"
 cd "${REPO_ROOT}"
+
+# ── Load .env early so all variables are available without manual export ──────
+# Variables already set in the environment take precedence (env > .env).
+if [[ -f "${REPO_ROOT}/.env" ]]; then
+  while IFS= read -r _line || [[ -n "${_line}" ]]; do
+    _line="${_line%$'\r'}"
+    [[ -z "${_line// }" ]] && continue
+    [[ "${_line#\#}" != "${_line}" ]] && continue
+    _key="${_line%%=*}"
+    _val="${_line#*=}"
+    [[ "${_key}" == "${_line}" ]] && continue
+    if [[ "${_val:0:1}" == "'" && "${_val: -1}" == "'" ]]; then _val="${_val:1:${#_val}-2}"; fi
+    if [[ "${_val:0:1}" == '"' && "${_val: -1}" == '"' ]]; then _val="${_val:1:${#_val}-2}"; fi
+    [[ -z "${!_key+x}" ]] && export "${_key}=${_val}"
+  done < "${REPO_ROOT}/.env"
+fi
 
 # ── Colour helpers ────────────────────────────────────────────────────────────
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'
@@ -48,6 +64,8 @@ while [[ $# -gt 0 ]]; do
     --project) PROJECT_ID="$2"; shift 2 ;;
     --region)  REGION="$2";     shift 2 ;;
     --repo)    REPO_NAME="$2";  shift 2 ;;
+    -h|--help)
+      grep '^#' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) error "Unknown flag: $1" ;;
   esac
 done
@@ -58,7 +76,11 @@ step "Checking prerequisites"
 command -v gcloud >/dev/null 2>&1 || error "gcloud CLI not found. Install: https://cloud.google.com/sdk/docs/install"
 command -v docker  >/dev/null 2>&1 || error "Docker not found. Install: https://docs.docker.com/get-docker/"
 
-[[ -f "${REPO_ROOT}/.env" ]] || error ".env file not found. Run: cp .env.example .env  then fill in secrets."
+if [[ -f "${REPO_ROOT}/.env" ]]; then
+  success ".env found at ${REPO_ROOT}/.env"
+else
+  warn ".env not found — relying on exported environment variables. Run: cp .env.example .env  to create one."
+fi
 success "Prerequisites OK"
 
 # ── Resolve GCP project ───────────────────────────────────────────────────────
@@ -135,15 +157,8 @@ step "Storing every key from .env in Secret Manager"
 # a Secret Manager secret and is later wired to the Cloud Run services via
 # --set-secrets. The YAML's `${KEY}` placeholders are resolved against these.
 #
-# Rules:
-#   - lines starting with '#' or blank lines are skipped
-#   - keys with empty values are skipped (no point creating empty secrets)
-#   - surrounding single/double quotes on the value are stripped
-#   - first '=' is the separator; everything after is the value (URIs / JSON OK)
-#
-# Note: we use two parallel indexed arrays (ENV_KEYS / ENV_VALUES) instead of
-# an associative array because macOS still ships bash 3.2, which doesn't
-# support `declare -A`. The dedup loop is O(n) but n is tiny in practice.
+# Note: we use two parallel indexed arrays instead of an associative array
+# because macOS ships bash 3.2, which doesn't support `declare -A`.
 ENV_KEYS=()
 ENV_VALUES=()
 _load_env_file() {
@@ -151,13 +166,12 @@ _load_env_file() {
   [[ -f "${file}" ]] || error "Env file not found: ${file}"
   local line key val existing i
   while IFS= read -r line || [[ -n "${line}" ]]; do
-    line="${line%$'\r'}"                          # strip CR (CRLF safety)
-    [[ -z "${line// }" ]] && continue             # blank line
-    [[ "${line#\#}" != "${line}" ]] && continue   # comment line
+    line="${line%$'\r'}"
+    [[ -z "${line// }" ]] && continue
+    [[ "${line#\#}" != "${line}" ]] && continue
     key="${line%%=*}"
     val="${line#*=}"
-    [[ "${key}" == "${line}" ]] && continue       # no '=' separator
-    # Strip a matched pair of surrounding quotes from the value.
+    [[ "${key}" == "${line}" ]] && continue
     if [[ "${val:0:1}" == "'" && "${val: -1}" == "'" ]]; then
       val="${val:1:${#val}-2}"
     elif [[ "${val:0:1}" == '"' && "${val: -1}" == '"' ]]; then
@@ -176,7 +190,6 @@ _load_env_file() {
 _load_env_file "${REPO_ROOT}/.env"
 info "Loaded ${#ENV_KEYS[@]} keys from .env: ${ENV_KEYS[*]}"
 
-# Helper: create or update a Secret Manager secret
 _upsert_secret() {
   local name="$1" value="$2"
   if gcloud secrets describe "${name}" --project="${PROJECT_ID}" --quiet 2>/dev/null; then
@@ -208,27 +221,29 @@ success "IAM binding set"
 
 # ── Build and push images ─────────────────────────────────────────────────────
 step "Building and pushing FastAPI image → ${IMG_API}"
-docker buildx build --platform linux/amd64 -f deployment/google/Dockerfile.api -t "${IMG_API}" --push .
+docker buildx build --platform linux/amd64 \
+  -f deployment/google/cloud_run/Dockerfile.api \
+  -t "${IMG_API}" --push .
 success "FastAPI image built and pushed"
 
 step "Building and pushing FastMCP image → ${IMG_MCP}"
-docker buildx build --platform linux/amd64 -f deployment/google/Dockerfile -t "${IMG_MCP}" --push .
+docker buildx build --platform linux/amd64 \
+  -f deployment/google/cloud_run/Dockerfile \
+  -t "${IMG_MCP}" --push .
 success "FastMCP image built and pushed"
 
 step "Building and pushing frontend image → ${IMG_FE}"
-docker buildx build --platform linux/amd64 -f deployment/google/Dockerfile.frontend -t "${IMG_FE}" --push .
+docker buildx build --platform linux/amd64 \
+  -f deployment/google/cloud_run/Dockerfile.frontend \
+  -t "${IMG_FE}" --push .
 success "Frontend image built and pushed"
 
 # ── Build --set-secrets flag for every key we pushed above ───────────────────
-# `gcloud run deploy` accepts a SINGLE --set-secrets flag with comma-separated
-# pairs, which avoids spawning N gcloud-secrets-describe calls and keeps the
-# command line short. Each pair maps the env-var-as-seen-by-the-container to
-# the secret name we just upserted.
 _secret_pairs=""
 for key in "${ENV_KEYS[@]}"; do
   _secret_pairs+="${key}=${key}:latest,"
 done
-_secret_pairs="${_secret_pairs%,}"   # strip trailing comma
+_secret_pairs="${_secret_pairs%,}"
 
 SECRET_FLAGS=()
 if [[ -n "${_secret_pairs}" ]]; then
@@ -244,8 +259,8 @@ gcloud run deploy "${SVC_API}" \
   --platform=managed \
   --allow-unauthenticated \
   --port=8000 \
-  --cpu=1 \
-  --memory=3Gi \
+  --cpu=2 \
+  --memory=5Gi \
   --min-instances=0 \
   --max-instances=5 \
   --set-env-vars="PYTHONUNBUFFERED=1,SEARCHAAS_CONFIG=/app/searchaas/config/searchaas.yaml" \
@@ -266,8 +281,8 @@ gcloud run deploy "${SVC_MCP}" \
   --platform=managed \
   --allow-unauthenticated \
   --port=8001 \
-  --cpu=1 \
-  --memory=3Gi \
+  --cpu=2 \
+  --memory=5Gi \
   --min-instances=0 \
   --max-instances=5 \
   --set-env-vars="PYTHONUNBUFFERED=1,SEARCHAAS_CONFIG=/app/searchaas/config/searchaas.yaml" \
@@ -280,14 +295,6 @@ MCP_URL=$(gcloud run services describe "${SVC_MCP}" \
 MCP_ENDPOINT="${MCP_URL}/mcp"
 success "FastMCP deployed → ${MCP_ENDPOINT}"
 
-# ── Update backend CORS to allow the frontend ────────────────────────────────
-# We don't know the frontend URL until after it is deployed, so we first deploy
-# with a placeholder and patch CORS after we have the real URL.  Cloud Run
-# assigns a stable URL on first deploy; subsequent redeploys keep it.
-#
-# Derive the expected frontend URL (Cloud Run URL format is deterministic once
-# the service exists).  We patch CORS after the frontend deploy below.
-
 # ── Deploy Frontend ───────────────────────────────────────────────────────────
 step "Deploying React frontend → Cloud Run service '${SVC_FE}'"
 gcloud run deploy "${SVC_FE}" \
@@ -297,8 +304,8 @@ gcloud run deploy "${SVC_FE}" \
   --platform=managed \
   --allow-unauthenticated \
   --port=8080 \
-  --cpu=1 \
-  --memory=512Mi \
+  --cpu=2 \
+  --memory=5Gi \
   --min-instances=0 \
   --max-instances=5 \
   --set-env-vars="SEARCHAAS_API_URL=${API_URL},SEARCHAAS_MCP_URL=${MCP_ENDPOINT}" \
@@ -315,22 +322,18 @@ step "Patching CORS on API and MCP services to allow frontend origin"
 gcloud run services update "${SVC_API}" \
   --region="${REGION}" \
   --project="${PROJECT_ID}" \
-  --update-env-vars="CORS_ORIGINS=${FE_URL}" \
+  --update-env-vars="SEARCHAAS_CORS_ORIGINS=${FE_URL}" \
   --quiet
 success "CORS updated on ${SVC_API}"
 
 gcloud run services update "${SVC_MCP}" \
   --region="${REGION}" \
   --project="${PROJECT_ID}" \
-  --update-env-vars="CORS_ORIGINS=${FE_URL}" \
+  --update-env-vars="SEARCHAAS_CORS_ORIGINS=${FE_URL}" \
   --quiet
 success "CORS updated on ${SVC_MCP}"
 
 # ── Post-deploy verification ──────────────────────────────────────────────────
-# Confirm the API container resolved the YAML's ${ATLAS_URI}/${ATLAS_DB}/...
-# placeholders from Secret Manager. If the response is missing the collection
-# or database, the secrets didn't reach the container — surface that here
-# instead of letting the user discover it via an empty UI later.
 step "Verifying live /settings on ${SVC_API} reflects searchaas.yaml + .env"
 sleep 4
 _live_settings=$(curl -sS --max-time 20 "${API_URL}/settings" || true)
@@ -348,10 +351,6 @@ else
   fi
 fi
 
-# Verify the frontend got its same-origin overrides set so the UI hits the
-# right backend. If SEARCHAAS_API_URL on the deployed frontend revision is
-# empty, /config.js falls back to http://localhost:8000 — the symptom the user
-# reported earlier in this conversation.
 step "Verifying frontend revision has SEARCHAAS_API_URL / SEARCHAAS_MCP_URL set"
 _fe_env=$(gcloud run services describe "${SVC_FE}" \
   --region="${REGION}" --project="${PROJECT_ID}" \

@@ -1,5 +1,43 @@
 import type { AppConfig, Strategy } from "./types";
 
+/** Build the $vectorSearch stage, accounting for AutoEmbeddings vs client-side.
+ *
+ *  AutoEmbeddings (embeddings.provider "auto"): Atlas embeds the query text
+ *  server-side, so the stage `path` is the text field and the query is passed
+ *  as `{ query: { text } }` with a `model` — there is NO client `queryVector`.
+ *  Client-side embeddings: the client sends a `queryVector` on `embedding_key`. */
+function vectorSearchStage(
+  cfg: AppConfig,
+  query: string,
+  numCandidates: number,
+  limit: number,
+  filters: Record<string, unknown>,
+): Record<string, unknown> {
+  const atlas = cfg.atlas;
+  const isAuto =
+    cfg.embeddings?.provider === "auto" ||
+    !atlas.embedding_key ||
+    atlas.dimensions === -1;
+
+  const stage: Record<string, unknown> = {
+    index: atlas.vector_index || "vector_index",
+  };
+  if (isAuto) {
+    stage.path = atlas.text_key || "text";                 // autoEmbed path
+    stage.query = { text: query };                          // Atlas embeds server-side
+    stage.numCandidates = numCandidates;
+    stage.limit = limit;
+    stage.model = String(cfg.embeddings?.config?.model ?? "<auto-embed model>");
+  } else {
+    stage.path = atlas.embedding_key || "embedding";
+    stage.queryVector = `<embedding(${query.length} chars) -> ${atlas.dimensions ?? "N"}-dim float[]>`;
+    stage.numCandidates = numCandidates;
+    stage.limit = limit;
+  }
+  if (Object.keys(filters).length) stage.filter = filters;
+  return stage;
+}
+
 /** Reconstruct an Atlas aggregation pipeline for the chosen strategy. */
 export function buildPipeline(
   strategy: Strategy | string,
@@ -12,66 +50,55 @@ export function buildPipeline(
   const retrieval = cfg.retrieval;
   const coll = atlas.collection || "<collection>";
   const s = String(strategy).replace(/-/g, "_");
+  const isAuto =
+    cfg.embeddings?.provider === "auto" ||
+    !atlas.embedding_key ||
+    atlas.dimensions === -1;
+  // Only client-side pipelines project the stored embedding out of results.
+  const stripEmbedding = isAuto ? {} : { [atlas.embedding_key || "embedding"]: 0 };
 
   if (s === "vector") {
-    const stage: Record<string, unknown> = {
-      index: atlas.vector_index || "vector_index",
-      path: atlas.embedding_key || "embedding",
-      queryVector: `<embedding(${query.length} chars) -> ${atlas.dimensions ?? "N"}-dim float[]>`,
-      numCandidates: Math.max(retrieval.vector?.num_candidates ?? 200, topK),
-      limit: topK,
-    };
-    if (Object.keys(filters).length) stage.filter = filters;
-    return {
-      collection: coll,
-      pipeline: [
-        { $vectorSearch: stage },
-        { $set: { score: { $meta: "vectorSearchScore" } } },
-        { $project: { [atlas.embedding_key || "embedding"]: 0 } },
-      ],
-    };
+    const stage = vectorSearchStage(
+      cfg, query, Math.max(retrieval.vector?.num_candidates ?? 200, topK), topK, filters,
+    );
+    const pipeline: unknown[] = [
+      { $vectorSearch: stage },
+      { $set: { score: { $meta: "vectorSearchScore" } } },
+    ];
+    if (!isAuto) pipeline.push({ $project: stripEmbedding });
+    return { collection: coll, pipeline };
   }
 
   if (s === "fulltext") {
-    const compound: Record<string, unknown> = {
-      must: [{ text: { query, path: atlas.text_key || "text" } }],
-    };
-    if (Object.keys(filters).length) {
-      compound.filter = Object.entries(filters).map(([k, v]) => ({
-        equals: { path: k, value: v },
-      }));
-    }
-    return {
-      collection: coll,
-      pipeline: [
-        { $search: { index: atlas.search_index || "default", compound } },
-        { $set: { score: { $meta: "searchScore" } } },
-        { $limit: topK },
-      ],
-    };
+    // The backend applies metadata filters as a plain $match after $search
+    // (MQL, same shape as $vectorSearch.filter) — not a Lucene compound filter.
+    const pipeline: unknown[] = [
+      { $search: { index: atlas.search_index || "default",
+                   text: { query, path: atlas.text_key || "text" } } },
+    ];
+    if (Object.keys(filters).length) pipeline.push({ $match: filters });
+    pipeline.push({ $set: { score: { $meta: "searchScore" } } }, { $limit: topK });
+    return { collection: coll, pipeline };
   }
 
   if (s === "hybrid") {
     const vw = retrieval.hybrid?.vector_weight ?? 0.6;
     const fw = retrieval.hybrid?.fulltext_weight ?? 0.4;
-    const vecStage: Record<string, unknown> = {
-      index: atlas.vector_index || "vector_index",
-      path: atlas.embedding_key || "embedding",
-      queryVector: `<embedding -> ${atlas.dimensions ?? "N"}-dim>`,
-      numCandidates: Math.max(retrieval.vector?.num_candidates ?? 200, topK * 10),
-      limit: topK * 10,
-    };
-    if (Object.keys(filters).length) vecStage.filter = filters;
+    const numCands = Math.max(retrieval.vector?.num_candidates ?? 200, topK * 10);
+    const vecStage = vectorSearchStage(cfg, query, numCands, topK * 10, filters);
+    // The full-text channel applies the SAME metadata filter as a $match (MQL).
+    const ftPipeline: unknown[] = [
+      { $search: { index: atlas.search_index || "default",
+                   text: { query, path: atlas.text_key || "text" } } },
+    ];
+    if (Object.keys(filters).length) ftPipeline.push({ $match: filters });
+    ftPipeline.push({ $limit: topK * 10 });
     return {
       collection: coll,
       strategy: "Reciprocal Rank Fusion (RRF)",
       weights: { vector: vw, fulltext: fw },
       vector_pipeline: [{ $vectorSearch: vecStage }],
-      fulltext_pipeline: [
-        { $search: { index: atlas.search_index || "default",
-                     text: { query, path: atlas.text_key || "text" } } },
-        { $limit: topK * 10 },
-      ],
+      fulltext_pipeline: ftPipeline,
       fusion: "score = vector_weight / (60 + rank_vector) + fulltext_weight / (60 + rank_fulltext)",
     };
   }
@@ -96,26 +123,17 @@ export function buildPipeline(
   }
 
   if (s === "parent_doc") {
-    const stage: Record<string, unknown> = {
-      index: atlas.vector_index || "vector_index",
-      path: atlas.embedding_key || "embedding",
-      queryVector: `<embedding -> ${atlas.dimensions ?? "N"}-dim>`,
-      numCandidates: topK * 10,
-      limit: topK,
-    };
-    if (Object.keys(filters).length) stage.filter = filters;
-    return {
-      collection: coll,
-      pipeline: [
-        { $vectorSearch: stage },
-        { $lookup: { from: coll, localField: "parent_id",
-                     foreignField: "_id", as: "parent" } },
-        { $replaceRoot: { newRoot: {
-            $ifNull: [{ $arrayElemAt: ["$parent", 0] }, "$$ROOT"],
-        } } },
-        { $project: { [atlas.embedding_key || "embedding"]: 0 } },
-      ],
-    };
+    const stage = vectorSearchStage(cfg, query, topK * 10, topK, filters);
+    const pipeline: unknown[] = [
+      { $vectorSearch: stage },
+      { $lookup: { from: coll, localField: "parent_id",
+                   foreignField: "_id", as: "parent" } },
+      { $replaceRoot: { newRoot: {
+          $ifNull: [{ $arrayElemAt: ["$parent", 0] }, "$$ROOT"],
+      } } },
+    ];
+    if (!isAuto) pipeline.push({ $project: stripEmbedding });
+    return { collection: coll, pipeline };
   }
 
   if (s === "auto") {

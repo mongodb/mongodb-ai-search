@@ -34,8 +34,11 @@ from searchaas.embeddings import EmbeddingFactory
 from searchaas.infrastructure import AtlasFactory
 from searchaas.llm import LLMFactory
 from searchaas.observability import configure_logging, get_logger
+# Side-effect import: register the pipeline-capture listener before the vector
+# store's MongoClient is built in `_build_vector_store`.
+from searchaas.observability import pipeline_capture as _pipeline_capture  # noqa: F401
 from searchaas.planning import PolicyStore, RetrievalPlanner
-from searchaas.query_understanding import QueryUnderstandingLayer
+from searchaas.query_understanding import FactStore, QueryUnderstandingLayer
 from searchaas.retrieval import RetrieverFactory
 
 configure_logging()
@@ -50,6 +53,7 @@ class Container:
     vector_store: Any
     collection: Any
     understanding: QueryUnderstandingLayer
+    fact_store: FactStore
     policies: PolicyStore
     planner: RetrievalPlanner
     retrievers: RetrieverFactory
@@ -367,9 +371,17 @@ def build_container(config: AppConfig | None = None) -> Container:
     is_auto = isinstance(embeddings, AutoEmbeddings)
 
     # --- Query Understanding + Planning ---
+    # Namespace the cache by the config that drives extraction (filter_fields +
+    # field_aliases) so changing either invalidates stale extractions.
+    field_aliases = cfg.query_understanding.field_aliases
+    ns_parts = [",".join(sorted(cfg.atlas.filter_fields))]
+    ns_parts += [f"{k}={'|'.join(v)}" for k, v in sorted(field_aliases.items())]
+    fact_store = FactStore(namespace=";".join(ns_parts))
     understanding = QueryUnderstandingLayer(
         llm=llm,
         allowed_filter_fields=cfg.atlas.filter_fields,
+        field_aliases=field_aliases,
+        fact_store=fact_store,
     )
     policies = PolicyStore(default_strategy=cfg.retrieval.default_strategy)
     planner = RetrievalPlanner(
@@ -406,6 +418,7 @@ def build_container(config: AppConfig | None = None) -> Container:
         vector_store=vector_store,
         collection=collection,
         understanding=understanding,
+        fact_store=fact_store,
         policies=policies,
         planner=planner,
         retrievers=retrievers,

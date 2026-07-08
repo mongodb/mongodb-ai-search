@@ -201,7 +201,7 @@ export async function runMcp(
     } else throw err;
   }
   if (raw && typeof raw === "object" && "results" in raw)
-    return { strategy: raw.strategy ?? strategy, plan: raw.plan ?? {}, results: raw.results ?? [], understood_query: raw.understood_query ?? null, summary: raw.summary ?? null, timings: raw.timings ?? null };
+    return { strategy: raw.strategy ?? strategy, plan: raw.plan ?? {}, results: raw.results ?? [], understood_query: raw.understood_query ?? null, summary: raw.summary ?? null, timings: raw.timings ?? null, pipeline: raw.pipeline ?? null };
   if (Array.isArray(raw))
     return { strategy, plan: {}, results: raw };
   return { strategy, plan: {}, results: [] };

@@ -28,7 +28,7 @@ param googleApiKey string = ''
 @secure()
 param openaiApiKey string = ''
 @secure()
-param azureOpenaiApiKey string
+param azureOpenaiApiKey string = ''
 @secure()
 param mcpApiKey string
 
@@ -40,7 +40,7 @@ var dataSecrets = [
   }
   {
     name: 'voyage-api-key'
-    value: voyageApiKey
+    value: empty(voyageApiKey) ? 'unset' : voyageApiKey
   }
   {
     name: 'google-api-key'
@@ -52,7 +52,7 @@ var dataSecrets = [
   }
   {
     name: 'azure-openai-api-key'
-    value: azureOpenaiApiKey
+    value: empty(azureOpenaiApiKey) ? 'unset' : azureOpenaiApiKey
   }
 ]
 

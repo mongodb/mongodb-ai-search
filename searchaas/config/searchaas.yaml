@@ -50,6 +50,17 @@
 # embeddings provider against the live index type and refuses to start on
 # mismatch (e.g. `provider: voyageai` + an autoEmbed index, or
 # `provider: auto` + a non-autoEmbed index).
+#
+# -----------------------------------------------------------------------------
+# Query facts → pre-filter vs post-filter
+# -----------------------------------------------------------------------------
+# The Query Understanding layer extracts typed facts ({field, op, value}) from
+# each query. A fact becomes a fast Atlas PRE-filter (records skipped before
+# scoring → lower latency) ONLY if its field is indexed as `{type: filter}` in
+# the Atlas vector index AND mirrored in `atlas.vector_index_definition` so it
+# appears in `AtlasConfig.filter_fields`. Facts on any other field are applied
+# as in-memory POST-filters after retrieval (precision only, no scan savings).
+# To make a frequently-queried field selective, index it as a filter field.
 
 atlas:
   uri: ${ATLAS_URI}                                      # mongodb+srv://... (secret, from env)
@@ -63,6 +74,33 @@ atlas:
   embedding_key:      ${ATLAS_EMBEDDING_KEY:-}          # Auto default empty -> None; set for client mode
   relevance_score_fn: ${ATLAS_RELEVANCE_FN:-}           # Auto default empty -> None; set for client mode
   dimensions:         ${ATLAS_DIMENSIONS:--1}           # -1 for auto; set real dims for client mode
+
+  # Mirror of the live Atlas vector index definition. Source of truth for
+  # `AtlasConfig.filter_fields` — every entry with `type: filter` here (and in
+  # the actual Atlas index) can be used as a fast $vectorSearch pre-filter.
+  # Keep this in sync with the index in Atlas; a filter path declared here but
+  # missing from the live index causes Atlas to reject the query.
+  vector_index_definition:
+    fields:
+      - type: autoEmbed          # server-side embedding of the plot text
+        path: plot
+        model: voyage-4
+        modality: text
+      - type: filter             # sample_mflix.movies filterable facets
+        path: imdb.rating
+      - type: filter
+        path: year
+      - type: filter
+        path: genres
+
+  # Mirror of the live Atlas Search (Lucene) index used for fulltext/hybrid.
+  # `dynamic: true` means every field is indexed and filterable, so
+  # `search_filter_fields` is None and the fulltext strategy keeps the same
+  # metadata filters as vector/hybrid (instead of dropping them). Keep in sync
+  # with the live `default` search index.
+  search_index_definition:
+    mappings:
+      dynamic: true
 
   # ---- Mode A: client-side Voyage embeddings (alternative) ------------------
   # vector_index:       ${ATLAS_VECTOR_INDEX:-voyage_vector_index}
@@ -129,9 +167,23 @@ planner:
     azure_api_key:      ${AZURE_OPENAI_API_KEY:-}
     # --- openai ---
     api_key:            ${OPENAI_API_KEY:-}
+    openai_api_base:    ${OPENAI_BASE_URL:-}
     # --- gemini ---
     google_api_key:     ${GOOGLE_API_KEY:-}
   default_top_k: ${PLANNER_DEFAULT_TOP_K:-20}
+
+# -----------------------------------------------------------------------------
+# Query Understanding
+# -----------------------------------------------------------------------------
+# field_aliases: query synonyms the LLM may use for each indexed filter field.
+# Injected into the extraction prompt so e.g. "highly rated"/"5 stars" resolve
+# to the exact indexed path `imdb.rating`. The LLM disambiguates by context, so
+# a synonym like "stars" is only mapped when it actually means the field.
+query_understanding:
+  field_aliases:
+    imdb.rating: [rating, ratings, score, scores, stars, grade, grading]
+    year:        [year, release year, released, released in]
+    genres:      [genre, genres, category, categories, kind]
 
 # -----------------------------------------------------------------------------
 # Retrieval Strategies

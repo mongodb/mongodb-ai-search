@@ -9,8 +9,6 @@ the planner / Atlas.
 """
 from __future__ import annotations
 
-import logging
-
 import pytest
 
 from searchaas.query_understanding import QueryUnderstandingLayer
@@ -48,14 +46,17 @@ def test_aws03_repro_company_filter_is_dropped(make_llm, prompt_subset):
 
 
 def test_understanding_keeps_allowlisted_field(make_llm):
-    """A filter on a genuinely indexed field survives sanitization."""
+    """A fact on a genuinely indexed field is compiled into the Atlas pre-filter,
+    while a non-indexed field is routed to post-filters (never sent to Atlas)."""
     query = "page 3 of the Q1 2024 release"
     layer = QueryUnderstandingLayer(
         llm=make_llm({query: {"page_number": 3, "company": "Amazon"}}),
         allowed_filter_fields=ALLOWED,
     )
     uq = layer.process(query)
-    assert uq.metadata_filters == {"page_number": 3}
+    assert uq.metadata_filters == {"page_number": {"$eq": 3}}
+    post_fields = {f.field for f in uq.post_filters}
+    assert "company" in post_fields and "page_number" not in post_fields
 
 
 def test_empty_allowlist_drops_every_filter(make_llm, prompt_subset):
@@ -83,9 +84,14 @@ def test_prompt_constraint_forbids_filters_when_none_configured(make_llm, prompt
     assert "{}" in rendered  # "this MUST be {}"
 
 
-def test_dropped_filters_are_logged(make_llm, prompt_subset, caplog):
+def test_non_indexed_facts_routed_to_post_filters(make_llm, prompt_subset):
+    """Non-indexed inferred fields are no longer dropped — they become in-memory
+    post-filters, while the Atlas pre-filter (metadata_filters) stays empty so
+    no unindexed path is ever sent to $vectorSearch.filter."""
     layer = _make_layer(make_llm, prompt_subset, ALLOWED)
     aws01 = next(p for p in prompt_subset if p["id"] == "aws-01")
-    with caplog.at_level(logging.WARNING, logger="searchaas.query_understanding"):
-        layer.process(aws01["query"])
-    assert "Dropping non-filterable metadata filter(s)" in caplog.text
+    uq = layer.process(aws01["query"])
+    assert uq.metadata_filters == {}
+    # aws-01 simulates {"company": "Amazon", "fiscal_year": 2024}; both non-indexed.
+    post_fields = {f.field for f in uq.post_filters}
+    assert {"company", "fiscal_year"} <= post_fields

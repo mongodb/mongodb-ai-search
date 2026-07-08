@@ -35,11 +35,14 @@ def extract_json(text: str) -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 # Auto-strategy clamping (shared by /retrieve and auto_search MCP tool)
 # ---------------------------------------------------------------------------
-_AUTO_ALLOWED = frozenset({"hybrid", "fulltext", "vector"})
+# hybrid/fulltext/vector are the general-purpose auto strategies; `metadata` is
+# included so ordering/superlative queries route to a find/$sort rather than a
+# semantic search. graph / parent_doc stay explicit-only.
+_AUTO_ALLOWED = frozenset({"hybrid", "fulltext", "vector", "metadata"})
 
 
 def clamp_auto_strategy(planner_choice: str, intent: str | None) -> str:
-    """Clamp the planner's strategy choice to the three auto-mode strategies."""
+    """Clamp the planner's strategy choice to the auto-mode strategies."""
     if planner_choice in _AUTO_ALLOWED:
         return planner_choice
     if intent in ("exact_lookup", "policy_lookup"):

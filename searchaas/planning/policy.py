@@ -18,7 +18,7 @@ from searchaas.observability import get_logger
 log = get_logger("searchaas.planning.policy")
 
 
-ALLOWED_STRATEGIES = ("vector", "fulltext", "hybrid", "graph", "parent_doc")
+ALLOWED_STRATEGIES = ("vector", "fulltext", "hybrid", "graph", "parent_doc", "metadata")
 
 
 class RetrievalPolicy(BaseModel):

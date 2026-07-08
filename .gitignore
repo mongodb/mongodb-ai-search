@@ -3,6 +3,11 @@
 .kiro/
 .codegraph/
 venv/
+.venv/
+
+# Local planning docs (not tracked)
+MQL_Stage_Plan.md
+RankFusionPlan.md
 
 # Python
 __pycache__/
@@ -17,3 +22,5 @@ __pycache__/
 
 # OS
 .DS_Store
+graphify-out/
+AWS_DEPLOYMENT.md
