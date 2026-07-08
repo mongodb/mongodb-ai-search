@@ -70,25 +70,38 @@ export default function App() {
   }, [showUrlPopup]);
 
   /* ── Hydrate config from backend ───────────────────────────────────────
-     Pull the live YAML config from FastAPI `GET /settings` and merge it
-     over DEFAULT_CONFIG so the side pane shows what the backend is really
-     using. Re-runs whenever the FastAPI URL changes. */
+     Try FastAPI GET /settings first. If that fails (e.g. only the MCP server
+     is running), fall back to the MCP server's /settings endpoint — which
+     exposes the same response shape. If both fail, proceed with DEFAULT_CONFIG
+     so searches are never permanently blocked. */
   const reloadConfig = async (signal?: AbortSignal) => {
     setConfigLoading(true);
     setConfigError(null);
-    try {
-      const live = await getSettings(fastapiUrl);
-      if (signal?.aborted) return;
-      setConfig(mergeBackendSettings(live));
-    } catch (e) {
-      if (signal?.aborted) return;
-      setConfigError(
-        `Could not load /settings from ${fastapiUrl} — showing default config. ` +
-        `(${String((e as Error).message ?? e)})`,
-      );
-    } finally {
-      if (!signal?.aborted) setConfigLoading(false);
+    // Derive the MCP server's base URL from the MCP endpoint URL.
+    // e.g. "http://localhost:8001/mcp" → "http://localhost:8001"
+    const mcpBase = mcpUrl.replace(/\/mcp\/?$/, "");
+    const candidates = [fastapiUrl, mcpBase].filter(Boolean);
+    let loaded = false;
+    for (const url of candidates) {
+      try {
+        const live = await getSettings(url);
+        if (signal?.aborted) return;
+        setConfig(mergeBackendSettings(live));
+        setConfigError(null);
+        loaded = true;
+        break;
+      } catch {
+        // Try next candidate
+      }
     }
+    if (!loaded && !signal?.aborted) {
+      setConfigError(
+        `Could not reach /settings on ${candidates.join(" or ")} — ` +
+        `using built-in defaults. Searches will work but the config panel ` +
+        `may not reflect live YAML values.`,
+      );
+    }
+    if (!signal?.aborted) setConfigLoading(false);
   };
 
   useEffect(() => {
@@ -96,7 +109,7 @@ export default function App() {
     reloadConfig(ctrl.signal);
     return () => ctrl.abort();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [fastapiUrl]);
+  }, [fastapiUrl, mcpUrl]);
 
   const backendLabel = backend === "fastapi" ? "FastAPI REST" : "FastMCP";
   const activeUrl = backend === "fastapi" ? fastapiUrl : mcpUrl;
@@ -111,20 +124,17 @@ export default function App() {
 
   const onRun = async (q: string) => {
     if (!q.trim()) return;
-    // Block searches until the live config has been hydrated from the backend
-    // (searchaas.yaml + .env). Sending overrides built from the placeholder
-    // DEFAULT_CONFIG would silently override the YAML on the server.
+    // Still waiting for the first /settings response — show a transient message
+    // but don't block: the user may be running MCP-only or FastAPI-only and the
+    // URL may just need a moment to respond.
     if (configLoading) {
-      setError("Still loading server config (searchaas.yaml + .env)… please retry in a moment.");
+      setError("Still loading server config… please retry in a moment.");
       return;
     }
-    if (configError) {
-      setError(
-        `Cannot search: failed to load server config from ${fastapiUrl}. ` +
-        `Click ↻ Reload to retry. (${configError})`,
-      );
-      return;
-    }
+    // /settings failed (server not reachable on fastapiUrl), but we still allow
+    // searches — the backend resolves its own config from its YAML + env.
+    // We just won't send atlas/retrieval overrides derived from DEFAULT_CONFIG
+    // (they would silently override YAML values the server already resolved).
     setError(null);
     setLoading(true);
     try {

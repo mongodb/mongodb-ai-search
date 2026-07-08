@@ -232,6 +232,7 @@ class PlannerUpdate(BaseModel):
     llm_provider: str | None = None
     config:       dict[str, Any] | None = None
     default_top_k: int | None = Field(default=None, ge=1, le=200)
+    enable_summarization: bool | None = None
 
 
 class RetrievalSettingsUpdate(BaseModel):
@@ -372,7 +373,8 @@ def _execute_plan(
         )
 
     t_sum = time.perf_counter()
-    summary = summarize(c.llm, invoke_query, serialized)
+    _enable_sum = get_container().config.planner.enable_summarization
+    summary = summarize(c.llm, invoke_query, serialized) if _enable_sum else None
     summarize_ms = round((time.perf_counter() - t_sum) * 1000, 1) if summary is not None else None
 
     total_ms = round((time.perf_counter() - t_total) * 1000, 1)

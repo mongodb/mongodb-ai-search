@@ -151,12 +151,21 @@ class PlannerConfig(BaseModel):
     llm_provider: str
     config: dict[str, Any] = Field(default_factory=dict)
     default_top_k: int = 20
+    enable_summarization: bool = True
 
 
 class RetrievalConfig(BaseModel):
     default_strategy: str = "hybrid"
     hybrid: dict[str, Any] = Field(default_factory=dict)
     vector: dict[str, Any] = Field(default_factory=dict)
+    max_time_ms: int | None = None   # per-aggregation kill switch; 0 = disabled
+
+    @property
+    def effective_max_time_ms(self) -> int | None:
+        """Return None when max_time_ms is 0 (disabled) or not set."""
+        if not self.max_time_ms:
+            return None
+        return self.max_time_ms
 
 
 class ServerConfig(BaseModel):

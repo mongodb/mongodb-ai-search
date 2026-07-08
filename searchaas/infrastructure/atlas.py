@@ -64,7 +64,22 @@ class AtlasFactory:
             client = MongoClient(
                 cfg.uri,
                 appname="searchaas",
+                # Fail fast on misconfiguration / network issues.
                 serverSelectionTimeoutMS=8000,
+                # Keep 2 warm connections alive so the first request after a
+                # cold start or idle period doesn't pay TCP handshake overhead.
+                minPoolSize=2,
+                # Cap the pool so we don't exhaust Atlas's connection limit.
+                # Atlas M10=500, M30=1500 concurrent connections; 10 per pod
+                # leaves headroom for multiple replicas.
+                maxPoolSize=10,
+                # Per-socket read/write deadline — prevents a hung aggregation
+                # from blocking a worker indefinitely (distinct from maxTimeMS
+                # which is a server-side kill switch).
+                socketTimeoutMS=30_000,
+                # How long a thread waits for a pool slot before raising an
+                # exception — surfaces contention early rather than queueing.
+                waitQueueTimeoutMS=5_000,
             )
         except ConfigurationError as exc:
             log.error("Atlas: invalid connection string — %s", exc)

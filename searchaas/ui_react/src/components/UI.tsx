@@ -153,3 +153,26 @@ export function Latency({ ms }: { ms: number }) {
   const display = ms >= 1000 ? `${(ms / 1000).toFixed(1)}s` : `${ms}ms`;
   return <span className={`latency ${cls}`}>⏱ {display}</span>;
 }
+
+/** Pill-style on/off toggle. */
+export function Toggle({ checked, onChange, label }: {
+  checked: boolean;
+  onChange: (checked: boolean) => void;
+  label?: string;
+}) {
+  return (
+    <label className="toggle-label">
+      <span
+        className={`toggle-track ${checked ? "toggle-on" : "toggle-off"}`}
+        role="switch"
+        aria-checked={checked}
+        tabIndex={0}
+        onClick={() => onChange(!checked)}
+        onKeyDown={(e) => (e.key === "Enter" || e.key === " ") && onChange(!checked)}
+      >
+        <span className="toggle-thumb" />
+      </span>
+      {label && <span className="toggle-text">{label}</span>}
+    </label>
+  );
+}

@@ -152,6 +152,7 @@ embeddings:
 # -----------------------------------------------------------------------------
 planner:
   llm_provider: ${PLANNER_LLM_PROVIDER:-gemini}
+  enable_summarization: ${ENABLE_SUMMARIZATION:-false}
   config:
     model: ${PLANNER_MODEL:-gemini-2.5-flash}
     temperature: ${PLANNER_TEMPERATURE:-0.1}
@@ -194,7 +195,14 @@ retrieval:
     vector_weight: ${RETRIEVAL_HYBRID_VECTOR_WEIGHT:-0.6}
     fulltext_weight: ${RETRIEVAL_HYBRID_FULLTEXT_WEIGHT:-0.4}
   vector:
-    num_candidates: ${RETRIEVAL_VECTOR_NUM_CANDIDATES:-200}
+    # Lower num_candidates → faster ANN scan, slightly lower recall.
+    # 100 is a good balance for collections under 1M docs; raise for larger
+    # collections or when recall matters more than latency.
+    num_candidates: ${RETRIEVAL_VECTOR_NUM_CANDIDATES:-50}
+  # Kill switch: abort any aggregation that takes longer than this (ms).
+  # Prevents a slow graph/regex query from blocking a worker indefinitely.
+  # Set to 0 or omit to disable (default: 5000 ms).
+  max_time_ms: ${RETRIEVAL_MAX_TIME_MS:-3000}
 
 # -----------------------------------------------------------------------------
 # Server

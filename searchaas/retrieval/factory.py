@@ -89,6 +89,7 @@ class RetrieverFactory:
         vector_num_candidates: int = 200,
         filter_fields: list[str] | None = None,
         fulltext_filter_fields: list[str] | None = None,
+        max_time_ms: int | None = None,
     ) -> None:
         self._vs = vector_store
         self._llm = llm
@@ -109,26 +110,22 @@ class RetrieverFactory:
         # and every field is filterable.
         self._filter_fields = list(filter_fields or [])
         self._fulltext_filter_fields = fulltext_filter_fields
+        self._max_time_ms = max_time_ms  # applied to custom aggregate() calls
 
         # Precompute hot-path flags so we don't call `isinstance` and
         # `getattr` chains on every request.
         self._is_auto = isinstance(getattr(vector_store, "embeddings", None), AutoEmbeddings)
         self._embeddings = getattr(vector_store, "embeddings", None)
 
-        # Snapshot the active Atlas config once. Previously every override
-        # request called `load_config().atlas` — even though `load_config`
-        # is `lru_cache(maxsize=1)`, taking the `.atlas` attribute and using
-        # it across the rest of the function still cost us a function call
-        # and attribute chain per request. Container rebuilds rebuild the
-        # factory, so this snapshot is always coherent with the live container.
+        # Snapshot the active Atlas config once.
         from searchaas.config import load_config
         self._atlas_cfg_snapshot = load_config().atlas
 
-        # Per-instance LRU for vector stores built from UI overrides. The UI
-        # tends to send the same overrides for an entire chat session, so a
-        # tiny LRU eliminates redundant `MongoDBAtlasVectorSearch.from_connection_string`
-        # calls (which open a new pymongo client connection pool and rerun
-        # index validation).
+        # Cache the text-index check for graph retrieval. list_indexes() is
+        # called once per factory lifetime (not once per graph request).
+        self._graph_text_index: bool | None = None
+
+        # Per-instance LRU for vector stores built from UI overrides.
         self._vs_cache: dict[tuple, Any] = {}
         self._vs_cache_max = 16
 
@@ -182,11 +179,25 @@ class RetrieverFactory:
         if s == "parent_doc":
             return self._build_parent_doc(plan, k, overrides)
         if s == "graph":
+            col = self._resolve_collection(overrides)
+            # Probe text index once per factory (not per request). The result
+            # is passed to the retriever so it never calls list_indexes() itself.
+            if self._graph_text_index is None:
+                try:
+                    self._graph_text_index = any(
+                        any(v == "text" for v in (idx.get("key") or {}).values())
+                        for idx in col.list_indexes()
+                    )
+                except Exception:
+                    self._graph_text_index = False
+                log.debug("graph text_index probe: %s", self._graph_text_index)
             return _GraphRAGRetriever(
-                collection=self._resolve_collection(overrides),
+                collection=col,
                 top_k=k,
                 text_key=(overrides and overrides.text_key) or self._text_key,
                 embedding_key=(overrides and overrides.embedding_key) or self._embedding_key,
+                max_time_ms=self._max_time_ms,
+                text_index_cached=self._graph_text_index,
             )
         if s == "metadata":
             return self._build_metadata(plan, k, overrides)
@@ -210,6 +221,7 @@ class RetrieverFactory:
             embedding_key=emb_key,
             filters=plan.filters or None,
             sort=getattr(plan, "sort", None) or None,
+            max_time_ms=self._max_time_ms,
         )
 
     def _sanitize_for(self, strategy: str, filters: dict[str, Any] | None) -> dict[str, Any]:
@@ -489,21 +501,29 @@ class RetrieverFactory:
 
     # ---- Full-text ------------------------------------------------------- #
     def _build_fulltext(self, plan, k: int, overrides: _Overrides = None) -> BaseRetriever:
-        """Lexical retrieval via Atlas Search ($search) — searches `text_key`."""
+        """Lexical retrieval via Atlas Search ($search) — searches `text_key`.
+
+        Uses `_FulltextRetriever` (a thin custom retriever) instead of
+        `MongoDBAtlasFullTextSearchRetriever` so we can add a server-side
+        `$project` that strips the embedding vector before it crosses the wire.
+        """
         col          = self._resolve_collection(overrides)
         search_index = (overrides and overrides.search_index) or self._search_index
         text_key     = (overrides and overrides.text_key)     or self._text_key
+        emb_key      = (overrides and overrides.embedding_key) or self._embedding_key
 
         log.info(
             "[MongoDB] $search — index=%r field=%r limit=%s filter=%s",
             search_index, text_key, k, plan.filters or None,
         )
-        return MongoDBAtlasFullTextSearchRetriever(
+        return _FulltextRetriever(
             collection=col,
-            search_index_name=search_index,
-            search_field=text_key,
+            search_index=search_index,
+            text_key=text_key,
+            embedding_key=emb_key,
             k=k,
-            filter=plan.filters or None,
+            filters=plan.filters or None,
+            max_time_ms=self._max_time_ms,
         )
 
     # ---- Hybrid (native $rankFusion) ------------------------------------ #
@@ -575,6 +595,7 @@ class RetrieverFactory:
                 fulltext_weight=fw,
                 pre_filter=plan.filters or None,
                 oversampling_factor=oversampling,
+                max_time_ms=self._max_time_ms,
             )
 
         emb_key = (overrides and overrides.embedding_key) or self._embedding_key
@@ -600,6 +621,7 @@ class RetrieverFactory:
             fulltext_weight=fw,
             pre_filter=plan.filters or None,
             oversampling_factor=oversampling,
+            max_time_ms=self._max_time_ms,
         )
 
     # ---- Parent-document ------------------------------------------------- #
@@ -669,7 +691,10 @@ class _GraphRAGRetriever(BaseRetriever):
     _max_depth: int = PrivateAttr()
     _text_key: str = PrivateAttr()
     _embedding_key: str = PrivateAttr()
-    _text_index_result: Any = PrivateAttr(default=None)   # None = not yet checked
+    _max_time_ms: int | None = PrivateAttr(default=None)
+    # Injected by RetrieverFactory so list_indexes() is called once per
+    # factory lifetime (not once per retrieval request).
+    _text_index_cached: bool | None = PrivateAttr(default=None)
 
     def __init__(
         self,
@@ -679,6 +704,8 @@ class _GraphRAGRetriever(BaseRetriever):
         max_depth: int = 1,
         text_key: str = "content",
         embedding_key: str = "embedding",
+        max_time_ms: int | None = None,
+        text_index_cached: bool | None = None,
     ) -> None:
         super().__init__()
         self._col = collection
@@ -686,6 +713,8 @@ class _GraphRAGRetriever(BaseRetriever):
         self._max_depth = max_depth
         self._text_key = text_key
         self._embedding_key = embedding_key
+        self._max_time_ms = max_time_ms
+        self._text_index_cached = text_index_cached
 
     def _get_relevant_documents(self, query: str, *, run_manager=None) -> list[Document]:  # type: ignore[override]
         try:
@@ -694,6 +723,14 @@ class _GraphRAGRetriever(BaseRetriever):
                 if self._has_text_index()
                 else {"$match": {self._text_key: {"$regex": query, "$options": "i"}}}
             )
+            # $project immediately after $graphLookup strips embedding vectors
+            # and the connected array from every document before they travel
+            # over the wire into Python. On collections with large vectors
+            # (512-3072 floats each) this cuts wire transfer significantly.
+            exclude_fields = {self._embedding_key: 0, "connected": 0}
+            if self._embedding_key != "embedding":
+                exclude_fields["embedding"] = 0
+
             pipeline = [
                 match_stage,
                 {"$limit": max(self._top_k, 10)},
@@ -705,19 +742,28 @@ class _GraphRAGRetriever(BaseRetriever):
                         "connectToField": "entities",
                         "as": "connected",
                         "maxDepth": self._max_depth,
+                        # Limit connected array size at the Atlas level to avoid
+                        # pulling thousands of hops into memory.
+                        "restrictSearchWithMatch": {},
                     }
                 },
+                # Project BEFORE Python reads any row: drop vectors + raw connected array.
+                # Individual hops are unpacked below via the pre-projected connected list.
+                {"$project": {**exclude_fields, "connected": 1, self._text_key: 1,
+                               "_id": 1, "entities": 1}},
                 {"$limit": self._top_k},
             ]
             log.debug(
-                "[MongoDB] aggregate pipeline — collection=%r stages=%s",
-                self._col.name,
-                pipeline,
+                "[MongoDB] aggregate pipeline (graph) — collection=%r stages=%d",
+                self._col.name, len(pipeline),
             )
+            agg_kwargs: dict = {}
+            if self._max_time_ms:
+                agg_kwargs["maxTimeMS"] = self._max_time_ms
+
             docs: list[Document] = []
-            for row in self._col.aggregate(pipeline):
+            for row in self._col.aggregate(pipeline, **agg_kwargs):
                 hops = row.get("connected", [])[: self._top_k]
-                # Convert BSON types (ObjectId, …) so the API can serialise them.
                 for r in (row, *hops):
                     try:
                         make_serializable(r)
@@ -726,7 +772,7 @@ class _GraphRAGRetriever(BaseRetriever):
                 docs.append(self._to_document(row))
                 for hop in hops:
                     docs.append(self._to_document(hop))
-            # de-dup by content
+            # de-dup by (_id, content prefix)
             seen, unique = set(), []
             for d in docs:
                 key = (d.metadata.get("_id"), d.page_content[:120])
@@ -742,9 +788,9 @@ class _GraphRAGRetriever(BaseRetriever):
             return []
 
     def _has_text_index(self) -> bool:
-        """Check once whether the collection has a text index; cache the result."""
-        if self._text_index_result is not None:
-            return self._text_index_result
+        """Return cached result (set by factory) or probe once and cache."""
+        if self._text_index_cached is not None:
+            return self._text_index_cached
         result = False
         try:
             result = any(
@@ -753,7 +799,7 @@ class _GraphRAGRetriever(BaseRetriever):
             )
         except Exception:
             result = False
-        self._text_index_result = result
+        self._text_index_cached = result
         return result
 
     def _to_document(self, row: dict) -> Document:
@@ -762,6 +808,99 @@ class _GraphRAGRetriever(BaseRetriever):
             if k not in (self._text_key, self._embedding_key, "connected")
         }
         return Document(page_content=row.get(self._text_key, ""), metadata=meta)
+
+
+# --------------------------------------------------------------------------- #
+# Fulltext retriever — custom $search pipeline with server-side $project
+# --------------------------------------------------------------------------- #
+class _FulltextRetriever(BaseRetriever):
+    """
+    Atlas Search (`$search`) retriever that projects out the embedding vector
+    **server-side** before the cursor sends bytes over the wire.
+
+    `MongoDBAtlasFullTextSearchRetriever` from langchain-mongodb has no
+    projection support — it returns full documents including the embedding
+    array (4–24 KB per doc × top_k docs). This class replaces it with a
+    direct aggregation that adds `{$project: {<embedding_key>: 0}}` after
+    `$search`, keeping all other document fields intact.
+    """
+
+    _col: Any = PrivateAttr()
+    _search_index: str = PrivateAttr()
+    _text_key: str = PrivateAttr()
+    _embedding_key: str = PrivateAttr()
+    _k: int = PrivateAttr()
+    _filters: dict | None = PrivateAttr()
+    _max_time_ms: int | None = PrivateAttr(default=None)
+
+    def __init__(
+        self,
+        *,
+        collection: Any,
+        search_index: str,
+        text_key: str,
+        embedding_key: str,
+        k: int,
+        filters: dict | None = None,
+        max_time_ms: int | None = None,
+    ) -> None:
+        super().__init__()
+        self._col = collection
+        self._search_index = search_index
+        self._text_key = text_key
+        self._embedding_key = embedding_key
+        self._k = k
+        self._filters = filters or None
+        self._max_time_ms = max_time_ms
+
+    def _get_relevant_documents(self, query: str, *, run_manager=None) -> list[Document]:  # type: ignore[override]
+        search_stage: dict = {
+            "$search": {
+                "index": self._search_index,
+                "text": {"query": query, "path": self._text_key},
+            }
+        }
+        if self._filters:
+            search_stage["$search"]["filter"] = self._filters  # type: ignore[index]
+
+        # Project out embedding vectors server-side — avoids sending 4–24 KB of
+        # floats per document over the wire only to discard them in Python.
+        exclude: dict[str, int] = {self._embedding_key: 0}
+        if self._embedding_key != "embedding":
+            exclude["embedding"] = 0   # belt-and-suspenders for legacy field name
+
+        pipeline: list[dict] = [
+            search_stage,
+            {"$project": exclude},
+            {"$limit": self._k},
+        ]
+
+        log.debug(
+            "[MongoDB] aggregate pipeline (fulltext) — collection=%r stages=%d",
+            self._col.name, len(pipeline),
+        )
+        agg_kwargs: dict = {}
+        if self._max_time_ms:
+            agg_kwargs["maxTimeMS"] = self._max_time_ms
+
+        try:
+            docs: list[Document] = []
+            for row in self._col.aggregate(pipeline, **agg_kwargs):
+                try:
+                    make_serializable(row)
+                except Exception:
+                    pass
+                text = row.pop(self._text_key, "") or ""
+                doc_id = row.get("_id")
+                docs.append(Document(
+                    page_content=text,
+                    metadata=row,
+                    id=str(doc_id) if doc_id is not None else None,
+                ))
+            return docs
+        except Exception as exc:
+            log.warning("Fulltext retrieval failed: %s", exc)
+            return []
 
 
 # --------------------------------------------------------------------------- #
@@ -783,6 +922,7 @@ class _MetadataRetriever(BaseRetriever):
     _embedding_key: str = PrivateAttr()
     _filters: dict | None = PrivateAttr()
     _sort: dict | None = PrivateAttr()
+    _max_time_ms: int | None = PrivateAttr(default=None)
 
     def __init__(
         self,
@@ -793,6 +933,7 @@ class _MetadataRetriever(BaseRetriever):
         embedding_key: str = "embedding",
         filters: dict | None = None,
         sort: dict | None = None,
+        max_time_ms: int | None = None,
     ) -> None:
         super().__init__()
         self._col = collection
@@ -801,6 +942,7 @@ class _MetadataRetriever(BaseRetriever):
         self._embedding_key = embedding_key
         self._filters = filters or None
         self._sort = sort or None
+        self._max_time_ms = max_time_ms
 
     def _get_relevant_documents(self, query: str, *, run_manager=None) -> list[Document]:  # type: ignore[override]
         pipeline: list[dict] = []
@@ -813,14 +955,24 @@ class _MetadataRetriever(BaseRetriever):
             pipeline.append({"$match": {sort_field: {"$type": "number"}}})
             pipeline.append({"$sort": dict(self._sort)})
         pipeline.append({"$limit": self._top_k})
+        # Project out the embedding vector server-side — it is stripped in
+        # _to_document() anyway, but doing it here avoids sending 4–24 KB per
+        # document over the wire before Python discards them.
+        exclude: dict[str, int] = {self._embedding_key: 0}
+        if self._embedding_key != "embedding":
+            exclude["embedding"] = 0
+        pipeline.append({"$project": exclude})
 
         log.debug(
-            "[MongoDB] aggregate pipeline (metadata) — collection=%r stages=%s",
-            self._col.name, pipeline,
+            "[MongoDB] aggregate pipeline (metadata) — collection=%r stages=%d",
+            self._col.name, len(pipeline),
         )
+        agg_kwargs: dict = {}
+        if self._max_time_ms:
+            agg_kwargs["maxTimeMS"] = self._max_time_ms
         try:
             docs: list[Document] = []
-            for row in self._col.aggregate(pipeline):
+            for row in self._col.aggregate(pipeline, **agg_kwargs):
                 # Convert BSON types (ObjectId, Decimal128, Binary, …) to
                 # JSON-serialisable values so the API response can be encoded.
                 try:
@@ -884,6 +1036,7 @@ class _RankFusionHybridRetriever(BaseRetriever):
     _fw: float = PrivateAttr()
     _pre_filter: dict | None = PrivateAttr()
     _oversampling: int = PrivateAttr()
+    _max_time_ms: int | None = PrivateAttr(default=None)
 
     def __init__(
         self,
@@ -900,6 +1053,7 @@ class _RankFusionHybridRetriever(BaseRetriever):
         fulltext_weight: float,
         pre_filter: dict | None,
         oversampling_factor: int,
+        max_time_ms: int | None = None,
     ) -> None:
         super().__init__()
         self._col = collection
@@ -914,6 +1068,7 @@ class _RankFusionHybridRetriever(BaseRetriever):
         self._fw = fulltext_weight
         self._pre_filter = pre_filter
         self._oversampling = max(1, oversampling_factor)
+        self._max_time_ms = max_time_ms
 
     def _vector_pipeline(self, query: str) -> list[dict]:
         """The ranked vector input pipeline for `$rankFusion` (mode-dependent)."""
@@ -972,13 +1127,14 @@ class _RankFusionHybridRetriever(BaseRetriever):
                         }
                     },
                     "combination": {"weights": {"vector": self._vw, "text": self._fw}},
-                    "scoreDetails": True,
+                    # scoreDetails intentionally omitted — it adds Atlas-side CPU
+                    # overhead computing per-channel breakdowns for every result.
+                    # The fused score is still surfaced via {$meta: "score"}.
                 }
             },
             {
                 "$addFields": {
                     "score": {"$meta": "score"},
-                    "score_details": {"$meta": "scoreDetails"},
                 }
             },
             {"$limit": self._k},
@@ -996,8 +1152,11 @@ class _RankFusionHybridRetriever(BaseRetriever):
         _make_ser = make_serializable
         _Document = Document
         _text_key = self._text_key
+        agg_kwargs: dict = {}
+        if self._max_time_ms:
+            agg_kwargs["maxTimeMS"] = self._max_time_ms
         docs: list[Document] = []
-        for res in self._col.aggregate(pipeline):
+        for res in self._col.aggregate(pipeline, **agg_kwargs):
             if _text_key not in res:
                 continue
             text = res.pop(_text_key)
@@ -1007,8 +1166,7 @@ class _RankFusionHybridRetriever(BaseRetriever):
                 score = float(score)
             except (TypeError, ValueError):
                 score = 0.0
-            # Make ObjectId / Decimal / etc serialisable for the API layer
-            # (also covers the nested `score_details` document).
+            # Make ObjectId / Decimal / etc serialisable for the API layer.
             try:
                 _make_ser(res)
             except Exception:
