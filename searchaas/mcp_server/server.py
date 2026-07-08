@@ -39,11 +39,35 @@ def _build_response(
     label: str,
 ) -> dict[str, Any]:
     """Shared tail: retrieve → serialize → summarize → build MCP response dict."""
+    import re as _re
     c = get_container()
     emb_key = (overrides and overrides.embedding_key) or _EMB_KEY
 
     t_mongo = time.perf_counter()
-    docs = c.retrievers.create(plan, overrides=overrides, retrieval_overrides=ret_overrides).invoke(invoke_query)
+    try:
+        docs = c.retrievers.create(
+            plan, overrides=overrides, retrieval_overrides=ret_overrides
+        ).invoke(invoke_query)
+    except Exception as exc:
+        # Atlas rejects $vectorSearch pre-filters on paths not declared as
+        # {type: filter} in the index. Evict the bad field and retry once
+        # without filters so the MCP tool returns results rather than raising.
+        err_str = str(exc)
+        if "needs to be indexed as filter" in err_str and plan.filters:
+            bad = _re.search(r"Path '([^']+)' needs to be indexed", err_str)
+            if bad:
+                c.retrievers.evict_filter_field(bad.group(1))
+            log.warning(
+                "MCP %s: pre-filter %s rejected by Atlas (not indexed as filter) — "
+                "retrying without filters. Error: %s",
+                label, list(plan.filters.keys()), exc,
+            )
+            plan.filters = {}
+            docs = c.retrievers.create(
+                plan, overrides=overrides, retrieval_overrides=ret_overrides
+            ).invoke(invoke_query)
+        else:
+            raise
     mongo_ms = round((time.perf_counter() - t_mongo) * 1000, 1)
 
     results = serialize_docs(docs, emb_key, include_score=True)

@@ -198,7 +198,7 @@ export default function App() {
             {/* MongoDB official logomark */}
             <img
               className="mdb-leaf"
-              src="./src/img/MongoDB_Logomark_ForestGreen.png"
+              src="https://thumbs.bfldr.com/at/bx744px9mcfvktwrr8mwsc3r/v/1069931051?expiry=1784113200&fit=bounds&height=800&sig=Y2MxOGRmNTkzNmI2Yjg4OWNhNjA2OWZlMTVhMTk4MmJlNmJmMTgzYw%3D%3D&width=1100"
               alt="MongoDB"
             />
             <span className="conn-bar-logo-text">

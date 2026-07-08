@@ -86,12 +86,12 @@ atlas:
         path: plot
         model: voyage-4
         modality: text
-      - type: filter             # sample_mflix.movies filterable facets
-        path: imdb.rating
-      - type: filter
-        path: year
-      - type: filter
-        path: genres
+      # - type: filter             # sample_mflix.movies filterable facets
+      #   path: imdb.rating
+      # - type: filter
+      #   path: year
+      # - type: filter
+      #   path: genres
 
   # Mirror of the live Atlas Search (Lucene) index used for fulltext/hybrid.
   # `dynamic: true` means every field is indexed and filterable, so
