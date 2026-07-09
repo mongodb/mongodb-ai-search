@@ -190,7 +190,7 @@ query_understanding:
 # Retrieval Strategies
 # -----------------------------------------------------------------------------
 retrieval:
-  default_strategy: ${RETRIEVAL_DEFAULT_STRATEGY:-hybrid}  # vector | fulltext | hybrid | graph | parent_doc
+  default_strategy: ${RETRIEVAL_DEFAULT_STRATEGY:-graph}  # vector | fulltext | hybrid | graph | parent_doc
   hybrid:
     vector_weight: ${RETRIEVAL_HYBRID_VECTOR_WEIGHT:-0.6}
     fulltext_weight: ${RETRIEVAL_HYBRID_FULLTEXT_WEIGHT:-0.4}
