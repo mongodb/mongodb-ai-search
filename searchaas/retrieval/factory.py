@@ -32,7 +32,6 @@ from langchain_mongodb.retrievers import (
     # Retained for the pre-8.0 portable-RRF fallback (client-side embed path);
     # not wired into `_build_hybrid`, which now emits native `$rankFusion`.
     MongoDBAtlasHybridSearchRetriever,  # noqa: F401
-    MongoDBAtlasParentDocumentRetriever,
 )
 from langchain_mongodb.vectorstores import MongoDBAtlasVectorSearch
 from langchain_mongodb.graphrag.graph import MongoDBGraphStore
@@ -720,17 +719,20 @@ class RetrieverFactory:
         index time; here we only construct the retriever bound to the same
         vectorstore.
 
-        AutoEmbeddings mode uses `_AutoEmbedParentDocRetriever` because the
-        official `MongoDBAtlasParentDocumentRetriever` calls
-        `embedder.embed_query` directly (NotImplemented for AutoEmbeddings).
+        Both embedder modes use `_AutoEmbedParentDocRetriever` (a $vectorSearch
+        child match + $lookup(doc_id -> _id) to the parent, in the same
+        collection). This replaces langchain's `MongoDBAtlasParentDocumentRetriever`,
+        which requires a separate `docstore`/`byte_store` (not how this data is
+        laid out — parents live in the same collection) and calls `embed_query`
+        (NotImplemented for AutoEmbeddings). The only difference is the vector
+        stage: server-side `query.text`+`model` (auto) vs client `queryVector`.
         """
-        vs       = self._resolve_vector_store(overrides)
         col      = self._resolve_collection(overrides)
         vi       = (overrides and overrides.vector_index)  or self._vector_index
         text_key = (overrides and overrides.text_key)      or self._text_key
+        oversampling = _oversampling_factor(k, self._vector_candidates, bool(plan.filters))
 
         if self._is_auto:
-            oversampling = _oversampling_factor(k, self._vector_candidates, bool(plan.filters))
             log.info(
                 "[MongoDB] parent-doc $vectorSearch (autoEmbed) — index=%r model=%r "
                 "limit=%s oversampling=%s pre_filter=%s",
@@ -747,15 +749,23 @@ class RetrieverFactory:
             )
 
         emb_key = (overrides and overrides.embedding_key) or self._embedding_key
+        # Ensure the base store exists (embedder lives on it) for the client path.
+        vs = self._resolve_vector_store(overrides)
         log.info(
-            "[MongoDB] parent-doc $vectorSearch — index=%r embedding=%r "
-            "limit=%s pre_filter=%s",
-            vi, emb_key, k, plan.filters or None,
+            "[MongoDB] parent-doc $vectorSearch (client embed) — index=%r embedding=%r "
+            "limit=%s oversampling=%s pre_filter=%s",
+            vi, emb_key, k, oversampling, plan.filters or None,
         )
-        return MongoDBAtlasParentDocumentRetriever(
-            vectorstore=vs,
+        return _AutoEmbedParentDocRetriever(
             collection=col,
-            search_kwargs={"k": k, "pre_filter": plan.filters or None},
+            vector_index=vi,
+            text_key=text_key,
+            model=None,
+            embeddings=getattr(vs, "embeddings", None) or self._embeddings,
+            embedding_key=emb_key,
+            k=k,
+            pre_filter=plan.filters or None,
+            oversampling_factor=oversampling,
         )
 
 
@@ -1394,21 +1404,30 @@ class _AutoEmbedHybridRetriever(BaseRetriever):
 
 
 # --------------------------------------------------------------------------- #
-# AutoEmbed-compatible parent-document retriever
+# Parent-document retriever ($vectorSearch child match -> $lookup parent)
 # --------------------------------------------------------------------------- #
 class _AutoEmbedParentDocRetriever(BaseRetriever):
-    """Parent-doc retriever for AutoEmbeddings-mode vectorstores.
+    """Parent-doc retriever for BOTH embedder modes.
 
-    Mirrors `MongoDBAtlasParentDocumentRetriever` but issues the server-side
-    `$vectorSearch` (with `query.text` + `model`) instead of embedding the
-    query client-side. After the child match, it `$lookup`s the parent doc
-    via `doc_id` and de-dupes.
+    Replaces langchain's `MongoDBAtlasParentDocumentRetriever` (which requires a
+    separate `docstore`/`byte_store` and calls `embed_query`, NotImplemented for
+    AutoEmbeddings). It runs the `$vectorSearch` on child chunks, then `$lookup`s
+    the parent via `doc_id -> _id` in the same collection and de-dupes.
+
+    The only per-mode difference is the vector stage:
+
+      * AutoEmbeddings (server-side): `$vectorSearch` with `query.text` + `model`,
+        path = `text_key`.
+      * Client-side embeddings: `embeddings.embed_query(query)` once, then
+        `$vectorSearch` with `queryVector`, path = `embedding_key`.
     """
 
     _col: Any = PrivateAttr()
     _vector_index: str = PrivateAttr()
     _text_key: str = PrivateAttr()
-    _model: str = PrivateAttr()
+    _model: str | None = PrivateAttr()
+    _embeddings: Any = PrivateAttr()
+    _embedding_key: str | None = PrivateAttr()
     _k: int = PrivateAttr()
     _pre_filter: dict | None = PrivateAttr()
     _oversampling: int = PrivateAttr()
@@ -1420,24 +1439,29 @@ class _AutoEmbedParentDocRetriever(BaseRetriever):
         collection: Any,
         vector_index: str,
         text_key: str,
-        model: str,
+        model: str | None,
         k: int,
         pre_filter: dict | None,
         oversampling_factor: int,
+        embeddings: Any = None,
+        embedding_key: str | None = None,
     ) -> None:
         super().__init__()
         self._col = collection
         self._vector_index = vector_index
         self._text_key = text_key
         self._model = model
+        self._embeddings = embeddings
+        self._embedding_key = embedding_key
         self._k = k
         self._pre_filter = pre_filter
         self._oversampling = max(1, oversampling_factor)
 
-    def _get_relevant_documents(self, query: str, *, run_manager=None) -> list[Document]:  # type: ignore[override]
-        # `autoembedding_vector_search_stage` is module-level.
-        pipeline = [
-            autoembedding_vector_search_stage(
+    def _child_vector_stage(self, query: str) -> dict:
+        """The ranked $vectorSearch stage over child chunks (mode-dependent)."""
+        if self._model is not None:
+            # AutoEmbeddings: Atlas embeds `query.text` with `model`, path=text_key.
+            return autoembedding_vector_search_stage(
                 query=query,
                 search_field=self._text_key,
                 index_name=self._vector_index,
@@ -1445,7 +1469,21 @@ class _AutoEmbedParentDocRetriever(BaseRetriever):
                 top_k=self._k,
                 filter=self._pre_filter,
                 oversampling_factor=self._oversampling,
-            ),
+            )
+        # Client-side: embed once, then queryVector on the embedding field.
+        query_vector = self._embeddings.embed_query(query)
+        return vector_search_stage(
+            query_vector=query_vector,
+            search_field=self._embedding_key or "embedding",
+            index_name=self._vector_index,
+            top_k=self._k,
+            filter=self._pre_filter,
+            oversampling_factor=self._oversampling,
+        )
+
+    def _get_relevant_documents(self, query: str, *, run_manager=None) -> list[Document]:  # type: ignore[override]
+        pipeline = [
+            self._child_vector_stage(query),
             {"$set": {"score": {"$meta": "vectorSearchScore"}}},
             {
                 "$lookup": {
