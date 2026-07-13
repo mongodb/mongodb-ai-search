@@ -59,6 +59,14 @@ class Container:
     retrievers: RetrieverFactory
 
 
+# Retrieval strategies that require an Atlas Vector Search index (and therefore
+# a built vector store). Only these trigger vector-store construction — which,
+# on a missing index, auto-creates it. Non-vector strategies (graph/fulltext/
+# metadata) must never build the store, so a graph-only deployment never creates
+# a spurious vector index on its collection.
+_VECTOR_STRATEGIES = {"auto", "vector", "hybrid", "parent_doc"}
+
+
 class ProviderIndexMismatch(RuntimeError):
     """Raised when `embeddings.provider` is incompatible with the live
     Atlas Vector Search index `atlas.vector_index`.
@@ -367,12 +375,19 @@ def build_container(config: AppConfig | None = None) -> Container:
         config=cfg.planner.config,
     )
 
-    # --- Vector store ---
-    vector_store = _build_vector_store(cfg, embeddings, collection)
+    # --- Vector store (DEFERRED) ---
+    # Do NOT build the vector store here — its construction auto-creates the
+    # Atlas vector index on the collection, which must not happen for a
+    # non-vector deployment (graph/fulltext/metadata). Hand the factory a
+    # provider; it builds lazily on first use by a vector-needing strategy.
+    # We warm it below only when the configured default_strategy needs vectors.
+    vector_store_provider = lambda: _build_vector_store(cfg, embeddings, collection)
 
     # Detect AutoEmbeddings mode for downstream retrievers (raw $vectorSearch
     # aggregations must use `text_key` as the index path, and a `null` filter on
     # the embedding field is meaningless since the field doesn't exist in docs).
+    # Derived from `embeddings` directly so it holds even when the vector store
+    # is never built.
     is_auto = isinstance(embeddings, AutoEmbeddings)
 
     # --- Query Understanding + Planning ---
@@ -402,7 +417,9 @@ def build_container(config: AppConfig | None = None) -> Container:
     # factory via `embedding_key`.
     retriever_embedding_key = cfg.atlas.text_key if is_auto else (cfg.atlas.embedding_key or "embedding")
     retrievers = RetrieverFactory(
-        vector_store=vector_store,
+        vector_store_provider=vector_store_provider,
+        embeddings=embeddings,
+        is_auto=is_auto,
         llm=llm,
         collection=collection,
         vector_index=cfg.atlas.vector_index,
@@ -416,6 +433,22 @@ def build_container(config: AppConfig | None = None) -> Container:
         fulltext_filter_fields=cfg.atlas.search_filter_fields,
         max_time_ms=cfg.retrieval.effective_max_time_ms,
     )
+
+    # Warm the vector store at startup ONLY when the configured strategy needs
+    # it — preserving today's warm-start latency for vector deployments while
+    # ensuring graph/fulltext/metadata deployments never build it (and never
+    # auto-create a vector index on their collection). A vector endpoint hit on
+    # a non-vector deployment still builds it lazily on that first request.
+    if cfg.retrieval.default_strategy in _VECTOR_STRATEGIES:
+        vector_store = retrievers.warm_vector_store()
+    else:
+        vector_store = None
+        log.info(
+            "Vector store: construction deferred — default_strategy=%r does not "
+            "require vectors (no vector index will be created on %s.%s unless a "
+            "vector/hybrid/parent_doc request is made).",
+            cfg.retrieval.default_strategy, cfg.atlas.database, collection.name,
+        )
 
     return Container(
         config=cfg,

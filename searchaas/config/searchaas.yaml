@@ -82,10 +82,12 @@ atlas:
   # missing from the live index causes Atlas to reject the query.
   vector_index_definition:
     fields:
-      - type: autoEmbed          # server-side embedding of the plot text
-        path: plot
-        model: voyage-4
-        modality: text
+      - type: vector          # normal vector index
+        path: embedding
+      # - type: autoEmbed          # server-side embedding of the plot text
+      #   path: plot
+      #   model: voyage-4
+      #   modality: text
       # - type: filter             # sample_mflix.movies filterable facets
       #   path: imdb.rating
       # - type: filter
@@ -116,13 +118,28 @@ atlas:
 #            gemini | bedrock_titan
 # -----------------------------------------------------------------------------
 
-# ---- Mode B: server-side AutoEmbeddings (ACTIVE) ----------------------------
+# ---- Client-side OpenAI embeddings (ACTIVE — matches the 1536-dim `vector` index) --
+# EmbeddingFactory.create() passes this config verbatim to OpenAIEmbeddings(**cfg),
+# so these keys must be OpenAI-shaped (model / api_key / base_url / dimensions).
 embeddings:
-  provider: ${EMBEDDINGS_PROVIDER:-auto}
+  provider: ${EMBEDDINGS_PROVIDER:-openai}
   config:
-    model: ${EMBEDDINGS_MODEL:-voyage-4}
-    voyage_api_key: ${VOYAGE_API_KEY}                   # ignored in auto mode; used in voyageai mode
-    output_dimension: ${EMBEDDINGS_OUTPUT_DIMENSION:-512}
+    model:      ${EMBEDDINGS_MODEL:-text-embedding-3-small}
+    api_key:    ${OPENAI_API_KEY}
+    base_url:   ${OPENAI_BASE_URL}          # Azure AI Foundry OpenAI-compatible /openai/v1
+    dimensions: ${ATLAS_DIMENSIONS:-1536}   # OpenAIEmbeddings param is `dimensions`; must match the index
+
+# ---- Mode B: server-side AutoEmbeddings (alternative) -----------------------
+# Use with an `autoEmbed` vector index (Atlas embeds query + docs internally).
+# Requires atlas.embedding_key=null, atlas.dimensions=-1, atlas.relevance_score_fn=null
+# (see EMBEDDINGS_PROVIDER=auto). Comment out the OpenAI block above and
+# uncomment this one.
+# embeddings:
+#   provider: ${EMBEDDINGS_PROVIDER:-auto}
+#   config:
+#     model: ${EMBEDDINGS_MODEL:-voyage-4}                  # MUST match the model in the autoEmbed index
+#     voyage_api_key: ${VOYAGE_API_KEY}                     # ignored in auto mode; used in voyageai mode
+#     output_dimension: ${EMBEDDINGS_OUTPUT_DIMENSION:-512}
 
 # ---- Mode A: client-side Voyage embeddings (alternative) --------------------
 # embeddings:

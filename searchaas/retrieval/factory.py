@@ -12,8 +12,9 @@ Self-query is Phase 2 (depends on Metadata Intelligence).
 """
 from __future__ import annotations
 
+import threading
 import time
-from typing import Any
+from typing import Any, Callable
 
 from langchain_core.documents import Document
 from langchain_core.retrievers import BaseRetriever
@@ -31,9 +32,9 @@ from langchain_mongodb.retrievers import (
     # Retained for the pre-8.0 portable-RRF fallback (client-side embed path);
     # not wired into `_build_hybrid`, which now emits native `$rankFusion`.
     MongoDBAtlasHybridSearchRetriever,  # noqa: F401
-    MongoDBAtlasParentDocumentRetriever,
 )
 from langchain_mongodb.vectorstores import MongoDBAtlasVectorSearch
+from langchain_mongodb.graphrag.graph import MongoDBGraphStore
 from langchain_mongodb.utils import make_serializable
 from pymongo.errors import OperationFailure
 from pymongo_search_utils.pipeline import (
@@ -62,6 +63,12 @@ _Overrides = Any  # AtlasOverrides | None
 _FILTER_NUMCANDIDATES_BOOST = 3
 _MAX_NUM_CANDIDATES = 10000
 
+# Max recursion depth for the GraphRAG `$graphLookup` traversal inside
+# `MongoDBGraphStore`. The store default is 3; 2 keeps hop fan-out bounded for
+# a first cut. Plumb to config/RetrievalOverrides later if per-request control
+# is needed.
+_GRAPH_MAX_DEPTH = 2
+
 
 def _oversampling_factor(k: int, num_cands: int, has_filter: bool) -> int:
     """candidates-per-result for $vectorSearch, boosted when a filter is set."""
@@ -76,10 +83,13 @@ class RetrieverFactory:
 
     def __init__(
         self,
-        vector_store: Any,
-        llm: Any,
-        collection: Any,
+        vector_store: Any = None,
+        llm: Any = None,
+        collection: Any = None,
         *,
+        vector_store_provider: Callable[[], Any] | None = None,
+        embeddings: Any = None,
+        is_auto: bool | None = None,
         vector_index: str | None = None,
         search_index: str = "default",
         text_key: str = "content",
@@ -91,11 +101,21 @@ class RetrieverFactory:
         fulltext_filter_fields: list[str] | None = None,
         max_time_ms: int | None = None,
     ) -> None:
-        self._vs = vector_store
+        # Vector-store construction is DEFERRED. The base store is built on first
+        # use by a vector-needing strategy (vector / non-auto hybrid / non-auto
+        # parent_doc / the vector diagnostic) via `_ensure_base_vector_store`,
+        # never for graph/fulltext/metadata. This is what keeps a graph-only
+        # deployment from auto-creating a spurious vector index on its
+        # collection. A pre-built `vector_store` (tests, warm starts) is honored
+        # directly; otherwise `vector_store_provider` builds it lazily once.
+        self._vs_built = vector_store            # None until built (or provided)
+        self._vs_provider = vector_store_provider
+        self._vs_lock = threading.Lock()
         self._llm = llm
         self._col = collection
         # `MongoDBAtlasVectorSearch` stores this as `_index_name`; we accept
-        # it explicitly so we don't reach into a private attribute.
+        # it explicitly so we don't reach into a private attribute (and so we
+        # don't need a built store to know the index name).
         self._vector_index = vector_index or getattr(vector_store, "_index_name", "vector_index")
         self._search_index = search_index
         self._text_key = text_key
@@ -112,18 +132,25 @@ class RetrieverFactory:
         self._fulltext_filter_fields = fulltext_filter_fields
         self._max_time_ms = max_time_ms  # applied to custom aggregate() calls
 
-        # Precompute hot-path flags so we don't call `isinstance` and
-        # `getattr` chains on every request.
-        self._is_auto = isinstance(getattr(vector_store, "embeddings", None), AutoEmbeddings)
-        self._embeddings = getattr(vector_store, "embeddings", None)
+        # Embedder mode. Prefer the explicit args (so we don't need a built
+        # vector store to know the mode); fall back to inspecting a pre-built
+        # store for backward compatibility (e.g. unit tests passing a fake).
+        if embeddings is not None or is_auto is not None:
+            self._embeddings = embeddings
+            self._is_auto = bool(is_auto)
+        else:
+            self._embeddings = getattr(vector_store, "embeddings", None)
+            self._is_auto = isinstance(self._embeddings, AutoEmbeddings)
 
         # Snapshot the active Atlas config once.
         from searchaas.config import load_config
         self._atlas_cfg_snapshot = load_config().atlas
 
-        # Cache the text-index check for graph retrieval. list_indexes() is
-        # called once per factory lifetime (not once per graph request).
-        self._graph_text_index: bool | None = None
+        # Per-collection cache of `MongoDBGraphStore` instances for the graph
+        # strategy. Building one attaches prompts + deep-copies the entity
+        # schema, so we do it once per collection (keyed by name), not per
+        # request. Mirrors the `_vs_cache` pattern.
+        self._graph_stores: dict[str, MongoDBGraphStore] = {}
 
         # Per-instance LRU for vector stores built from UI overrides.
         self._vs_cache: dict[tuple, Any] = {}
@@ -180,24 +207,9 @@ class RetrieverFactory:
             return self._build_parent_doc(plan, k, overrides)
         if s == "graph":
             col = self._resolve_collection(overrides)
-            # Probe text index once per factory (not per request). The result
-            # is passed to the retriever so it never calls list_indexes() itself.
-            if self._graph_text_index is None:
-                try:
-                    self._graph_text_index = any(
-                        any(v == "text" for v in (idx.get("key") or {}).values())
-                        for idx in col.list_indexes()
-                    )
-                except Exception:
-                    self._graph_text_index = False
-                log.debug("graph text_index probe: %s", self._graph_text_index)
             return _GraphRAGRetriever(
-                collection=col,
+                graph_store=self._get_graph_store(col),
                 top_k=k,
-                text_key=(overrides and overrides.text_key) or self._text_key,
-                embedding_key=(overrides and overrides.embedding_key) or self._embedding_key,
-                max_time_ms=self._max_time_ms,
-                text_index_cached=self._graph_text_index,
             )
         if s == "metadata":
             return self._build_metadata(plan, k, overrides)
@@ -268,6 +280,63 @@ class RetrieverFactory:
             return AtlasFactory.collection(overrides.collection)
         return self._col
 
+    def _get_graph_store(self, collection: Any) -> MongoDBGraphStore:
+        """
+        Return a `MongoDBGraphStore` attached to *collection*, cached by name.
+
+        We attach to an **existing** knowledge-graph collection (entity nodes
+        with `_id`=name, `type`, `relationships.target_ids`) — we do NOT call
+        `add_documents`, so no ingestion/LLM extraction runs here. `self._llm`
+        (a `BaseChatModel`) is the `entity_extraction_model`, used server-side
+        by `similarity_search` to pull entity names out of the query before the
+        `$graphLookup` traversal.
+        """
+        cached = self._graph_stores.get(collection.name)
+        if cached is not None:
+            return cached
+        log.info(
+            "Building MongoDBGraphStore: collection=%r max_depth=%s",
+            collection.name, _GRAPH_MAX_DEPTH,
+        )
+        store = MongoDBGraphStore(
+            collection=collection,
+            entity_extraction_model=self._llm,
+            max_depth=_GRAPH_MAX_DEPTH,
+        )
+        self._graph_stores[collection.name] = store
+        return store
+
+    def _ensure_base_vector_store(self):
+        """
+        Build (once) and return the base `MongoDBAtlasVectorSearch`.
+
+        Construction is deferred to first use so a non-vector deployment
+        (graph/fulltext/metadata) never builds a vector store — and therefore
+        never auto-creates a vector index on its collection. Thread-safe:
+        concurrent uvicorn worker requests share one build.
+        """
+        if self._vs_built is not None:
+            return self._vs_built
+        with self._vs_lock:
+            if self._vs_built is not None:  # double-checked under lock
+                return self._vs_built
+            if self._vs_provider is None:
+                raise RuntimeError(
+                    "This deployment was started without a vector store "
+                    "(default_strategy is non-vector, e.g. graph/fulltext/metadata), "
+                    "but a vector-based strategy (vector/hybrid/parent_doc) was "
+                    "requested. Configure a vector-capable collection and set "
+                    "default_strategy to vector/hybrid/parent_doc/auto."
+                )
+            self._vs_built = self._vs_provider()
+            return self._vs_built
+
+    def warm_vector_store(self) -> Any:
+        """Eagerly build and return the base vector store (called at startup
+        only when the configured default_strategy needs vectors, to preserve
+        warm starts)."""
+        return self._ensure_base_vector_store()
+
     def _resolve_vector_store(self, overrides: _Overrides):
         """
         Return a vector store, creating a temporary one when UI overrides
@@ -277,7 +346,7 @@ class RetrieverFactory:
         every request from the same UI session.
         """
         if not overrides:
-            return self._vs
+            return self._ensure_base_vector_store()
 
         # Fast-path: no override actually differs from the container defaults.
         # `or` short-circuits as soon as one mismatch is found.
@@ -287,7 +356,7 @@ class RetrieverFactory:
             or (overrides.embedding_key and overrides.embedding_key != self._embedding_key)
             or (overrides.text_key      and overrides.text_key      != self._text_key)
         ):
-            return self._vs
+            return self._ensure_base_vector_store()
 
         cfg = self._atlas_cfg_snapshot
         col_name  = overrides.collection    or self._col.name
@@ -359,7 +428,7 @@ class RetrieverFactory:
         if not is_auto:
             try:
                 t0 = time.perf_counter()
-                qvec = self._vs.embeddings.embed_query(query)
+                qvec = self._ensure_base_vector_store().embeddings.embed_query(query)
                 report["embed_ms"] = round((time.perf_counter() - t0) * 1000, 1)
                 report["query_dimensions"] = len(qvec) if hasattr(qvec, "__len__") else None
                 report["stage"] = "embedded"
@@ -650,17 +719,20 @@ class RetrieverFactory:
         index time; here we only construct the retriever bound to the same
         vectorstore.
 
-        AutoEmbeddings mode uses `_AutoEmbedParentDocRetriever` because the
-        official `MongoDBAtlasParentDocumentRetriever` calls
-        `embedder.embed_query` directly (NotImplemented for AutoEmbeddings).
+        Both embedder modes use `_AutoEmbedParentDocRetriever` (a $vectorSearch
+        child match + $lookup(doc_id -> _id) to the parent, in the same
+        collection). This replaces langchain's `MongoDBAtlasParentDocumentRetriever`,
+        which requires a separate `docstore`/`byte_store` (not how this data is
+        laid out — parents live in the same collection) and calls `embed_query`
+        (NotImplemented for AutoEmbeddings). The only difference is the vector
+        stage: server-side `query.text`+`model` (auto) vs client `queryVector`.
         """
-        vs       = self._resolve_vector_store(overrides)
         col      = self._resolve_collection(overrides)
         vi       = (overrides and overrides.vector_index)  or self._vector_index
         text_key = (overrides and overrides.text_key)      or self._text_key
+        oversampling = _oversampling_factor(k, self._vector_candidates, bool(plan.filters))
 
         if self._is_auto:
-            oversampling = _oversampling_factor(k, self._vector_candidates, bool(plan.filters))
             log.info(
                 "[MongoDB] parent-doc $vectorSearch (autoEmbed) — index=%r model=%r "
                 "limit=%s oversampling=%s pre_filter=%s",
@@ -677,154 +749,123 @@ class RetrieverFactory:
             )
 
         emb_key = (overrides and overrides.embedding_key) or self._embedding_key
+        # Ensure the base store exists (embedder lives on it) for the client path.
+        vs = self._resolve_vector_store(overrides)
         log.info(
-            "[MongoDB] parent-doc $vectorSearch — index=%r embedding=%r "
-            "limit=%s pre_filter=%s",
-            vi, emb_key, k, plan.filters or None,
+            "[MongoDB] parent-doc $vectorSearch (client embed) — index=%r embedding=%r "
+            "limit=%s oversampling=%s pre_filter=%s",
+            vi, emb_key, k, oversampling, plan.filters or None,
         )
-        return MongoDBAtlasParentDocumentRetriever(
-            vectorstore=vs,
+        return _AutoEmbedParentDocRetriever(
             collection=col,
-            search_kwargs={"k": k, "pre_filter": plan.filters or None},
+            vector_index=vi,
+            text_key=text_key,
+            model=None,
+            embeddings=getattr(vs, "embeddings", None) or self._embeddings,
+            embedding_key=emb_key,
+            k=k,
+            pre_filter=plan.filters or None,
+            oversampling_factor=oversampling,
         )
 
 
 # --------------------------------------------------------------------------- #
-# GraphRAG retriever — Atlas as the knowledge graph via $graphLookup
+# GraphRAG retriever — langchain MongoDBGraphStore knowledge-graph traversal
 # --------------------------------------------------------------------------- #
-
-
+#
+# Backed by langchain's `MongoDBGraphStore`, which expects an **entity-node**
+# collection built per the MongoDB GraphRAG tutorial (each doc is an entity:
+# `_id`=name, `type`, `attributes`, `relationships.target_ids`). We attach to a
+# PRE-BUILT graph (no `add_documents` / ingestion here) and query it with
+# `similarity_search(query)`:
+#
+#   1. LLM extracts entity NAMES from the query text.
+#   2. `$graphLookup` traverses `relationships.target_ids -> _id`, up to
+#      `max_depth` hops, collecting the connected entity nodes.
+#
+# It returns `Entity` dicts (no text, no score, no depth). We adapt each into a
+# readable `Document` so the existing `serialize_docs -> summarize` path can
+# synthesize an answer from the graph neighborhood.
 class _GraphRAGRetriever(BaseRetriever):
-    """
-    Multi-hop graph retrieval using `$graphLookup` over the chunks collection.
+    """GraphRAG retriever over a `MongoDBGraphStore` entity-node collection."""
 
-    Looks up seed chunks matching the query, then traverses `entities` to
-    pull in connected chunks (one hop by default). Falls back gracefully if
-    the collection lacks an entity graph.
-    """
-
-    _col: Any = PrivateAttr()
+    _store: Any = PrivateAttr()
     _top_k: int = PrivateAttr()
-    _max_depth: int = PrivateAttr()
-    _text_key: str = PrivateAttr()
-    _embedding_key: str = PrivateAttr()
-    _max_time_ms: int | None = PrivateAttr(default=None)
-    # Injected by RetrieverFactory so list_indexes() is called once per
-    # factory lifetime (not once per retrieval request).
-    _text_index_cached: bool | None = PrivateAttr(default=None)
 
     def __init__(
         self,
         *,
-        collection: Any,
+        graph_store: Any,
         top_k: int = 20,
-        max_depth: int = 1,
-        text_key: str = "content",
-        embedding_key: str = "embedding",
-        max_time_ms: int | None = None,
-        text_index_cached: bool | None = None,
     ) -> None:
         super().__init__()
-        self._col = collection
+        self._store = graph_store
         self._top_k = top_k
-        self._max_depth = max_depth
-        self._text_key = text_key
-        self._embedding_key = embedding_key
-        self._max_time_ms = max_time_ms
-        self._text_index_cached = text_index_cached
 
     def _get_relevant_documents(self, query: str, *, run_manager=None) -> list[Document]:  # type: ignore[override]
         try:
-            match_stage = (
-                {"$match": {"$text": {"$search": query}}}
-                if self._has_text_index()
-                else {"$match": {self._text_key: {"$regex": query, "$options": "i"}}}
-            )
-            # $project immediately after $graphLookup strips embedding vectors
-            # and the connected array from every document before they travel
-            # over the wire into Python. On collections with large vectors
-            # (512-3072 floats each) this cuts wire transfer significantly.
-            exclude_fields = {self._embedding_key: 0, "connected": 0}
-            if self._embedding_key != "embedding":
-                exclude_fields["embedding"] = 0
-
-            pipeline = [
-                match_stage,
-                {"$limit": max(self._top_k, 10)},
-                {
-                    "$graphLookup": {
-                        "from": self._col.name,
-                        "startWith": "$entities",
-                        "connectFromField": "entities",
-                        "connectToField": "entities",
-                        "as": "connected",
-                        "maxDepth": self._max_depth,
-                        # Limit connected array size at the Atlas level to avoid
-                        # pulling thousands of hops into memory.
-                        "restrictSearchWithMatch": {},
-                    }
-                },
-                # Project BEFORE Python reads any row: drop vectors + raw connected array.
-                # Individual hops are unpacked below via the pre-projected connected list.
-                {"$project": {**exclude_fields, "connected": 1, self._text_key: 1,
-                               "_id": 1, "entities": 1}},
-                {"$limit": self._top_k},
-            ]
-            log.debug(
-                "[MongoDB] aggregate pipeline (graph) — collection=%r stages=%d",
-                self._col.name, len(pipeline),
-            )
-            agg_kwargs: dict = {}
-            if self._max_time_ms:
-                agg_kwargs["maxTimeMS"] = self._max_time_ms
-
-            docs: list[Document] = []
-            for row in self._col.aggregate(pipeline, **agg_kwargs):
-                hops = row.get("connected", [])[: self._top_k]
-                for r in (row, *hops):
-                    try:
-                        make_serializable(r)
-                    except Exception:
-                        pass
-                docs.append(self._to_document(row))
-                for hop in hops:
-                    docs.append(self._to_document(hop))
-            # de-dup by (_id, content prefix)
-            seen, unique = set(), []
-            for d in docs:
-                key = (d.metadata.get("_id"), d.page_content[:120])
-                if key in seen:
-                    continue
-                seen.add(key)
-                unique.append(d)
-                if len(unique) >= self._top_k:
-                    break
-            return unique
+            # LLM query-entity extraction + $graphLookup traversal, server-side.
+            entities = self._store.similarity_search(query) or []
         except Exception as exc:
+            # Pointing at a non-graph collection (no matching entity nodes),
+            # an LLM/extraction hiccup, or an aggregation error all land here —
+            # degrade gracefully to an empty result rather than 500.
             log.warning("GraphRAG retrieval failed: %s", exc)
             return []
 
-    def _has_text_index(self) -> bool:
-        """Return cached result (set by factory) or probe once and cache."""
-        if self._text_index_cached is not None:
-            return self._text_index_cached
-        result = False
-        try:
-            result = any(
-                any(v == "text" for v in (idx.get("key") or {}).values())
-                for idx in self._col.list_indexes()
-            )
-        except Exception:
-            result = False
-        self._text_index_cached = result
-        return result
+        docs: list[Document] = []
+        for ent in entities[: self._top_k]:
+            try:
+                docs.append(self._entity_to_document(ent))
+            except Exception:
+                continue
+        log.debug(
+            "[MongoDB] GraphRAG similarity_search — entities=%d returned=%d",
+            len(entities), len(docs),
+        )
+        return docs
 
-    def _to_document(self, row: dict) -> Document:
-        meta = {
-            k: v for k, v in row.items()
-            if k not in (self._text_key, self._embedding_key, "connected")
-        }
-        return Document(page_content=row.get(self._text_key, ""), metadata=meta)
+    @staticmethod
+    def _entity_to_document(entity: dict) -> Document:
+        """Render a `MongoDBGraphStore` Entity dict into a readable Document.
+
+        page_content is human/LLM-readable prose (name, type, attributes, and
+        outgoing relationships) so `summarize` has real text to work with;
+        the raw entity fields are preserved in metadata.
+        """
+        # BSON types -> JSON-serialisable for the API layer.
+        try:
+            make_serializable(entity)
+        except Exception:
+            pass
+
+        name = entity.get("_id", "")
+        etype = entity.get("type") or ""
+        lines = [f"{name} ({etype})" if etype else str(name)]
+
+        attributes = entity.get("attributes") or {}
+        if isinstance(attributes, dict):
+            for key, vals in attributes.items():
+                rendered = ", ".join(map(str, vals)) if isinstance(vals, list) else str(vals)
+                lines.append(f"{key}: {rendered}")
+
+        rel = entity.get("relationships") or {}
+        target_ids = rel.get("target_ids") or []
+        rel_types = rel.get("types") or []
+        for i, target in enumerate(target_ids):
+            label = rel_types[i] if i < len(rel_types) else "related_to"
+            lines.append(f"{label} -> {target}")
+
+        return Document(
+            page_content="\n".join(lines),
+            metadata={
+                "_id": name,
+                "entity_type": etype,
+                "attributes": attributes,
+                "relationships": rel,
+            },
+            id=str(name) if name else None,
+        )
 
 
 # --------------------------------------------------------------------------- #
@@ -1363,21 +1404,30 @@ class _AutoEmbedHybridRetriever(BaseRetriever):
 
 
 # --------------------------------------------------------------------------- #
-# AutoEmbed-compatible parent-document retriever
+# Parent-document retriever ($vectorSearch child match -> $lookup parent)
 # --------------------------------------------------------------------------- #
 class _AutoEmbedParentDocRetriever(BaseRetriever):
-    """Parent-doc retriever for AutoEmbeddings-mode vectorstores.
+    """Parent-doc retriever for BOTH embedder modes.
 
-    Mirrors `MongoDBAtlasParentDocumentRetriever` but issues the server-side
-    `$vectorSearch` (with `query.text` + `model`) instead of embedding the
-    query client-side. After the child match, it `$lookup`s the parent doc
-    via `doc_id` and de-dupes.
+    Replaces langchain's `MongoDBAtlasParentDocumentRetriever` (which requires a
+    separate `docstore`/`byte_store` and calls `embed_query`, NotImplemented for
+    AutoEmbeddings). It runs the `$vectorSearch` on child chunks, then `$lookup`s
+    the parent via `doc_id -> _id` in the same collection and de-dupes.
+
+    The only per-mode difference is the vector stage:
+
+      * AutoEmbeddings (server-side): `$vectorSearch` with `query.text` + `model`,
+        path = `text_key`.
+      * Client-side embeddings: `embeddings.embed_query(query)` once, then
+        `$vectorSearch` with `queryVector`, path = `embedding_key`.
     """
 
     _col: Any = PrivateAttr()
     _vector_index: str = PrivateAttr()
     _text_key: str = PrivateAttr()
-    _model: str = PrivateAttr()
+    _model: str | None = PrivateAttr()
+    _embeddings: Any = PrivateAttr()
+    _embedding_key: str | None = PrivateAttr()
     _k: int = PrivateAttr()
     _pre_filter: dict | None = PrivateAttr()
     _oversampling: int = PrivateAttr()
@@ -1389,24 +1439,29 @@ class _AutoEmbedParentDocRetriever(BaseRetriever):
         collection: Any,
         vector_index: str,
         text_key: str,
-        model: str,
+        model: str | None,
         k: int,
         pre_filter: dict | None,
         oversampling_factor: int,
+        embeddings: Any = None,
+        embedding_key: str | None = None,
     ) -> None:
         super().__init__()
         self._col = collection
         self._vector_index = vector_index
         self._text_key = text_key
         self._model = model
+        self._embeddings = embeddings
+        self._embedding_key = embedding_key
         self._k = k
         self._pre_filter = pre_filter
         self._oversampling = max(1, oversampling_factor)
 
-    def _get_relevant_documents(self, query: str, *, run_manager=None) -> list[Document]:  # type: ignore[override]
-        # `autoembedding_vector_search_stage` is module-level.
-        pipeline = [
-            autoembedding_vector_search_stage(
+    def _child_vector_stage(self, query: str) -> dict:
+        """The ranked $vectorSearch stage over child chunks (mode-dependent)."""
+        if self._model is not None:
+            # AutoEmbeddings: Atlas embeds `query.text` with `model`, path=text_key.
+            return autoembedding_vector_search_stage(
                 query=query,
                 search_field=self._text_key,
                 index_name=self._vector_index,
@@ -1414,7 +1469,21 @@ class _AutoEmbedParentDocRetriever(BaseRetriever):
                 top_k=self._k,
                 filter=self._pre_filter,
                 oversampling_factor=self._oversampling,
-            ),
+            )
+        # Client-side: embed once, then queryVector on the embedding field.
+        query_vector = self._embeddings.embed_query(query)
+        return vector_search_stage(
+            query_vector=query_vector,
+            search_field=self._embedding_key or "embedding",
+            index_name=self._vector_index,
+            top_k=self._k,
+            filter=self._pre_filter,
+            oversampling_factor=self._oversampling,
+        )
+
+    def _get_relevant_documents(self, query: str, *, run_manager=None) -> list[Document]:  # type: ignore[override]
+        pipeline = [
+            self._child_vector_stage(query),
             {"$set": {"score": {"$meta": "vectorSearchScore"}}},
             {
                 "$lookup": {
