@@ -151,7 +151,12 @@ class PlannerConfig(BaseModel):
     llm_provider: str
     config: dict[str, Any] = Field(default_factory=dict)
     default_top_k: int = 20
-    enable_summarization: bool = True
+    enable_summarization: bool = False
+    # Hard deadline (seconds) per individual LLM call (QU layer + planner).
+    # When exceeded the call is cancelled and the layer falls back to its safe
+    # default so the request still completes via Atlas rather than hanging.
+    # Set to 0 to disable (not recommended in production).
+    llm_timeout_s: float = 5.0
 
 
 class RetrievalConfig(BaseModel):
@@ -159,6 +164,12 @@ class RetrievalConfig(BaseModel):
     hybrid: dict[str, Any] = Field(default_factory=dict)
     vector: dict[str, Any] = Field(default_factory=dict)
     max_time_ms: int | None = None   # per-aggregation kill switch; 0 = disabled
+    # Maximum simultaneous in-flight Atlas AutoEmbed aggregation calls.
+    # Caps the request rate sent to Voyage AI to prevent rate-limit 500s.
+    # 0 = unlimited (dangerous under high concurrency). Tune to
+    # (voyage_rpm_limit / 60) * avg_embed_latency_s, e.g. for 300 RPM
+    # and 0.4 s latency: (300/60) * 0.4 = 2 — set to 5 for headroom.
+    concurrency_limit: int = 20
 
     @property
     def effective_max_time_ms(self) -> int | None:

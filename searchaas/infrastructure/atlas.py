@@ -8,6 +8,7 @@ for the first query to fail.
 """
 from __future__ import annotations
 
+import os
 import time
 from functools import lru_cache
 from typing import Any
@@ -61,25 +62,29 @@ class AtlasFactory:
         cfg = load_config().atlas
         log.info("Atlas: connecting to %s", _redact(cfg.uri))
         try:
+            # Connection pool sizing:
+            # With N Cloud Run instances each holding maxPoolSize connections,
+            # total Atlas connections = N × maxPoolSize. Stay under the Atlas
+            # tier limit (M0=100, M10=500, M30=1500).
+            #   M0  : ATLAS_MAX_POOL=5   → 20 instances × 5  = 100  (at limit)
+            #   M10 : ATLAS_MAX_POOL=20  → 20 instances × 20 = 400  (safe)
+            #   M30+: ATLAS_MAX_POOL=50  → 20 instances × 50 = 1000 (safe)
+            _max_pool = int(os.environ.get("ATLAS_MAX_POOL", "50"))
             client = MongoClient(
                 cfg.uri,
                 appname="searchaas",
                 # Fail fast on misconfiguration / network issues.
-                serverSelectionTimeoutMS=8000,
-                # Keep 2 warm connections alive so the first request after a
-                # cold start or idle period doesn't pay TCP handshake overhead.
+                serverSelectionTimeoutMS=8_000,
+                # Keep a small number of warm connections per instance.
                 minPoolSize=2,
-                # Cap the pool so we don't exhaust Atlas's connection limit.
-                # Atlas M10=500, M30=1500 concurrent connections; 10 per pod
-                # leaves headroom for multiple replicas.
-                maxPoolSize=10,
+                # Capped per-instance; scale via ATLAS_MAX_POOL env var.
+                maxPoolSize=_max_pool,
                 # Per-socket read/write deadline — prevents a hung aggregation
                 # from blocking a worker indefinitely (distinct from maxTimeMS
                 # which is a server-side kill switch).
-                socketTimeoutMS=30_000,
-                # How long a thread waits for a pool slot before raising an
-                # exception — surfaces contention early rather than queueing.
-                waitQueueTimeoutMS=5_000,
+                socketTimeoutMS=10_000,
+                # Fail fast when the pool is full rather than queueing forever.
+                waitQueueTimeoutMS=2_000,
             )
         except ConfigurationError as exc:
             log.error("Atlas: invalid connection string — %s", exc)

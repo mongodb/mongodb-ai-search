@@ -13,6 +13,7 @@ from __future__ import annotations
 from typing import Any
 
 from langchain_core.language_models import BaseChatModel
+from langchain_core.runnables import RunnableConfig
 from langchain_core.messages import HumanMessage, SystemMessage
 from pydantic import BaseModel, Field
 
@@ -75,10 +76,13 @@ class RetrievalPlanner:
         llm: BaseChatModel,
         policy_store: PolicyStore,
         default_top_k: int = 20,
+        llm_timeout_s: float = 5.0,
     ) -> None:
         self._llm = llm
         self._policies = policy_store
         self._default_top_k = default_top_k
+        # Hard deadline per LLM call. 0 = no timeout.
+        self._llm_timeout_s: float = llm_timeout_s
         # Simple FIFO cache keyed on (raw_query, intent) to skip repeat LLM calls.
         self._cache: dict[tuple[str, str | None], RetrievalPlan] = {}
 
@@ -144,11 +148,20 @@ class RetrievalPlanner:
             sort=uq.sort,
             intent=uq.intent,
         )
+        messages = [
+            SystemMessage(content="You output strict JSON only."),
+            HumanMessage(content=prompt),
+        ]
         try:
-            resp = self._llm.invoke([
-                SystemMessage(content="You output strict JSON only."),
-                HumanMessage(content=prompt),
-            ])
+            if self._llm_timeout_s > 0:
+                try:
+                    cfg = RunnableConfig(timeout=self._llm_timeout_s)
+                    resp = self._llm.invoke(messages, config=cfg)
+                except TypeError:
+                    # LLM implementation does not accept config kwarg (e.g. test fakes).
+                    resp = self._llm.invoke(messages)
+            else:
+                resp = self._llm.invoke(messages)
             data = extract_json(getattr(resp, "content", str(resp)))
             if not data:
                 raise ValueError("empty plan")
@@ -160,7 +173,14 @@ class RetrievalPlanner:
             known = RetrievalPlan.model_fields.keys()
             plan = RetrievalPlan(**{k: v for k, v in data.items() if k in known})
         except Exception as exc:
-            log.warning("Planner LLM failed (%s); falling back to defaults.", exc)
+            if "timeout" in type(exc).__name__.lower() or "timeout" in str(exc).lower():
+                log.warning(
+                    "Planner LLM timed out after %.1f s — "
+                    "falling back to default strategy=%s top_k=%s.",
+                    self._llm_timeout_s, policy.default_strategy, self._default_top_k,
+                )
+            else:
+                log.warning("Planner LLM failed (%s); falling back to defaults.", exc)
             plan = RetrievalPlan(
                 strategy=policy.default_strategy,
                 top_k=self._default_top_k,

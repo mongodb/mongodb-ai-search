@@ -60,7 +60,9 @@ ENV PYTHONUNBUFFERED=1 \
     PYTHONPATH=/app \
     SEARCHAAS_CONFIG=/app/searchaas/config/searchaas.yaml
 
-# REST API port — must match server.port in searchaas.yaml (default 8000)
+# Cloud Run injects PORT at runtime (default 8000 for local runs).
+# EXPOSE is documentation-only; the actual port is read from $PORT at startup.
+ENV PORT=8000
 EXPOSE 8000
 
 # Non-root user for least-privilege execution
@@ -68,10 +70,14 @@ RUN useradd --no-create-home --shell /bin/false api
 USER api
 
 # Start the FastAPI server via uvicorn.
+# $PORT is set by Cloud Run at container startup — uvicorn reads it via the
+# shell entrypoint so the same image works locally (PORT=8000) and on Cloud Run
+# (PORT=whatever Cloud Run assigns, typically 8080 or the --port flag value).
 # Workers are kept at 1 to share the bootstrap singleton (get_container) cleanly.
 # Scale horizontally with multiple containers rather than multiple workers.
-CMD ["uvicorn", "searchaas.api.app:app", \
-     "--host", "0.0.0.0", \
-     "--port", "8000", \
-     "--workers", "1", \
-     "--log-level", "info"]
+CMD ["sh", "-c", \
+     "exec uvicorn searchaas.api.app:app \
+      --host 0.0.0.0 \
+      --port ${PORT:-8000} \
+      --workers 1 \
+      --log-level info"]

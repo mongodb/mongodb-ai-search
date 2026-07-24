@@ -259,11 +259,23 @@ gcloud run deploy "${SVC_API}" \
   --platform=managed \
   --allow-unauthenticated \
   --port=8000 \
-  --cpu=2 \
-  --memory=5Gi \
-  --min-instances=0 \
-  --max-instances=5 \
-  --set-env-vars="PYTHONUNBUFFERED=1,SEARCHAAS_CONFIG=/app/searchaas/config/searchaas.yaml" \
+  --cpu=4 \
+  --memory=8Gi \
+  --min-instances=3 \
+  --max-instances=20 \
+  --concurrency=200 \
+  --cpu-boost \
+  --timeout=300 \
+  --set-env-vars="PYTHONUNBUFFERED=1,\
+SEARCHAAS_CONFIG=/app/searchaas/config/searchaas.yaml,\
+CONCURRENCY_LIMIT=80,\
+ATLAS_MAX_POOL=20,\
+RETRIEVAL_MAX_TIME_MS=5000,\
+LLM_TIMEOUT_S=5.0,\
+EMBED_QUEUE_TIMEOUT_S=4,\
+REQUEST_TIMEOUT_S=10,\
+HNSW_PREWARM_COLLECTIONS=IT_helpdesk:it_helpdesk_vector_index:text;employee_support:employee_support_vector_index:text,\
+ENABLE_SUMMARIZATION=false" \
   "${SECRET_FLAGS[@]}" \
   --quiet
 
@@ -281,11 +293,14 @@ gcloud run deploy "${SVC_MCP}" \
   --platform=managed \
   --allow-unauthenticated \
   --port=8001 \
-  --cpu=2 \
-  --memory=5Gi \
-  --min-instances=0 \
-  --max-instances=5 \
-  --set-env-vars="PYTHONUNBUFFERED=1,SEARCHAAS_CONFIG=/app/searchaas/config/searchaas.yaml" \
+  --cpu=4 \
+  --memory=8Gi \
+  --min-instances=2 \
+  --max-instances=20 \
+  --concurrency=200 \
+  --cpu-boost \
+  --timeout=300 \
+  --set-env-vars="PYTHONUNBUFFERED=1,SEARCHAAS_CONFIG=/app/searchaas/config/searchaas.yaml,CONCURRENCY_LIMIT=80" \
   "${SECRET_FLAGS[@]}" \
   --quiet
 
