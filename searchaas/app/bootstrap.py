@@ -402,12 +402,14 @@ def build_container(config: AppConfig | None = None) -> Container:
         allowed_filter_fields=cfg.atlas.filter_fields,
         field_aliases=field_aliases,
         fact_store=fact_store,
+        llm_timeout_s=cfg.planner.llm_timeout_s,
     )
     policies = PolicyStore(default_strategy=cfg.retrieval.default_strategy)
     planner = RetrievalPlanner(
         llm=llm,
         policy_store=policies,
         default_top_k=cfg.planner.default_top_k,
+        llm_timeout_s=cfg.planner.llm_timeout_s,
     )
 
     # --- Retrievers ---

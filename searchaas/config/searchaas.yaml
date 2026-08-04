@@ -1,229 +1,287 @@
-# =============================================================================
-# SearchaaS Phase 1 Configuration
-# -----------------------------------------------------------------------------
-# All providers, models, indexes, and runtime options are supplied here.
-# Switching an embedding model, LLM, or retrieval strategy is a config change,
-# NOT a code change.
-#
-# Every value below is overridable at runtime via an environment variable using
-# `${VAR:-default}` syntax. This means you can change collections, indexes,
-# dimensions, providers, models, or strategy WITHOUT rebuilding the image —
-# just update the Container App env vars (or .env locally) and restart.
-#
-# Secrets (ATLAS_URI, VOYAGE_API_KEY, GOOGLE_API_KEY) are injected from the
-# environment / Container Apps secrets and never baked into the image.
-# =============================================================================
+# # =============================================================================
+# # SearchaaS Phase 1 Configuration
+# # -----------------------------------------------------------------------------
+# # All providers, models, indexes, and runtime options are supplied here.
+# # Switching an embedding model, LLM, or retrieval strategy is a config change,
+# # NOT a code change.
+# #
+# # Every value below is overridable at runtime via an environment variable using
+# # `${VAR:-default}` syntax. This means you can change collections, indexes,
+# # dimensions, providers, models, or strategy WITHOUT rebuilding the image —
+# # just update the Container App env vars (or .env locally) and restart.
+# #
+# # Secrets (ATLAS_URI, VOYAGE_API_KEY, GOOGLE_API_KEY) are injected from the
+# # environment / Container Apps secrets and never baked into the image.
+# # =============================================================================
 
-# ---- Vector Search index ----------------------------------------------------
-# MUST match an existing Atlas Vector Search index on the collection above.
-#
-# Two supported embedding modes:
-#
-#   (A) Client-side embeddings  (embeddings.provider != "auto")
-#       - The client embeds the query (e.g. via Voyage / OpenAI / Cohere…).
-#       - `embedding_key` MUST equal the `path` declared in the index AND the
-#         field name used at ingestion time.
-#       - `dimensions` MUST equal the index's `numDimensions` and the
-#         embedder's output size.
-#       - `relevance_score_fn` is the similarity used at query time.
-#       - Index field type: `vector`.
-#
-#   (B) Server-side AutoEmbeddings  (embeddings.provider: auto)  *** ACTIVE ***
-#       - Atlas embeds the query and the document text INTERNALLY using the
-#         model declared in the index's `autoEmbed` field.
-#       - `embedding_key`      MUST be `null`.
-#       - `dimensions`         MUST be `-1`.
-#       - `relevance_score_fn` MUST be `null`.
-#       - Index field type: `autoEmbed`, with `path` = atlas.text_key and a
-#         `model` declaration that matches embeddings.config.model.
-# -----------------------------------------------------------------------------
-#
-# Current target (Mode B, server-side AutoEmbeddings):
-#   index name : autoembed_index
-#   path       : text                  (== atlas.text_key)
-#   type       : autoEmbed
-#   model      : voyage-4              (== embeddings.config.model)
-#
-# To switch to Mode A (client-side Voyage embeddings on `voyage_vector_index`),
-# comment the ACTIVE Mode B blocks below and uncomment the Mode A blocks.
-# The bootstrap layer (`searchaas/app/bootstrap.py`) cross-validates the
-# embeddings provider against the live index type and refuses to start on
-# mismatch (e.g. `provider: voyageai` + an autoEmbed index, or
-# `provider: auto` + a non-autoEmbed index).
-#
-# -----------------------------------------------------------------------------
-# Query facts → pre-filter vs post-filter
-# -----------------------------------------------------------------------------
-# The Query Understanding layer extracts typed facts ({field, op, value}) from
-# each query. A fact becomes a fast Atlas PRE-filter (records skipped before
-# scoring → lower latency) ONLY if its field is indexed as `{type: filter}` in
-# the Atlas vector index AND mirrored in `atlas.vector_index_definition` so it
-# appears in `AtlasConfig.filter_fields`. Facts on any other field are applied
-# as in-memory POST-filters after retrieval (precision only, no scan savings).
-# To make a frequently-queried field selective, index it as a filter field.
+# # ---- Vector Search index ----------------------------------------------------
+# # MUST match an existing Atlas Vector Search index on the collection above.
+# #
+# # Two supported embedding modes:
+# #
+# #   (A) Client-side embeddings  (embeddings.provider != "auto")
+# #       - The client embeds the query (e.g. via Voyage / OpenAI / Cohere…).
+# #       - `embedding_key` MUST equal the `path` declared in the index AND the
+# #         field name used at ingestion time.
+# #       - `dimensions` MUST equal the index's `numDimensions` and the
+# #         embedder's output size.
+# #       - `relevance_score_fn` is the similarity used at query time.
+# #       - Index field type: `vector`.
+# #
+# #   (B) Server-side AutoEmbeddings  (embeddings.provider: auto)  *** ACTIVE ***
+# #       - Atlas embeds the query and the document text INTERNALLY using the
+# #         model declared in the index's `autoEmbed` field.
+# #       - `embedding_key`      MUST be `null`.
+# #       - `dimensions`         MUST be `-1`.
+# #       - `relevance_score_fn` MUST be `null`.
+# #       - Index field type: `autoEmbed`, with `path` = atlas.text_key and a
+# #         `model` declaration that matches embeddings.config.model.
+# # -----------------------------------------------------------------------------
+# #
+# # Current target (Mode B, server-side AutoEmbeddings):
+# #   index name : autoembed_index
+# #   path       : text                  (== atlas.text_key)
+# #   type       : autoEmbed
+# #   model      : voyage-4              (== embeddings.config.model)
+# #
+# # To switch to Mode A (client-side Voyage embeddings on `voyage_vector_index`),
+# # comment the ACTIVE Mode B blocks below and uncomment the Mode A blocks.
+# # The bootstrap layer (`searchaas/app/bootstrap.py`) cross-validates the
+# # embeddings provider against the live index type and refuses to start on
+# # mismatch (e.g. `provider: voyageai` + an autoEmbed index, or
+# # `provider: auto` + a non-autoEmbed index).
 
-atlas:
-  uri: ${ATLAS_URI}                                      # mongodb+srv://... (secret, from env)
-  database: ${ATLAS_DB:-amazon}
-  collection: ${ATLAS_COLLECTION:-pdf_multimodal_chunks}
+# atlas:
+#   uri: ${ATLAS_URI}                                      # mongodb+srv://... (secret, from env)
+#   database: ${ATLAS_DB:-amazon}
+#   collection: ${ATLAS_COLLECTION:-pdf_multimodal_chunks}
 
-  # ---- Mode B: server-side AutoEmbeddings (ACTIVE default) ------------------
-  vector_index:       ${ATLAS_VECTOR_INDEX:-vector_index}
-  search_index:       ${ATLAS_SEARCH_INDEX:-default}     # Atlas Search (Lucene) index for fulltext/hybrid
-  text_key:           ${ATLAS_TEXT_KEY:-raw_text}            # MUST match the autoEmbed path
-  embedding_key:      ${ATLAS_EMBEDDING_KEY:-}          # Auto default empty -> None; set for client mode
-  relevance_score_fn: ${ATLAS_RELEVANCE_FN:-}           # Auto default empty -> None; set for client mode
-  dimensions:         ${ATLAS_DIMENSIONS:--1}           # -1 for auto; set real dims for client mode
+#   # ---- Mode B: server-side AutoEmbeddings (ACTIVE default) ------------------
+#   vector_index:       ${ATLAS_VECTOR_INDEX:-vector_index}
+#   search_index:       ${ATLAS_SEARCH_INDEX:-default}     # Atlas Search (Lucene) index for fulltext/hybrid
+#   text_key:           ${ATLAS_TEXT_KEY:-raw_text}            # MUST match the autoEmbed path
+#   embedding_key:      ${ATLAS_EMBEDDING_KEY:-}          # Auto default empty -> None; set for client mode
+#   relevance_score_fn: ${ATLAS_RELEVANCE_FN:-}           # Auto default empty -> None; set for client mode
+#   dimensions:         ${ATLAS_DIMENSIONS:--1}           # -1 for auto; set real dims for client mode
 
-  # Mirror of the live Atlas vector index definition. Source of truth for
-  # `AtlasConfig.filter_fields` — every entry with `type: filter` here (and in
-  # the actual Atlas index) can be used as a fast $vectorSearch pre-filter.
-  # Keep this in sync with the index in Atlas; a filter path declared here but
-  # missing from the live index causes Atlas to reject the query.
-  vector_index_definition:
-    fields:
-      - type: vector          # normal vector index
-        path: embedding
-      # - type: autoEmbed          # server-side embedding of the plot text
-      #   path: plot
-      #   model: voyage-4
-      #   modality: text
-      # - type: filter             # sample_mflix.movies filterable facets
-      #   path: imdb.rating
-      # - type: filter
-      #   path: year
-      # - type: filter
-      #   path: genres
+#   # ---- Mode A: client-side Voyage embeddings (alternative) ------------------
+#   # vector_index:       ${ATLAS_VECTOR_INDEX:-voyage_vector_index}
+#   # search_index:       ${ATLAS_SEARCH_INDEX:-default}
+#   # text_key:           ${ATLAS_TEXT_KEY:-text}
+#   # embedding_key:      ${ATLAS_EMBEDDING_KEY:-embedding-vectors}
+#   # relevance_score_fn: ${ATLAS_RELEVANCE_FN:-cosine}
+#   # dimensions:         ${ATLAS_DIMENSIONS:-512}
 
-  # Mirror of the live Atlas Search (Lucene) index used for fulltext/hybrid.
-  # `dynamic: true` means every field is indexed and filterable, so
-  # `search_filter_fields` is None and the fulltext strategy keeps the same
-  # metadata filters as vector/hybrid (instead of dropping them). Keep in sync
-  # with the live `default` search index.
-  search_index_definition:
-    mappings:
-      dynamic: true
+# # -----------------------------------------------------------------------------
+# # Embedding provider for QUERY embeddings.
+# # Supported: auto | azure_openai | openai | voyageai | cohere | huggingface
+# #            gemini | bedrock_titan
+# # -----------------------------------------------------------------------------
 
-  # ---- Mode A: client-side Voyage embeddings (alternative) ------------------
-  # vector_index:       ${ATLAS_VECTOR_INDEX:-voyage_vector_index}
-  # search_index:       ${ATLAS_SEARCH_INDEX:-default}
-  # text_key:           ${ATLAS_TEXT_KEY:-text}
-  # embedding_key:      ${ATLAS_EMBEDDING_KEY:-embedding-vectors}
-  # relevance_score_fn: ${ATLAS_RELEVANCE_FN:-cosine}
-  # dimensions:         ${ATLAS_DIMENSIONS:-512}
-
-# -----------------------------------------------------------------------------
-# Embedding provider for QUERY embeddings.
-# Supported: auto | azure_openai | openai | voyageai | cohere | huggingface
-#            gemini | bedrock_titan
-# -----------------------------------------------------------------------------
-
-# ---- Client-side OpenAI embeddings (ACTIVE — matches the 1536-dim `vector` index) --
-# EmbeddingFactory.create() passes this config verbatim to OpenAIEmbeddings(**cfg),
-# so these keys must be OpenAI-shaped (model / api_key / base_url / dimensions).
-embeddings:
-  provider: ${EMBEDDINGS_PROVIDER:-openai}
-  config:
-    model:      ${EMBEDDINGS_MODEL:-text-embedding-3-small}
-    api_key:    ${OPENAI_API_KEY}
-    base_url:   ${OPENAI_BASE_URL}          # Azure AI Foundry OpenAI-compatible /openai/v1
-    dimensions: ${ATLAS_DIMENSIONS:-1536}   # OpenAIEmbeddings param is `dimensions`; must match the index
-
-# ---- Mode B: server-side AutoEmbeddings (alternative) -----------------------
-# Use with an `autoEmbed` vector index (Atlas embeds query + docs internally).
-# Requires atlas.embedding_key=null, atlas.dimensions=-1, atlas.relevance_score_fn=null
-# (see EMBEDDINGS_PROVIDER=auto). Comment out the OpenAI block above and
-# uncomment this one.
+# # ---- Mode B: server-side AutoEmbeddings (ACTIVE) ----------------------------
 # embeddings:
 #   provider: ${EMBEDDINGS_PROVIDER:-auto}
 #   config:
-#     model: ${EMBEDDINGS_MODEL:-voyage-4}                  # MUST match the model in the autoEmbed index
-#     voyage_api_key: ${VOYAGE_API_KEY}                     # ignored in auto mode; used in voyageai mode
+#     model: ${EMBEDDINGS_MODEL:-voyage-4}
+#     voyage_api_key: ${VOYAGE_API_KEY}                   # ignored in auto mode; used in voyageai mode
 #     output_dimension: ${EMBEDDINGS_OUTPUT_DIMENSION:-512}
 
-# ---- Mode A: client-side Voyage embeddings (alternative) --------------------
-# embeddings:
-#   provider: ${EMBEDDINGS_PROVIDER:-voyageai}
-#   config:
-#     model: ${EMBEDDINGS_MODEL:-voyage-4}
-#     voyage_api_key: ${VOYAGE_API_KEY}
-#     output_dimension: ${EMBEDDINGS_OUTPUT_DIMENSION:-512}  # MUST match atlas.dimensions
+# # ---- Mode A: client-side Voyage embeddings (alternative) --------------------
+# # embeddings:
+# #   provider: ${EMBEDDINGS_PROVIDER:-voyageai}
+# #   config:
+# #     model: ${EMBEDDINGS_MODEL:-voyage-4}
+# #     voyage_api_key: ${VOYAGE_API_KEY}
+# #     output_dimension: ${EMBEDDINGS_OUTPUT_DIMENSION:-512}  # MUST match atlas.dimensions
 
-# ---- Other client-side examples ---------------------------------------------
-# embeddings:
-#   provider: gemini
+# # ---- Other client-side examples ---------------------------------------------
+# # embeddings:
+# #   provider: gemini
+# #   config:
+# #     model: models/text-embedding-004
+# #     google_api_key: ${GOOGLE_API_KEY}
+# #
+# # embeddings:
+# #   provider: bedrock_titan
+# #   config:
+# #     model_id: amazon.titan-embed-text-v2:0
+# #     region_name: us-east-1
+# #     credentials_profile_name: default
+
+# # -----------------------------------------------------------------------------
+# # LLM used by the Query Understanding Layer and Retrieval Planner
+# # Supported: gemini | vertex_ai | azure_openai | openai | anthropic | bedrock
+# #
+# # gemini    — Google AI Studio API key (GOOGLE_API_KEY).
+# #             Uses generativelanguage.googleapis.com. Keep the key
+# #             unrestricted or allow-list the caller IP.
+# # vertex_ai — Vertex AI via Application Default Credentials (no API key).
+# #             Set GOOGLE_CLOUD_PROJECT + GOOGLE_CLOUD_LOCATION.
+# # -----------------------------------------------------------------------------
+# planner:
+#   llm_provider: ${PLANNER_LLM_PROVIDER:-gemini}
 #   config:
-#     model: models/text-embedding-004
-#     google_api_key: ${GOOGLE_API_KEY}
+#     # Model name — must be an exact provider model ID.
+#     #
+#     # Google AI Studio (llm_provider: gemini)  — smallest → largest:
+#     #   gemini-2.5-flash-lite   (smallest, cheapest, fastest)   ← recommended
+#     #   gemini-2.5-flash        (mid tier, good default)
+#     #   gemini-2.5-pro          (largest, highest quality)
+#     #
+#     # Vertex AI serverless (llm_provider: vertex_ai)  — Gemini only:
+#     #   gemini-2.5-flash-lite   (smallest)                       ← recommended
+#     #   gemini-2.5-flash
+#     #   gemini-2.5-pro
+#     #
+#     # Note: Gemma on Vertex is Model-Garden only (self-deploy to an endpoint),
+#     # NOT serverless — so `gemma-*` IDs are unsupported through this factory.
+#     # If you need Gemma, use llm_provider: gemini (Google AI Studio) with an
+#     # unrestricted key; the exact IDs available there change over time — list
+#     # them with: curl "https://generativelanguage.googleapis.com/v1beta/models?key=$GOOGLE_API_KEY"
+#     model: ${PLANNER_MODEL:-gemini-2.5-flash-lite}
+#     temperature: ${PLANNER_TEMPERATURE:-0.0}
+#     # Provider-specific credentials/endpoints. Only the fields matching the
+#     # active provider need values — the LLMFactory strips empty entries and
+#     # drops fields foreign to the chosen provider, so unused keys are ignored.
+#     # Switch providers via PLANNER_LLM_PROVIDER without editing this block.
+#     #
+#     # --- vertex_ai ---
+#     project:  ${GOOGLE_CLOUD_PROJECT:-}
+#     location: ${GOOGLE_CLOUD_LOCATION:-us-central1}
+#     # --- azure_openai ---
+#     # azure_endpoint:     ${AZURE_OPENAI_ENDPOINT:-}
+#     # azure_deployment:   ${AZURE_OPENAI_DEPLOYMENT:-gpt-4o}
+#     # openai_api_version: ${AZURE_OPENAI_API_VERSION:-2024-08-01-preview}
+#     # azure_api_key:      ${AZURE_OPENAI_API_KEY:-}
+#     # --- openai ---
+#     # api_key:            ${OPENAI_API_KEY:-}
+#     # --- gemini ---
+#     google_api_key:     ${GOOGLE_API_KEY:-}
+#   default_top_k: ${PLANNER_DEFAULT_TOP_K:-20}
+
+# # -----------------------------------------------------------------------------
+# # Retrieval Strategies
+# # -----------------------------------------------------------------------------
+# retrieval:
+#   default_strategy: ${RETRIEVAL_DEFAULT_STRATEGY:-hybrid}  # vector | fulltext | hybrid | graph | parent_doc
+#   hybrid:
+#     vector_weight: ${RETRIEVAL_HYBRID_VECTOR_WEIGHT:-0.6}
+#     fulltext_weight: ${RETRIEVAL_HYBRID_FULLTEXT_WEIGHT:-0.4}
+#   vector:
+#     num_candidates: ${RETRIEVAL_VECTOR_NUM_CANDIDATES:-20}
+
+# # -----------------------------------------------------------------------------
+# # Server
+# # -----------------------------------------------------------------------------
+# server:
+#   host: ${SERVER_HOST:-0.0.0.0}
+#   port: ${SERVER_PORT:-8000}
+#   mcp_host: ${MCP_HOST:-0.0.0.0}
+#   mcp_port: ${MCP_PORT:-8001}
+#   mcp_transport: ${MCP_TRANSPORT:-streamable-http}
+#   log_level: ${LOG_LEVEL:-info}
+# =============================================================================
+# SearchaaS — Graph demo configuration
+# -----------------------------------------------------------------------------
+# Points the app at `ai_search.tech_kb_graph`, a small self-contained corpus
+# where every document has an `entities` array. This makes the built-in
+# `graph` retrieval strategy actually traverse, since it does:
+#     $graphLookup startWith=$entities connectFromField=entities connectToField=entities
 #
-# embeddings:
-#   provider: bedrock_titan
-#   config:
-#     model_id: amazon.titan-embed-text-v2:0
-#     region_name: us-east-1
-#     credentials_profile_name: default
+# Run with:
+#     SEARCHAAS_CONFIG=searchaas/config/searchaas-graph.yaml \
+#       uvicorn searchaas.api.app:app --host 0.0.0.0 --port 8000 --reload
+# or (MCP server):
+#     SEARCHAAS_CONFIG=searchaas/config/searchaas-graph.yaml \
+#       python -m searchaas.mcp_server.server
+#
+# The two Atlas Search indexes on the collection are:
+#   - vector_index : autoEmbed on `text` (voyage-4, text modality)
+#                    + filter fields: category, published_year
+#   - default      : Lucene index on text/title/category/published_year/entities
+#
+# Both indexes were created via the pymongo create_search_index admin API.
+# Corpus: 11 short tech docs across four categories (database, cloud,
+# framework, concept) with overlapping entity edges — see the README block
+# at the bottom of this file for sample queries.
+# =============================================================================
+
+atlas:
+  uri: ${ATLAS_URI}
+  database: ${ATLAS_DB:-kaggle_dataset}
+  collection: ${ATLAS_COLLECTION:-retail}
+
+  # ---- Server-side AutoEmbeddings (Atlas embeds `text` internally) ----------
+  vector_index:       ${ATLAS_VECTOR_INDEX:-vector_index}
+  search_index:       ${ATLAS_SEARCH_INDEX:-default}
+  text_key:           ${ATLAS_TEXT_KEY:-Text}
+  embedding_key:      ${ATLAS_EMBEDDING_KEY:-}         # empty -> None (auto mode)
+  relevance_score_fn: ${ATLAS_RELEVANCE_FN:-}          # empty -> None (auto mode)
+  dimensions:         ${ATLAS_DIMENSIONS:--1}          # -1 required in auto mode
+
+  # Paste your index definitions here so the bootstrap layer knows which
+  # metadata fields are legal in $vectorSearch.filter and Lucene $search.
+  vector_index_definition:
+    fields:
+      - type: autoEmbed
+        path: Text
+        model: voyage-4
+        modality: text
+  search_index_definition:
+    mappings:
+      dynamic: false
+      fields:
+        text:            { type: string }
+        title:           { type: string }
+        category:        { type: token }
+        published_year:  { type: number }
+        entities:        { type: token }
 
 # -----------------------------------------------------------------------------
-# LLM used by the Query Understanding Layer and Retrieval Planner
-# Supported: azure_openai | openai | gemini | anthropic | bedrock
+# Embeddings — auto mode: Atlas handles the query embedding server-side using
+# the model declared in the vector index (voyage-4). No client key needed.
+# -----------------------------------------------------------------------------
+embeddings:
+  provider: ${EMBEDDINGS_PROVIDER:-auto}
+  config:
+    model: ${EMBEDDINGS_MODEL:-voyage-4}
+    voyage_api_key: ${VOYAGE_API_KEY:-}   # unused in auto mode
+
+# -----------------------------------------------------------------------------
+# Planner LLM (only used by `auto_search` / `/retrieve` endpoint — explicit
+# strategy endpoints skip NLU by default; see the recent latency work).
 # -----------------------------------------------------------------------------
 planner:
   llm_provider: ${PLANNER_LLM_PROVIDER:-gemini}
-  enable_summarization: ${ENABLE_SUMMARIZATION:-false}
   config:
-    model: ${PLANNER_MODEL:-gemini-2.5-flash}
-    temperature: ${PLANNER_TEMPERATURE:-0.1}
-    # Provider-specific credentials/endpoints. Only the fields matching the
-    # active provider need values — the LLMFactory strips empty entries and
-    # drops fields foreign to the chosen provider, so unused keys are ignored.
-    # Switch providers via PLANNER_LLM_PROVIDER without editing this block.
-    #
-    # --- azure_openai (default) ---
-    azure_endpoint:     ${AZURE_OPENAI_ENDPOINT:-}
-    azure_deployment:   ${AZURE_OPENAI_DEPLOYMENT:-gpt-4o}
-    openai_api_version: ${AZURE_OPENAI_API_VERSION:-2024-08-01-preview}
-    azure_api_key:      ${AZURE_OPENAI_API_KEY:-}
-    # --- openai ---
-    api_key:            ${OPENAI_API_KEY:-}
-    openai_api_base:    ${OPENAI_BASE_URL:-}
-    # --- gemini ---
-    google_api_key:     ${GOOGLE_API_KEY:-}
-  default_top_k: ${PLANNER_DEFAULT_TOP_K:-20}
+    model: ${PLANNER_MODEL:-gemini-2.5-flash-lite}
+    temperature: ${PLANNER_TEMPERATURE:-0.0}
+    project:  ${GOOGLE_CLOUD_PROJECT:-}
+    location: ${GOOGLE_CLOUD_LOCATION:-us-central1}
+    google_api_key: ${GOOGLE_API_KEY:-}
+  default_top_k: ${PLANNER_DEFAULT_TOP_K:-10}
+  # Hard deadline per LLM call in the QU layer and planner (seconds).
+  # Cancels slow Gemini calls and falls back to safe defaults so the request
+  # still returns results via Atlas. Set to 0 to disable.
+  llm_timeout_s: ${LLM_TIMEOUT_S:-5.0}
+  # Set to true to have the LLM generate a summary of retrieved results.
+  # Disabled by default — adds latency and LLM cost; can be enabled per-request
+  # via the `summarize` field on the RetrieveRequest, or globally here.
+  enable_summarization: ${ENABLE_SUMMARIZATION:-false}
 
-# -----------------------------------------------------------------------------
-# Query Understanding
-# -----------------------------------------------------------------------------
-# field_aliases: query synonyms the LLM may use for each indexed filter field.
-# Injected into the extraction prompt so e.g. "highly rated"/"5 stars" resolve
-# to the exact indexed path `imdb.rating`. The LLM disambiguates by context, so
-# a synonym like "stars" is only mapped when it actually means the field.
-query_understanding:
-  field_aliases:
-    imdb.rating: [rating, ratings, score, scores, stars, grade, grading]
-    year:        [year, release year, released, released in]
-    genres:      [genre, genres, category, categories, kind]
-
-# -----------------------------------------------------------------------------
-# Retrieval Strategies
-# -----------------------------------------------------------------------------
 retrieval:
-  default_strategy: ${RETRIEVAL_DEFAULT_STRATEGY:-hybrid}  # vector | fulltext | hybrid | graph | parent_doc
+  default_strategy: ${RETRIEVAL_DEFAULT_STRATEGY:-hybrid}
   hybrid:
-    vector_weight: ${RETRIEVAL_HYBRID_VECTOR_WEIGHT:-0.6}
+    vector_weight:   ${RETRIEVAL_HYBRID_VECTOR_WEIGHT:-0.6}
     fulltext_weight: ${RETRIEVAL_HYBRID_FULLTEXT_WEIGHT:-0.4}
   vector:
-    # Lower num_candidates → faster ANN scan, slightly lower recall.
-    # 100 is a good balance for collections under 1M docs; raise for larger
-    # collections or when recall matters more than latency.
-    num_candidates: ${RETRIEVAL_VECTOR_NUM_CANDIDATES:-50}
-  # Kill switch: abort any aggregation that takes longer than this (ms).
-  # Prevents a slow graph/regex query from blocking a worker indefinitely.
-  # Set to 0 or omit to disable (default: 5000 ms).
-  max_time_ms: ${RETRIEVAL_MAX_TIME_MS:-3000}
+    num_candidates: ${RETRIEVAL_VECTOR_NUM_CANDIDATES:-100}
+  # Server-side query kill switch — Atlas aborts any aggregation that runs
+  # longer than this and returns an error instead of hanging the connection.
+  # This caps the p99 tail at a predictable ceiling and keeps the connection
+  # pool free for other requests. Set MAX_TIME_MS=0 to disable.
+  max_time_ms: ${MAX_TIME_MS:-5000}
 
-# -----------------------------------------------------------------------------
-# Server
-# -----------------------------------------------------------------------------
 server:
   host: ${SERVER_HOST:-0.0.0.0}
   port: ${SERVER_PORT:-8000}
@@ -231,3 +289,65 @@ server:
   mcp_port: ${MCP_PORT:-8001}
   mcp_transport: ${MCP_TRANSPORT:-streamable-http}
   log_level: ${LOG_LEVEL:-info}
+
+# =============================================================================
+# Sample queries
+# =============================================================================
+# All queries below assume the server is running with SEARCHAAS_CONFIG pointing
+# to this file. Set `summarize=false` on explicit-strategy calls to avoid the
+# ~3-8 s Gemini summarizer round-trip (see recent latency changes).
+#
+# ── 1. Vector search — semantic recall on `text` ─────────────────────────────
+# curl -sS http://localhost:8000/retrieve/vector \
+#   -H 'content-type: application/json' \
+#   -d '{
+#     "query": "managed database service in the cloud",
+#     "top_k": 5,
+#     "summarize": false,
+#     "understand": false
+#   }' | jq .
+# Expected top hits: db-1 (Atlas overview), db-2 (Vector Search).
+#
+# ── 2. Full-text search — Atlas Search / Lucene on `text` ────────────────────
+# curl -sS http://localhost:8000/retrieve/fulltext \
+#   -H 'content-type: application/json' \
+#   -d '{
+#     "query": "graphLookup aggregation",
+#     "top_k": 5,
+#     "summarize": false,
+#     "understand": false
+#   }' | jq .
+# Expected top hit: db-3 (Aggregation Pipeline).
+#
+# ── 3. Hybrid — RRF fusion of vector + fulltext ──────────────────────────────
+# curl -sS http://localhost:8000/retrieve/hybrid \
+#   -H 'content-type: application/json' \
+#   -d '{
+#     "query": "how does hybrid search combine semantic and lexical retrieval",
+#     "top_k": 5,
+#     "summarize": false,
+#     "understand": false,
+#     "retrieval": { "vector_weight": 0.6, "fulltext_weight": 0.4 }
+#   }' | jq .
+# Expected top hit: rt-1 (Hybrid Retrieval with RRF).
+#
+# ── 4. Graph — $graphLookup traversal via `entities` ─────────────────────────
+# curl -sS http://localhost:8000/retrieve/graph \
+#   -H 'content-type: application/json' \
+#   -d '{
+#     "query": "MongoDB Atlas embeddings",
+#     "top_k": 8,
+#     "summarize": false,
+#     "understand": false
+#   }' | jq .
+# Seed hit db-2 links via MongoDB/Atlas/embeddings to db-1, db-3, cl-1,
+# cl-3, fw-1, rt-1 — you'll see chunks from multiple clusters in one call.
+#
+# ── 5. Auto — LLM picks the strategy end-to-end ──────────────────────────────
+# curl -sS http://localhost:8000/retrieve \
+#   -H 'content-type: application/json' \
+#   -d '{
+#     "query": "Which cloud providers offer managed foundation models for embeddings?",
+#     "top_k": 5
+#   }' | jq .
+# =============================================================================

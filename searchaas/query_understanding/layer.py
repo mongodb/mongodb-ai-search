@@ -16,6 +16,7 @@ from typing import Any  # retained for metadata_filters type hint
 
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import HumanMessage, SystemMessage
+from langchain_core.runnables import RunnableConfig
 
 from searchaas.facts import (
     Fact,
@@ -125,6 +126,7 @@ class QueryUnderstandingLayer:
         allowed_filter_fields: list[str] | None = None,
         field_aliases: dict[str, list[str]] | None = None,
         fact_store: Any | None = None,
+        llm_timeout_s: float = 5.0,
     ) -> None:
         self._llm = llm
         self._filter_fields = list(allowed_filter_fields or [])
@@ -136,6 +138,9 @@ class QueryUnderstandingLayer:
         # also serves as the facts audit log). Typed loosely to avoid importing
         # the store here (it imports UnderstoodQuery from this module).
         self._store = fact_store
+        # Hard deadline per LLM call — prevents slow Gemini responses from
+        # hanging the request for 15+ seconds. 0 = no timeout.
+        self._llm_timeout_s: float = llm_timeout_s
 
     def process(self, raw: str) -> UnderstoodQuery:
         if raw in self._cache:
@@ -232,12 +237,30 @@ class QueryUnderstandingLayer:
             query=query,
             filter_rule=self._filter_rule(),
         )
+        messages = [
+            SystemMessage(content="You output strict JSON only."),
+            HumanMessage(content=prompt),
+        ]
         try:
-            resp = self._llm.invoke([
-                SystemMessage(content="You output strict JSON only."),
-                HumanMessage(content=prompt),
-            ])
+            if self._llm_timeout_s > 0:
+                try:
+                    cfg = RunnableConfig(timeout=self._llm_timeout_s)
+                    resp = self._llm.invoke(messages, config=cfg)
+                except TypeError:
+                    # LLM implementation does not accept config kwarg (e.g. test fakes).
+                    resp = self._llm.invoke(messages)
+            else:
+                resp = self._llm.invoke(messages)
             return extract_json(getattr(resp, "content", str(resp)))
         except Exception as exc:
-            log.warning("Query understanding LLM failed: %s", exc)
+            # Timeout surfaces as TimeoutError or langchain's RunnableTimeoutError.
+            # Both are caught here; the caller falls back to a safe default UnderstoodQuery.
+            if "timeout" in type(exc).__name__.lower() or "timeout" in str(exc).lower():
+                log.warning(
+                    "Query understanding LLM timed out after %.1f s for query %r — "
+                    "falling back to empty UnderstoodQuery (hybrid retrieval, no filters).",
+                    self._llm_timeout_s, query[:80],
+                )
+            else:
+                log.warning("Query understanding LLM failed: %s", exc)
             return {}

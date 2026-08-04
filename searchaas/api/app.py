@@ -8,12 +8,12 @@ the FastMCP surface.
 from __future__ import annotations
 
 import os
+import threading
 import time
+import traceback
 import uuid
 from contextlib import asynccontextmanager
 from typing import Any
-
-import traceback
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -41,28 +41,156 @@ _EMB_KEY = _cfg.atlas.embedding_key
 _POST_FILTER_OVERSHOOT = 3
 _MAX_RETRIEVE_K = 100
 
+# ---------------------------------------------------------------------------
+# Embedding concurrency semaphore
+# ---------------------------------------------------------------------------
+# Limits the number of simultaneous Atlas AutoEmbed aggregation calls so the
+# aggregate request rate to Voyage AI stays under its RPM quota. Initialized
+# lazily on first use so the config is fully loaded before we read the limit.
+# ---------------------------------------------------------------------------
+_embed_semaphore: threading.Semaphore | None = None
+_embed_semaphore_lock = threading.Lock()
+
+
+def _get_semaphore() -> threading.Semaphore:
+    global _embed_semaphore
+    if _embed_semaphore is not None:
+        return _embed_semaphore
+    with _embed_semaphore_lock:
+        if _embed_semaphore is None:
+            limit = _cfg.retrieval.concurrency_limit
+            _embed_semaphore = threading.Semaphore(limit if limit > 0 else 2 ** 31)
+            log.info("Embed concurrency semaphore initialised: limit=%s", limit)
+    return _embed_semaphore
+
+
+# Strategies that call Atlas AutoEmbed (voyage-4) — fulltext and metadata do
+# not embed the query so they bypass the semaphore.
+_EMBED_STRATEGIES = frozenset({"vector", "hybrid", "auto", "parent_doc"})
+
+# ---------------------------------------------------------------------------
+# Rate-limit retry helper
+# ---------------------------------------------------------------------------
+_RATE_LIMIT_PHRASES = (
+    "rate limit exceeded",
+    "rate_limit",
+    "too many requests",
+    "embedding provider rate limit",
+)
+_RETRY_MAX      = int(os.environ.get("EMBED_RETRY_MAX",      "3"))
+_RETRY_BASE_S   = float(os.environ.get("EMBED_RETRY_BASE_S", "1.0"))
+_RETRY_CAP_S    = float(os.environ.get("EMBED_RETRY_CAP_S",  "8.0"))
+
+
+def _is_rate_limit_error(exc: Exception) -> bool:
+    msg = str(exc).lower()
+    return any(phrase in msg for phrase in _RATE_LIMIT_PHRASES)
+
 
 # ---------------------------------------------------------------------------
 # Lifespan: warm the container at startup so the first real request pays no
 # cold-start penalty (embedder init, LLM client, vector store, index preflight).
 # ---------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
+# Readiness state — set True once the background warmup thread completes.
+# Retrieval endpoints check this and return 503 until the container is ready,
+# preventing the 30-90 s cold-start blocking from appearing as tail latency.
+# ---------------------------------------------------------------------------
+_container_ready = False
+_warmup_start_ts: float = 0.0
+
+
+def _warm_in_background() -> None:
+    """
+    Run all slow startup work in a daemon thread so uvicorn binds immediately.
+
+    Sets _container_ready = True when done so retrieval endpoints know they
+    can serve without blocking. Until then they return 503 + Retry-After: 5.
+    """
+    global _container_ready, _warmup_start_ts
+    try:
+        log.info(
+            "Warmup [bg]: embeddings=%s llm=%s default_strategy=%s",
+            _cfg.embeddings.provider,
+            _cfg.planner.llm_provider,
+            _cfg.retrieval.default_strategy,
+        )
+        ping = AtlasFactory.ping()
+        if not ping.get("ok"):
+            log.error("Warmup [bg]: Atlas ping FAILED — %s", ping)
+        else:
+            log.info("Warmup [bg]: Atlas reachable (%.1f ms)", ping.get("latency_ms", -1))
+
+        log.info("Warmup [bg]: building container (embedder + LLM + vector store)…")
+        get_container()
+
+        # Pre-warm the HNSW index cache by issuing a lightweight vector query
+        # per collection registered in YAML. This populates Atlas's buffer pool
+        # so the first real requests see warm-cache latency instead of 3-5× cold.
+        _prewarm_hnsw()
+
+        elapsed = round(time.perf_counter() - _warmup_start_ts, 1)
+        log.info("Warmup [bg]: container + HNSW cache ready in %.1f s", elapsed)
+    except Exception:
+        log.exception("Warmup [bg]: container build failed — requests will retry lazily")
+    finally:
+        # Mark ready regardless of partial failure so the server doesn't
+        # refuse all traffic forever if an optional step (HNSW prewarm) fails.
+        _container_ready = True
+
+
+def _prewarm_hnsw() -> None:
+    """Issue one cheap vector query per configured collection to warm Atlas HNSW."""
+    try:
+        c = get_container()
+        # Use a generic warmup query that will match something in any domain corpus.
+        warmup_query = "help"
+        # Default collection (from YAML atlas.collection).
+        try:
+            from searchaas.planning.engine import RetrievalPlan
+            plan = RetrievalPlan(strategy="vector", top_k=1)
+            retriever = c.retrievers.create(plan)
+            retriever.invoke(warmup_query)
+            log.info("HNSW prewarm: default collection OK")
+        except Exception as exc:
+            log.warning("HNSW prewarm: default collection failed (%s) — skipping", exc)
+
+        # Extra collections via HNSW_PREWARM_COLLECTIONS env var.
+        # Format: "col:vec_index:text_key;col2:vec_index2:text_key2"
+        extra = os.environ.get("HNSW_PREWARM_COLLECTIONS", "")
+        if extra:
+            for entry in extra.split(";"):
+                entry = entry.strip()
+                parts = entry.split(":")
+                if len(parts) < 2:
+                    continue
+                col_name  = parts[0].strip()
+                vec_idx   = parts[1].strip()
+                text_key  = parts[2].strip() if len(parts) > 2 else "text"
+                try:
+                    from searchaas.planning.engine import RetrievalPlan
+                    plan = RetrievalPlan(strategy="vector", top_k=1)
+                    overrides = AtlasOverrides(
+                        collection=col_name,
+                        vector_index=vec_idx,
+                        text_key=text_key,
+                    )
+                    retriever = c.retrievers.create(plan, overrides=overrides)
+                    retriever.invoke(warmup_query)
+                    log.info("HNSW prewarm: %s/%s OK", col_name, vec_idx)
+                except Exception as exc:
+                    log.warning("HNSW prewarm: %s/%s failed (%s)", col_name, vec_idx, exc)
+    except Exception as exc:
+        log.warning("HNSW prewarm: skipped (%s)", exc)
+
+
 @asynccontextmanager
 async def _lifespan(app: FastAPI):
-    log.info(
-        "Startup: embeddings=%s llm=%s default_strategy=%s",
-        _cfg.embeddings.provider,
-        _cfg.planner.llm_provider,
-        _cfg.retrieval.default_strategy,
-    )
-    ping = AtlasFactory.ping()
-    if not ping.get("ok"):
-        log.error("Startup: Atlas ping FAILED — %s", ping)
-    else:
-        log.info("Startup: Atlas reachable (%.1f ms)", ping.get("latency_ms", -1))
-
-    log.info("Startup: warming container (embedder + LLM + vector store)…")
-    get_container()
-    log.info("Startup: container ready — serving requests")
+    global _warmup_start_ts
+    _warmup_start_ts = time.perf_counter()
+    t = threading.Thread(target=_warm_in_background, daemon=True, name="warmup")
+    t.start()
+    log.info("Startup: port bound — warmup running in background thread")
     yield
 
 
@@ -103,14 +231,43 @@ else:
     )
 
 
+# Hard per-request deadline (seconds). Requests that exceed this are cancelled
+# and return 504 Gateway Timeout — preventing long-tail hangs from tying up
+# uvicorn worker threads. Set REQUEST_TIMEOUT_S=0 to disable.
+_REQUEST_TIMEOUT_S = float(os.environ.get("REQUEST_TIMEOUT_S", "10"))
+
+# Non-retrieval paths that bypass the readiness gate (always served immediately).
+_READINESS_EXEMPT = frozenset({"/health", "/docs", "/openapi.json", "/redoc"})
+
+
 @app.middleware("http")
 async def _request_logger(request: Request, call_next):
+    import asyncio as _asyncio
     rid = uuid.uuid4().hex[:8]
     t0 = time.perf_counter()
     origin = request.headers.get("origin")
-    log.info("req %s -> %s %s origin=%s", rid, request.method, request.url.path, origin)
+    path   = request.url.path
+
+    # ── Readiness gate ────────────────────────────────────────────────────
+    # Retrieval endpoints return 503 until background warmup completes so
+    # new Cloud Run instances don't serve cold-start latency spikes to users.
+    if not _container_ready and path not in _READINESS_EXEMPT:
+        elapsed = round(time.perf_counter() - _warmup_start_ts, 1)
+        log.info("req %s 503 NOT READY (%.1f s elapsed)", rid, elapsed)
+        return JSONResponse(
+            status_code=503,
+            content={"detail": "Server warming up", "elapsed_s": elapsed},
+            headers={"Retry-After": "5", "x-request-id": rid},
+        )
+
+    log.info("req %s -> %s %s origin=%s", rid, request.method, path, origin)
     try:
-        response = await call_next(request)
+        if _REQUEST_TIMEOUT_S > 0:
+            response = await _asyncio.wait_for(
+                call_next(request), timeout=_REQUEST_TIMEOUT_S
+            )
+        else:
+            response = await call_next(request)
         ms = round((time.perf_counter() - t0) * 1000, 1)
         # Surface CORS preflight rejections clearly. Symptoms: browser sends
         # OPTIONS, server returns 400 with no body and no Access-Control-* headers.
@@ -130,16 +287,24 @@ async def _request_logger(request: Request, call_next):
         response.headers["x-request-id"] = rid
         return response
     except Exception as exc:
+        import asyncio as _asyncio
         ms = round((time.perf_counter() - t0) * 1000, 1)
+        if isinstance(exc, _asyncio.TimeoutError):
+            log.warning("req %s TIMEOUT after %.0f ms (limit=%.0f s)",
+                        rid, ms, _REQUEST_TIMEOUT_S)
+            return JSONResponse(
+                status_code=504,
+                content={"detail": f"Request timed out after {_REQUEST_TIMEOUT_S:.0f} s",
+                         "request_id": rid, "path": path},
+                headers={"x-request-id": rid},
+            )
         log.exception("req %s !! after %sms", rid, ms)
-        # Surface the real error to the client instead of a bare 500 with no
-        # body. Controlled by SEARCHAAS_DEBUG_ERRORS=1 (default on in non-prod).
         debug = os.environ.get("SEARCHAAS_DEBUG_ERRORS", "1") == "1"
         body: dict[str, Any] = {
             "error": type(exc).__name__,
             "message": str(exc),
             "request_id": rid,
-            "path": request.url.path,
+            "path": path,
         }
         if debug:
             body["traceback"] = traceback.format_exception(exc)
@@ -342,16 +507,75 @@ def _execute_plan(
     if post_filters:
         plan.top_k = min(desired_k * _POST_FILTER_OVERSHOOT, _MAX_RETRIEVE_K)
 
+    def _invoke_with_guard(plan, overrides, retrieval_overrides) -> tuple[list, list, float]:
+        """
+        Invoke the retriever under the embedding concurrency semaphore and with
+        exponential-backoff retries on Voyage AI rate-limit errors.
+
+        Returns (docs, caps, mongo_ms).
+        """
+        uses_embed = plan.strategy in _EMBED_STRATEGIES
+        sem = _get_semaphore() if uses_embed else None
+
+        # Maximum seconds a request may wait for a semaphore slot before the
+        # server returns 503. Prevents threads from blocking indefinitely when
+        # the embedding concurrency limit is saturated under high load.
+        # Override via EMBED_QUEUE_TIMEOUT_S env var (0 = no timeout).
+        _queue_timeout = float(os.environ.get("EMBED_QUEUE_TIMEOUT_S", "4"))
+
+        attempt = 0
+        while True:
+            retriever = c.retrievers.create(
+                plan, overrides=overrides, retrieval_overrides=retrieval_overrides,
+            )
+            try:
+                if sem:
+                    acquired = sem.acquire(
+                        timeout=_queue_timeout if _queue_timeout > 0 else None
+                    )
+                    if not acquired:
+                        log.warning(
+                            "Semaphore queue timeout after %.1f s (strategy=%s) — "
+                            "returning 503. Raise CONCURRENCY_LIMIT or "
+                            "EMBED_QUEUE_TIMEOUT_S to absorb more burst.",
+                            _queue_timeout, plan.strategy,
+                        )
+                        raise HTTPException(
+                            status_code=503,
+                            detail=(
+                                "Server at embedding capacity. "
+                                "All query slots are busy — retry in a moment."
+                            ),
+                        )
+                try:
+                    t0 = time.perf_counter()
+                    with capture():
+                        docs = retriever.invoke(invoke_query)
+                        caps = captured()
+                    mongo_ms = round((time.perf_counter() - t0) * 1000, 1)
+                finally:
+                    if sem:
+                        sem.release()
+                return docs, caps, mongo_ms
+            except HTTPException:
+                raise
+            except Exception as exc:
+                if _is_rate_limit_error(exc) and attempt < _RETRY_MAX:
+                    delay = min(_RETRY_BASE_S * (2 ** attempt), _RETRY_CAP_S)
+                    attempt += 1
+                    log.warning(
+                        "Voyage AI rate limit hit (attempt %d/%d) — "
+                        "backing off %.1f s before retry. strategy=%s",
+                        attempt, _RETRY_MAX, delay, plan.strategy,
+                    )
+                    time.sleep(delay)
+                    continue
+                raise
+
     try:
-        retriever = c.retrievers.create(
-            plan, overrides=req.atlas, retrieval_overrides=req.retrieval,
+        docs, caps, mongo_ms = _invoke_with_guard(
+            plan, req.atlas, req.retrieval,
         )
-        t0 = time.perf_counter()
-        # Capture the ACTUAL aggregation pipeline(s) executed during retrieval.
-        with capture():
-            docs = retriever.invoke(invoke_query)
-            caps = captured()
-        mongo_ms = round((time.perf_counter() - t0) * 1000, 1)
     except Exception as exc:
         # Atlas rejects $vectorSearch pre-filters on paths not declared as
         # {type: filter} in the index. When this happens, evict the offending
@@ -370,19 +594,27 @@ def _execute_plan(
             )
             plan.filters = {}
             try:
-                retriever = c.retrievers.create(
-                    plan, overrides=req.atlas, retrieval_overrides=req.retrieval,
+                docs, caps, mongo_ms = _invoke_with_guard(
+                    plan, req.atlas, req.retrieval,
                 )
-                t0 = time.perf_counter()
-                with capture():
-                    docs = retriever.invoke(invoke_query)
-                    caps = captured()
-                mongo_ms = round((time.perf_counter() - t0) * 1000, 1)
             except Exception as retry_exc:
                 log.exception("Retrieval failed after filter retry (%s)", plan.strategy)
                 raise HTTPException(
                     status_code=500, detail=f"retrieval failed: {retry_exc}"
                 ) from retry_exc
+        elif _is_rate_limit_error(exc):
+            log.error(
+                "Voyage AI rate limit exhausted after %d retries (strategy=%s): %s",
+                _RETRY_MAX, plan.strategy, exc,
+            )
+            raise HTTPException(
+                status_code=429,
+                detail=(
+                    "Embedding provider rate limit exceeded. "
+                    f"Retried {_RETRY_MAX}× with backoff. "
+                    "Reduce concurrency or upgrade your Voyage AI plan."
+                ),
+            ) from exc
         else:
             log.exception("Retrieval failed (%s)", plan.strategy)
             raise HTTPException(status_code=500, detail=f"retrieval failed: {exc}") from exc

@@ -24,3 +24,11 @@ __pycache__/
 .DS_Store
 graphify-out/
 AWS_DEPLOYMENT.md
+
+# Node / Next.js
+node_modules/
+.next/
+.nuxt/
+out/
+dist/
+*.node
