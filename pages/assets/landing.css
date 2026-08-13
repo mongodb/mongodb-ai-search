@@ -1,0 +1,261 @@
+/* SearchaaS landing page — MongoDB.com-inspired theme */
+:root {
+  --mdb-dark: #001e2b;
+  --mdb-dark-2: #023430;
+  --mdb-green: #00ed64;
+  --mdb-forest: #00684a;
+  --mdb-mint: #c0f5d8;
+  --mdb-slate: #b8c4c2;
+  --fg: #1f2328;
+  --muted: #59636e;
+  --link: #0969da;
+  --border: #d1d9e0;
+  --bg-soft: #f6f8fa;
+}
+
+/* ── Top nav ─────────────────────────────────────────────────────────────── */
+.lnav {
+  position: sticky; top: 0; z-index: 100;
+  display: flex; align-items: center; gap: 1.5rem;
+  background: var(--mdb-dark);
+  padding: 0.8rem 1.5rem;
+  border-bottom: 1px solid rgba(255,255,255,0.12);
+}
+.lnav .logo {
+  display: flex; align-items: center; gap: 0.5rem;
+  color: #fff; font-weight: 800; font-size: 1.1rem; letter-spacing: -0.02em;
+}
+.lnav .logo:hover { text-decoration: none; }
+.lnav .logo .leaf { color: var(--mdb-green); }
+.lnav nav { display: flex; gap: 1.2rem; margin-left: 1rem; flex-wrap: wrap; }
+.lnav nav a { color: var(--mdb-slate); font-size: 0.92rem; }
+.lnav nav a:hover { color: #fff; text-decoration: none; }
+.lnav .cta {
+  margin-left: auto;
+  background: var(--mdb-green); color: var(--mdb-dark) !important;
+  font-weight: 700; font-size: 0.9rem;
+  padding: 0.45rem 1.1rem; border-radius: 6px;
+}
+.lnav .cta:hover { background: var(--mdb-mint); text-decoration: none; }
+
+/* ── Hero ────────────────────────────────────────────────────────────────── */
+.lhero {
+  background:
+    radial-gradient(900px 400px at 85% -10%, rgba(0,237,100,0.18), transparent 60%),
+    linear-gradient(160deg, var(--mdb-dark) 40%, var(--mdb-dark-2));
+  color: #fff;
+  padding: 4rem 1.5rem 4.5rem;
+}
+.lhero .wrap {
+  max-width: 1160px; margin: 0 auto;
+  display: grid; grid-template-columns: 1.05fr 0.95fr; gap: 3rem; align-items: center;
+}
+.lhero .kicker {
+  color: var(--mdb-green); font-weight: 700; font-size: 0.8rem;
+  letter-spacing: 0.14em; text-transform: uppercase; margin: 0 0 0.8rem;
+}
+.lhero h1 {
+  margin: 0 0 1rem; font-size: clamp(2rem, 4.5vw, 3rem);
+  line-height: 1.12; letter-spacing: -0.02em;
+}
+.lhero h1 em { color: var(--mdb-green); font-style: normal; }
+.lhero .sub { color: var(--mdb-slate); font-size: 1.08rem; max-width: 34rem; margin: 0 0 1.8rem; }
+.lhero .actions { display: flex; gap: 0.9rem; flex-wrap: wrap; }
+.btn {
+  display: inline-block; font-weight: 700; font-size: 0.95rem;
+  padding: 0.7rem 1.4rem; border-radius: 6px; transition: background 0.15s ease;
+}
+.btn-primary { background: var(--mdb-green); color: var(--mdb-dark) !important; }
+.btn-primary:hover { background: var(--mdb-mint); text-decoration: none; }
+.btn-ghost {
+  background: transparent; color: #fff !important;
+  border: 1px solid rgba(255,255,255,0.4);
+}
+.btn-ghost:hover { border-color: #fff; text-decoration: none; }
+.lhero .stats {
+  display: flex; gap: 2rem; margin-top: 2.2rem; flex-wrap: wrap;
+}
+.lhero .stat b { display: block; font-size: 1.4rem; color: var(--mdb-green); }
+.lhero .stat span { font-size: 0.8rem; color: var(--mdb-slate); }
+
+/* ── Chatbot demo (hero right) ───────────────────────────────────────────── */
+.chatdemo {
+  background: #fff; color: var(--fg);
+  border-radius: 14px; overflow: hidden;
+  box-shadow: 0 20px 60px rgba(0,0,0,0.45);
+  font-size: 0.88rem;
+}
+.chatdemo .cd-head {
+  display: flex; align-items: center; gap: 0.55rem;
+  background: var(--bg-soft); border-bottom: 1px solid var(--border);
+  padding: 0.65rem 1rem; font-weight: 700;
+}
+.chatdemo .cd-head .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--mdb-green); }
+.chatdemo .cd-head .sub { font-weight: 400; color: var(--muted); font-size: 0.75rem; margin-left: auto; }
+.chatdemo .cd-body { padding: 1rem; min-height: 300px; max-height: 340px; overflow-y: auto; }
+.cd-msg { display: flex; margin-bottom: 0.8rem; }
+.cd-msg.user { justify-content: flex-end; }
+.cd-msg .bubble {
+  max-width: 85%; padding: 0.55rem 0.85rem; border-radius: 12px;
+  background: var(--bg-soft); border: 1px solid var(--border);
+}
+.cd-msg.user .bubble { background: var(--mdb-forest); color: #fff; border: none; border-bottom-right-radius: 4px; }
+.cd-msg.bot .bubble { border-bottom-left-radius: 4px; }
+.cd-badges { display: flex; gap: 0.4rem; flex-wrap: wrap; margin-bottom: 0.45rem; }
+.cd-badge {
+  font-size: 0.68rem; font-weight: 700; padding: 0.12rem 0.5rem; border-radius: 999px;
+  background: #e3f9ec; color: var(--mdb-forest); border: 1px solid #b6e9cd;
+}
+.cd-badge.strategy { background: #eef2ff; color: #3b4a8c; border-color: #d5ddff; }
+.cd-badge.time { background: #fff7e6; color: #8a5a00; border-color: #ffe1a8; }
+.cd-cites { margin-top: 0.5rem; padding-top: 0.45rem; border-top: 1px dashed var(--border); }
+.cd-cites .lbl { font-size: 0.7rem; color: var(--muted); font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; }
+.cd-cite {
+  display: inline-block; margin: 0.25rem 0.25rem 0 0; font-size: 0.72rem;
+  background: #fff; border: 1px solid var(--border); border-radius: 6px; padding: 0.15rem 0.5rem;
+  color: var(--link);
+}
+.typing { display: inline-flex; gap: 4px; padding: 0.4rem 0.2rem; }
+.typing i { width: 6px; height: 6px; border-radius: 50%; background: var(--muted); opacity: 0.4; animation: blink 1.2s infinite; }
+.typing i:nth-child(2) { animation-delay: 0.2s; }
+.typing i:nth-child(3) { animation-delay: 0.4s; }
+@keyframes blink { 0%, 60%, 100% { opacity: 0.25; } 30% { opacity: 0.9; } }
+.chatdemo .cd-suggests {
+  display: flex; gap: 0.5rem; flex-wrap: wrap;
+  padding: 0.75rem 1rem; border-top: 1px solid var(--border); background: var(--bg-soft);
+}
+.chatdemo .cd-suggests button {
+  font-size: 0.78rem; padding: 0.35rem 0.7rem; border-radius: 999px;
+  border: 1px solid var(--border); background: #fff; cursor: pointer; color: var(--fg);
+}
+.chatdemo .cd-suggests button:hover { border-color: var(--mdb-forest); color: var(--mdb-forest); }
+.chatdemo .cd-note { padding: 0.45rem 1rem; font-size: 0.7rem; color: var(--muted); background: var(--bg-soft); }
+
+/* ── Sections ────────────────────────────────────────────────────────────── */
+.lsec { max-width: 1160px; margin: 0 auto; padding: 3.5rem 1.5rem 1rem; }
+.lsec .kicker {
+  color: var(--mdb-forest); font-weight: 700; font-size: 0.78rem;
+  letter-spacing: 0.14em; text-transform: uppercase; margin: 0 0 0.5rem;
+}
+.lsec > h2 { margin: 0 0 0.6rem; font-size: 1.7rem; letter-spacing: -0.01em; }
+.lsec > .lead { color: var(--muted); max-width: 48rem; margin: 0 0 1.8rem; }
+.lsec-alt { background: var(--bg-soft); border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); margin-top: 3rem; }
+.lsec-alt .lsec { padding-bottom: 3rem; }
+
+/* ── Architecture diagram (SVG) ──────────────────────────────────────────── */
+.archwrap {
+  background: #fff; border: 1px solid var(--border); border-radius: 14px;
+  padding: 1.2rem; overflow-x: auto;
+}
+.archwrap svg { display: block; min-width: 900px; width: 100%; height: auto; }
+.anode rect, .anode foreignobject { transition: filter 0.15s ease, stroke 0.15s ease; }
+.anode { cursor: pointer; }
+.anode rect {
+  fill: #fff; stroke: var(--border); stroke-width: 1.2; rx: 10;
+}
+.anode:hover rect { stroke: var(--mdb-forest); filter: drop-shadow(0 3px 8px rgba(0,104,74,0.25)); }
+.anode .t { font: 700 14px -apple-system, "Segoe UI", sans-serif; fill: var(--fg); }
+.anode .s { font: 400 11px -apple-system, "Segoe UI", sans-serif; fill: var(--muted); }
+.anode.core rect { fill: #f2fbf6; stroke: #b6e9cd; }
+.anode.core:hover rect { stroke: var(--mdb-forest); }
+.anode.data rect { fill: var(--mdb-dark); stroke: var(--mdb-dark); }
+.anode.data .t { fill: #fff; }
+.anode.data .s { fill: var(--mdb-slate); }
+.anode.llm rect { fill: #f4f0ff; stroke: #ddd2f7; }
+.anode.llm:hover rect { stroke: #6c4fd1; }
+.chip {
+  font: 600 10.5px -apple-system, "Segoe UI", sans-serif;
+}
+.chip rect { fill: #fff; stroke: #b6e9cd; rx: 999; }
+.chip:hover rect { stroke: var(--mdb-forest); fill: #e9fbef; }
+.chip text { fill: var(--mdb-forest); }
+.achip-label { font: 700 10px -apple-system, "Segoe UI", sans-serif; fill: var(--muted); letter-spacing: 0.06em; }
+.aedge { stroke: #9aa4ad; stroke-width: 1.6; fill: none; marker-end: url(#arr); }
+.aedge.dash { stroke-dasharray: 5 4; stroke: #b39ddb; marker-end: url(#arrp); }
+.aedge.resp { stroke: var(--mdb-forest); stroke-dasharray: 2 4; marker-end: url(#arrg); }
+.aelabel { font: 600 10px -apple-system, "Segoe UI", sans-serif; fill: var(--muted); }
+.archlegend { display: flex; gap: 1.4rem; flex-wrap: wrap; margin-top: 0.8rem; font-size: 0.78rem; color: var(--muted); }
+.archlegend span { display: inline-flex; align-items: center; gap: 0.4rem; }
+.archlegend i { width: 22px; height: 0; border-top: 2px solid #9aa4ad; display: inline-block; }
+.archlegend i.dash { border-top: 2px dashed #b39ddb; }
+.archlegend i.resp { border-top: 2px dashed var(--mdb-forest); }
+
+/* ── Agent interaction steps ─────────────────────────────────────────────── */
+.steps { display: grid; grid-template-columns: repeat(5, 1fr); gap: 0.8rem; }
+.step {
+  position: relative; display: block; background: #fff; color: var(--fg);
+  border: 1px solid var(--border); border-radius: 12px; padding: 1rem 0.9rem 0.9rem;
+}
+.step:hover { border-color: var(--mdb-forest); box-shadow: 0 3px 12px rgba(0,104,74,0.12); text-decoration: none; }
+.step .n {
+  width: 26px; height: 26px; border-radius: 50%;
+  background: var(--mdb-dark); color: var(--mdb-green);
+  font-weight: 800; font-size: 0.8rem;
+  display: flex; align-items: center; justify-content: center; margin-bottom: 0.6rem;
+}
+.step h3 { margin: 0 0 0.3rem; font-size: 0.95rem; }
+.step p { margin: 0; font-size: 0.8rem; color: var(--muted); }
+.step code { font-size: 0.72rem; background: var(--bg-soft); padding: 0.1em 0.35em; border-radius: 4px; }
+
+/* ── Cloud tabs ──────────────────────────────────────────────────────────── */
+.cloudtabs { display: flex; gap: 0.5rem; margin-bottom: 1.4rem; flex-wrap: wrap; }
+.cloudtabs button {
+  display: inline-flex; align-items: center; gap: 0.5rem;
+  font-size: 0.95rem; font-weight: 700; padding: 0.6rem 1.3rem;
+  border-radius: 999px; border: 1px solid var(--border);
+  background: #fff; color: var(--fg); cursor: pointer;
+}
+.cloudtabs button[aria-selected="true"] {
+  background: var(--mdb-dark); color: var(--mdb-green); border-color: var(--mdb-dark);
+}
+.cloudpanel { display: none; }
+.cloudpanel.active { display: block; animation: fadein 0.25s ease; }
+@keyframes fadein { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+.clouddiag {
+  display: grid; grid-template-columns: repeat(4, 1fr); gap: 0.8rem; margin-bottom: 1.2rem;
+}
+.clayer {
+  background: #fff; border: 1px solid var(--border); border-radius: 12px; padding: 0.9rem;
+  display: flex; flex-direction: column; gap: 0.35rem;
+}
+.clayer .lbl { font-size: 0.68rem; font-weight: 800; text-transform: uppercase; letter-spacing: 0.07em; color: var(--muted); }
+.clayer .svc { font-weight: 700; font-size: 0.95rem; }
+.clayer .desc { font-size: 0.78rem; color: var(--muted); }
+.clayer.const { background: var(--mdb-dark); border-color: var(--mdb-dark); }
+.clayer.const .lbl { color: var(--mdb-slate); }
+.clayer.const .svc { color: var(--mdb-green); }
+.clayer.const .desc { color: var(--mdb-slate); }
+.cloudlinks { display: flex; gap: 0.6rem; flex-wrap: wrap; }
+.cloudlinks a {
+  font-size: 0.85rem; font-weight: 600;
+  border: 1px solid var(--border); border-radius: 8px; background: #fff;
+  padding: 0.45rem 0.9rem; color: var(--link);
+}
+.cloudlinks a:hover { border-color: var(--link); text-decoration: none; }
+
+/* ── Docs portal (below fold) ────────────────────────────────────────────── */
+.docshead { display: flex; align-items: center; gap: 1rem; flex-wrap: wrap; margin-bottom: 0.4rem; }
+.docshead input {
+  margin-left: auto; width: min(320px, 100%);
+  padding: 0.5rem 0.9rem; border: 1px solid var(--border); border-radius: 8px; font-size: 0.9rem;
+}
+
+/* ── Footer ──────────────────────────────────────────────────────────────── */
+.lfooter {
+  background: var(--mdb-dark); color: var(--mdb-slate);
+  padding: 2.5rem 1.5rem; margin-top: 3rem; font-size: 0.85rem;
+}
+.lfooter .wrap { max-width: 1160px; margin: 0 auto; display: flex; justify-content: space-between; gap: 1.5rem; flex-wrap: wrap; }
+.lfooter b { color: #fff; }
+.lfooter a { color: var(--mdb-slate); }
+
+/* ── Responsive ──────────────────────────────────────────────────────────── */
+@media (max-width: 960px) {
+  .lhero .wrap { grid-template-columns: 1fr; }
+  .steps { grid-template-columns: repeat(2, 1fr); }
+  .clouddiag { grid-template-columns: repeat(2, 1fr); }
+  .lnav nav { display: none; }
+}
+@media (max-width: 560px) {
+  .steps, .clouddiag { grid-template-columns: 1fr; }
+}

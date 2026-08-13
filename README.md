@@ -491,11 +491,11 @@ authenticated, Docker running, a GCP project with billing, and a populated
 
 **Option A — Single service (recommended).** One image, one URL; nginx serves
 the React SPA and proxies API/MCP traffic to internal backends (no CORS config).
-Script: [`deployment/google/deploy-combined.sh`](deployment/google/deploy-combined.sh).
+Script: [`deployment/google/cloud_run/deploy-combined.sh`](deployment/google/cloud_run/deploy-combined.sh).
 
 ```bash
-chmod +x deployment/google/deploy-combined.sh
-./deployment/google/deploy-combined.sh --project <PROJECT_ID> --region <REGION>
+chmod +x deployment/google/cloud_run/deploy-combined.sh
+./deployment/google/cloud_run/deploy-combined.sh --project <PROJECT_ID> --region <REGION>
 ```
 
 | Endpoint | Description |
@@ -506,11 +506,11 @@ chmod +x deployment/google/deploy-combined.sh
 
 **Option B — Separate services.** Three independent Cloud Run services, useful
 to scale the API and MCP independently from the frontend.
-Script: [`deployment/google/deploy.sh`](deployment/google/deploy.sh).
+Script: [`deployment/google/cloud_run/deploy.sh`](deployment/google/cloud_run/deploy.sh).
 
 ```bash
-chmod +x deployment/google/deploy.sh
-./deployment/google/deploy.sh --project <PROJECT_ID> --region <REGION>
+chmod +x deployment/google/cloud_run/deploy.sh
+./deployment/google/cloud_run/deploy.sh --project <PROJECT_ID> --region <REGION>
 ```
 
 | Cloud Run service | URL path | Description |

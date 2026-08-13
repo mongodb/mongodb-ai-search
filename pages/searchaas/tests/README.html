@@ -1,0 +1,133 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SearchaaS Test Suite · SearchaaS Docs</title>
+<link rel="stylesheet" href="../../../pages/assets/style.css">
+<link rel="stylesheet" href="../../../pages/assets/pygments.css">
+</head>
+<body>
+<header class="topbar">
+  <a class="brand" href="../../../index.html">SearchaaS Docs</a>
+  <a class="back" href="../../../index.html">← All docs</a>
+</header>
+<main class="content">
+<h1 id="searchaas-test-suite">SearchaaS Test Suite</h1>
+<p>Tests for the metadata-filter allowlist fix (branch <code>fix/llm-filter-allowlist</code>),
+which stops the Query Understanding LLM from sending invented filter fields
+into Atlas <code>$vectorSearch</code> (the <code>Path '&lt;field&gt;' needs to be indexed as filter</code>
+<code>OperationFailure</code>).</p>
+<p>The suite is <strong>hermetic</strong> — it never touches a live Atlas cluster or a real
+LLM. The chat model and vector store are replaced with in-memory fakes, so the
+tests are fast (~0.2s) and run anywhere.</p>
+<h2 id="prerequisites">Prerequisites</h2>
+<div class="highlight"><pre><span></span><code><span class="c1"># From the repo root, with the project venv active</span>
+pip<span class="w"> </span>install<span class="w"> </span>pytest<span class="w">        </span><span class="c1"># already present in ./venv (pytest 9.x)</span>
+</code></pre></div>
+
+<p>No AWS, Atlas, or network access is required. The config loader autoloads the
+project <code>.env</code>, so <code>ATLAS_URI</code> / <code>ATLAS_DB</code> are picked up automatically if
+present; if they are absent the tests still pass (the one config test sets its
+own env via <code>monkeypatch</code>).</p>
+<h2 id="running">Running</h2>
+<div class="highlight"><pre><span></span><code><span class="c1"># Run everything (uses pytest.ini -&gt; testpaths = searchaas/tests)</span>
+pytest
+
+<span class="c1"># Equivalent explicit form</span>
+python3<span class="w"> </span>-m<span class="w"> </span>pytest<span class="w"> </span>searchaas/tests/
+
+<span class="c1"># Verbose: list every test name</span>
+pytest<span class="w"> </span>-v
+
+<span class="c1"># Run a single file</span>
+pytest<span class="w"> </span>searchaas/tests/test_retriever_filter_allowlist.py
+
+<span class="c1"># Run a single test</span>
+pytest<span class="w"> </span>searchaas/tests/test_query_understanding_filters.py::test_aws03_repro_company_filter_is_dropped
+
+<span class="c1"># Filter by keyword</span>
+pytest<span class="w"> </span>-k<span class="w"> </span><span class="s2">&quot;aws03 or allowlist&quot;</span>
+
+<span class="c1"># Stop on first failure, show locals</span>
+pytest<span class="w"> </span>-x<span class="w"> </span>-l
+</code></pre></div>
+
+<p>All commands are run from the <strong>repo root</strong>
+(<code>mongodb-ai-enterprise-search/</code>). <code>pytest.ini</code> sets <code>testpaths</code>, so a bare
+<code>pytest</code> finds the suite.</p>
+<h2 id="whats-covered">What's covered</h2>
+<table>
+<thead>
+<tr>
+<th>File</th>
+<th>Focus</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>test_filtering.py</code></td>
+<td><code>sanitize_filters()</code> + <code>AtlasConfig.filter_fields</code> / <code>search_filter_fields</code> derivation from the index definitions in <code>searchaas.yaml</code></td>
+</tr>
+<tr>
+<td><code>test_query_understanding_filters.py</code></td>
+<td><code>QueryUnderstandingLayer</code> strips hallucinated filters and injects the allowed-fields constraint into the LLM prompt</td>
+</tr>
+<tr>
+<td><code>test_retriever_filter_allowlist.py</code></td>
+<td><code>RetrieverFactory.create()</code> choke point — no invented <code>pre_filter</code> reaches <code>$vectorSearch</code>; allowlisted fields pass through; per-strategy allowlists</td>
+</tr>
+<tr>
+<td><code>conftest.py</code></td>
+<td>Shared fixtures, fakes (<code>FakeLLM</code>, <code>FakeVectorStore</code>), and the prompt subset</td>
+</tr>
+</tbody>
+</table>
+<h3 id="prompt-driven-scenarios">Prompt-driven scenarios</h3>
+<p>The tests are driven by a subset of the evaluation prompts in
+<code>test_prompts.json</code>, defined in <code>conftest.py::PROMPT_SUBSET</code>. Each prompt is
+paired with the metadata filters a hallucination-prone LLM would emit for it
+(e.g. <code>aws-03</code> → <code>{"company": "Amazon"}</code>, the original reproducing case). To
+extend coverage, add an entry to <code>PROMPT_SUBSET</code>:</p>
+<div class="highlight"><pre><span></span><code><span class="n">PROMPT_SUBSET</span> <span class="o">=</span> <span class="p">{</span>
+    <span class="o">...</span>
+    <span class="s2">&quot;mdbpaper-05&quot;</span><span class="p">:</span> <span class="p">{</span><span class="s2">&quot;company&quot;</span><span class="p">:</span> <span class="s2">&quot;MongoDB&quot;</span><span class="p">,</span> <span class="s2">&quot;doc_type&quot;</span><span class="p">:</span> <span class="s2">&quot;whitepaper&quot;</span><span class="p">},</span>
+<span class="p">}</span>
+</code></pre></div>
+
+<p>The prompt id must exist in <code>test_prompts.json</code>; the dict is the filter set the
+fake LLM will hallucinate for that query.</p>
+<h2 id="expected-output">Expected output</h2>
+<div class="highlight"><pre><span></span><code>collected 32 items
+
+searchaas/tests/test_filtering.py ...............                        [ 46%]
+searchaas/tests/test_query_understanding_filters.py .......              [ 68%]
+searchaas/tests/test_retriever_filter_allowlist.py ..........            [100%]
+
+============================== 32 passed in 0.22s ==============================
+</code></pre></div>
+
+<h2 id="coverage-optional">Coverage (optional)</h2>
+<div class="highlight"><pre><span></span><code>pip<span class="w"> </span>install<span class="w"> </span>pytest-cov
+pytest<span class="w"> </span>--cov<span class="o">=</span>searchaas.filtering<span class="w"> </span><span class="se">\</span>
+<span class="w">       </span>--cov<span class="o">=</span>searchaas.config.loader<span class="w"> </span><span class="se">\</span>
+<span class="w">       </span>--cov<span class="o">=</span>searchaas.query_understanding.layer<span class="w"> </span><span class="se">\</span>
+<span class="w">       </span>--cov<span class="o">=</span>searchaas.retrieval.factory<span class="w"> </span><span class="se">\</span>
+<span class="w">       </span>--cov-report<span class="o">=</span>term-missing
+</code></pre></div>
+
+<h2 id="troubleshooting">Troubleshooting</h2>
+<ul>
+<li><strong><code>ModuleNotFoundError: searchaas</code></strong> — run from the repo root, not from
+  inside <code>searchaas/</code>. <code>conftest.py</code> also inserts the repo root onto
+  <code>sys.path</code> as a fallback.</li>
+<li><strong><code>caplog</code> assertions empty</strong> — the <code>searchaas</code> logger sets
+  <code>propagate=False</code>; the autouse <code>_propagate_searchaas_logs</code> fixture in
+  <code>conftest.py</code> re-enables propagation so <code>caplog</code> can capture warnings. Keep
+  that fixture if you add log-assertion tests.</li>
+</ul>
+</main>
+<script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+<script>if (window.mermaid) mermaid.initialize({startOnLoad: true, theme: "neutral"});</script>
+</body>
+</html>

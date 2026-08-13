@@ -1,0 +1,394 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SearchaaS — Vertex AI Agent Engine (Reasoning Engine) Deployment · SearchaaS Docs</title>
+<link rel="stylesheet" href="../../../../pages/assets/style.css">
+<link rel="stylesheet" href="../../../../pages/assets/pygments.css">
+</head>
+<body>
+<header class="topbar">
+  <a class="brand" href="../../../../index.html">SearchaaS Docs</a>
+  <a class="back" href="../../../../index.html">← All docs</a>
+</header>
+<main class="content">
+<h1 id="searchaas-vertex-ai-agent-engine-reasoning-engine-deployment">SearchaaS — Vertex AI Agent Engine (Reasoning Engine) Deployment</h1>
+<p>Deploys SearchaaS to the <strong>Google Cloud Gemini agent platform's managed agent
+runtime — Vertex AI Agent Engine</strong> (formerly "Reasoning Engine"). This is the
+managed, serverless agent host: <strong>no Cloud Run service, no locally-built
+container image</strong>. The Agent Engine service builds and runs the agent
+container server-side from the pickled agent object, the <code>searchaas</code> package,
+and the pip requirements uploaded to a staging bucket.</p>
+<p>Docs:
+- <a href="https://cloud.google.com/vertex-ai/generative-ai/docs/agent-engine/overview">https://cloud.google.com/vertex-ai/generative-ai/docs/agent-engine/overview</a>
+- <a href="https://cloud.google.com/vertex-ai/generative-ai/docs/agent-engine/develop/custom">https://cloud.google.com/vertex-ai/generative-ai/docs/agent-engine/develop/custom</a></p>
+<blockquote>
+<p>The standard containerized deployment (React UI + REST API + MCP server)
+remains available under <a href="../cloud_run/README.html"><code>../cloud_run/</code></a>.</p>
+</blockquote>
+<hr />
+<h2 id="agent-engine-contract-this-deployment-satisfies">Agent Engine contract this deployment satisfies</h2>
+<table>
+<thead>
+<tr>
+<th>Requirement</th>
+<th>How it's met</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Queryable agent object</td>
+<td><code>SearchaaSAgent</code> in <code>deploy_agent_engine.py</code> implements <code>query()</code> + <code>stream_query()</code> (custom reasoning-engine template)</td>
+</tr>
+<tr>
+<td><code>set_up()</code> hook</td>
+<td>Builds the SearchaaS <code>Container</code> remotely after unpickling (Atlas client, embedder, planner LLM, retrievers)</td>
+</tr>
+<tr>
+<td>Code packaged</td>
+<td><code>extra_packages=["searchaas"]</code> — the repo package is tarred, uploaded to the staging bucket, and importable in the remote runtime</td>
+</tr>
+<tr>
+<td>Dependencies</td>
+<td>repo-root <code>requirements.txt</code> (minus <code>pytest</code>) is installed server-side</td>
+</tr>
+<tr>
+<td>Config</td>
+<td>Plain env vars (<code>ATLAS_DB</code>, <code>EMBEDDINGS_PROVIDER</code>, …) via <code>env_vars</code></td>
+</tr>
+<tr>
+<td>Secrets</td>
+<td><code>ATLAS_URI</code>, API keys via <strong>Secret Manager <code>SecretRef</code></strong> — never baked into the agent</td>
+</tr>
+<tr>
+<td>Staging</td>
+<td><code>gs://&lt;project&gt;-agent-engine-staging</code> bucket, created by <code>deploy.sh</code></td>
+</tr>
+<tr>
+<td>IAM</td>
+<td><code>deploy.sh</code> grants the Agent Engine service agent <code>secretmanager.secretAccessor</code> + <code>storage.objectViewer</code> on the staging bucket</td>
+</tr>
+</tbody>
+</table>
+<p>The <code>searchaas</code> application code is <strong>not modified</strong> — the agent wrapper lives
+entirely in this directory and reuses the identical pipeline as the FastAPI
+<code>/retrieve</code> endpoint and the MCP <code>auto_search</code> tool
+(understand → plan → retrieve → summarize).</p>
+<hr />
+<h2 id="files">Files</h2>
+<table>
+<thead>
+<tr>
+<th>File</th>
+<th>Purpose</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>deploy.sh</code></td>
+<td>End-to-end deploy: APIs → staging bucket → secrets → IAM → Agent Engine</td>
+</tr>
+<tr>
+<td><code>deploy_agent_engine.py</code></td>
+<td><code>SearchaaSAgent</code> wrapper class + <code>AgentEngine.create()/update()</code> driver</td>
+</tr>
+<tr>
+<td><code>requirements-deploy.txt</code></td>
+<td>Deploy-time deps installed into the local venv (Vertex AI SDK + cloudpickle)</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="run-it">Run it</h2>
+<div class="highlight"><pre><span></span><code><span class="nb">export</span><span class="w"> </span><span class="nv">ATLAS_URI</span><span class="o">=</span><span class="s1">&#39;mongodb+srv://USER:PASS@cluster.mongodb.net/?retryWrites=true&#39;</span>
+<span class="nb">export</span><span class="w"> </span><span class="nv">ATLAS_DB</span><span class="o">=</span><span class="s1">&#39;your_database_name&#39;</span>
+
+<span class="c1"># Interactive confirmation (type &#39;deploy-agent-engine&#39; when prompted):</span>
+./deployment/google/agent_runtime/deploy.sh
+
+<span class="c1"># Or skip the prompt in CI:</span>
+<span class="nv">YES</span><span class="o">=</span>yes<span class="w"> </span>./deployment/google/agent_runtime/deploy.sh<span class="w"> </span>--yes
+
+<span class="c1"># With explicit project/region:</span>
+./deployment/google/agent_runtime/deploy.sh<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--project<span class="w"> </span>my-gcp-project<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--region<span class="w"> </span>us-central1<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--yes
+
+<span class="c1"># Update an existing engine in place (no new resource created):</span>
+<span class="nv">AGENT_ENGINE_ID</span><span class="o">=</span>&lt;engine-id&gt;<span class="w"> </span>./deployment/google/agent_runtime/deploy.sh<span class="w"> </span>--yes
+</code></pre></div>
+
+<p>The server-side build takes <strong>~5–15 minutes</strong>. On success the script prints:</p>
+<div class="highlight"><pre><span></span><code>AGENT_ENGINE_RESOURCE=projects/&lt;project&gt;/locations/us-central1/reasoningEngines/&lt;id&gt;
+</code></pre></div>
+
+<hr />
+<h2 id="query-the-deployed-agent">Query the deployed agent</h2>
+<div class="highlight"><pre><span></span><code><span class="kn">import</span><span class="w"> </span><span class="nn">vertexai</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">vertexai</span><span class="w"> </span><span class="kn">import</span> <span class="n">agent_engines</span>
+
+<span class="n">vertexai</span><span class="o">.</span><span class="n">init</span><span class="p">(</span><span class="n">project</span><span class="o">=</span><span class="s2">&quot;my-gcp-project&quot;</span><span class="p">,</span> <span class="n">location</span><span class="o">=</span><span class="s2">&quot;us-central1&quot;</span><span class="p">)</span>
+<span class="n">agent</span> <span class="o">=</span> <span class="n">agent_engines</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;projects/.../locations/us-central1/reasoningEngines/&lt;id&gt;&quot;</span><span class="p">)</span>
+
+<span class="c1"># Auto mode — the planner picks the retrieval strategy:</span>
+<span class="n">resp</span> <span class="o">=</span> <span class="n">agent</span><span class="o">.</span><span class="n">query</span><span class="p">(</span><span class="nb">input</span><span class="o">=</span><span class="s2">&quot;best rated hotels&quot;</span><span class="p">,</span> <span class="n">top_k</span><span class="o">=</span><span class="mi">5</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="n">resp</span><span class="p">[</span><span class="s2">&quot;summary&quot;</span><span class="p">],</span> <span class="n">resp</span><span class="p">[</span><span class="s2">&quot;results&quot;</span><span class="p">])</span>
+
+<span class="c1"># Fixed strategy — vector | fulltext | hybrid | graph | parent_doc | metadata:</span>
+<span class="n">resp</span> <span class="o">=</span> <span class="n">agent</span><span class="o">.</span><span class="n">query</span><span class="p">(</span><span class="nb">input</span><span class="o">=</span><span class="s2">&quot;best rated hotels&quot;</span><span class="p">,</span> <span class="n">top_k</span><span class="o">=</span><span class="mi">5</span><span class="p">,</span> <span class="n">strategy</span><span class="o">=</span><span class="s2">&quot;hybrid&quot;</span><span class="p">)</span>
+
+<span class="c1"># Optional metadata pre-filters:</span>
+<span class="n">resp</span> <span class="o">=</span> <span class="n">agent</span><span class="o">.</span><span class="n">query</span><span class="p">(</span><span class="nb">input</span><span class="o">=</span><span class="s2">&quot;hotels in Paris&quot;</span><span class="p">,</span> <span class="n">top_k</span><span class="o">=</span><span class="mi">5</span><span class="p">,</span>
+                   <span class="n">filters</span><span class="o">=</span><span class="p">{</span><span class="s2">&quot;imdb.rating&quot;</span><span class="p">:</span> <span class="mi">8</span><span class="p">})</span>
+
+<span class="c1"># Optional per-request overrides (same semantics as the REST /retrieve body):</span>
+<span class="c1"># target another collection in the same database + tune retrieval weights.</span>
+<span class="n">resp</span> <span class="o">=</span> <span class="n">agent</span><span class="o">.</span><span class="n">query</span><span class="p">(</span>
+    <span class="nb">input</span><span class="o">=</span><span class="s2">&quot;How do I connect to the VPN?&quot;</span><span class="p">,</span> <span class="n">top_k</span><span class="o">=</span><span class="mi">5</span><span class="p">,</span>
+    <span class="n">atlas</span><span class="o">=</span><span class="p">{</span>
+        <span class="s2">&quot;collection&quot;</span><span class="p">:</span> <span class="s2">&quot;IT_helpdesk&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;vector_index&quot;</span><span class="p">:</span> <span class="s2">&quot;it_helpdesk_vector_index&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;search_index&quot;</span><span class="p">:</span> <span class="s2">&quot;it_helpdesk_search_index&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;text_key&quot;</span><span class="p">:</span> <span class="s2">&quot;text&quot;</span><span class="p">,</span>
+        <span class="s2">&quot;embedding_key&quot;</span><span class="p">:</span> <span class="kc">None</span><span class="p">,</span>          <span class="c1"># autoEmbed index — no client-side key</span>
+    <span class="p">},</span>
+    <span class="n">retrieval</span><span class="o">=</span><span class="p">{</span><span class="s2">&quot;vector_weight&quot;</span><span class="p">:</span> <span class="mf">0.55</span><span class="p">,</span> <span class="s2">&quot;fulltext_weight&quot;</span><span class="p">:</span> <span class="mf">0.45</span><span class="p">,</span>
+               <span class="s2">&quot;num_candidates&quot;</span><span class="p">:</span> <span class="mi">150</span><span class="p">},</span>
+<span class="p">)</span>
+
+<span class="c1"># Streaming (progress events + final result):</span>
+<span class="k">for</span> <span class="n">event</span> <span class="ow">in</span> <span class="n">agent</span><span class="o">.</span><span class="n">stream_query</span><span class="p">(</span><span class="nb">input</span><span class="o">=</span><span class="s2">&quot;best rated hotels&quot;</span><span class="p">,</span> <span class="n">top_k</span><span class="o">=</span><span class="mi">5</span><span class="p">):</span>
+    <span class="nb">print</span><span class="p">(</span><span class="n">event</span><span class="p">)</span>
+</code></pre></div>
+
+<p>The response dict matches the REST <code>/retrieve</code> payload: <code>strategy</code>, <code>summary</code>,
+<code>results</code>, <code>understood_query</code>, <code>plan</code>, <code>timings</code>.</p>
+<h3 id="from-the-console-gemini-agent-platform">From the console / Gemini agent platform</h3>
+<p>Open <strong>Vertex AI → Agent Builder → Agent Engines</strong>
+(<a href="https://console.cloud.google.com/vertex-ai/agents/agent-engines">https://console.cloud.google.com/vertex-ai/agents/agent-engines</a>) — the
+<code>searchaas-agent</code> engine appears there once deployed, with a built-in
+playground for <code>query</code> / <code>streamQuery</code> calls, and can be registered as a tool
+for Gemini Enterprise agents.</p>
+<hr />
+<h2 id="configuration">Configuration</h2>
+<p>All configuration in <code>searchaas/config/searchaas.yaml</code> uses <code>${VAR:-default}</code>
+syntax, so the deployed agent is configured purely with <strong>environment
+variables</strong> — no redeploy of code needed beyond re-running <code>deploy.sh</code>.
+Export variables before deploying and they are forwarded:</p>
+<div class="highlight"><pre><span></span><code><span class="nb">export</span><span class="w"> </span><span class="nv">EMBEDDINGS_PROVIDER</span><span class="o">=</span>auto
+<span class="nb">export</span><span class="w"> </span><span class="nv">ATLAS_VECTOR_INDEX</span><span class="o">=</span>autoembed_index
+<span class="nb">export</span><span class="w"> </span><span class="nv">ATLAS_DIMENSIONS</span><span class="o">=</span>-1
+./deployment/google/agent_runtime/deploy.sh<span class="w"> </span>--yes
+</code></pre></div>
+
+<h3 id="atlas-connection-index">Atlas connection &amp; index</h3>
+<table>
+<thead>
+<tr>
+<th>Env var</th>
+<th>Default</th>
+<th>Purpose</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>ATLAS_URI</code></td>
+<td><em>(required)</em></td>
+<td><code>mongodb+srv://...</code> connection string (Secret Manager)</td>
+</tr>
+<tr>
+<td><code>ATLAS_DB</code></td>
+<td><code>amazon</code></td>
+<td>Database name</td>
+</tr>
+<tr>
+<td><code>ATLAS_COLLECTION</code></td>
+<td><code>pdf_multimodal_chunks</code></td>
+<td>Collection to search</td>
+</tr>
+<tr>
+<td><code>ATLAS_VECTOR_INDEX</code></td>
+<td><code>aisearch_vector_index</code></td>
+<td>Atlas Vector Search index</td>
+</tr>
+<tr>
+<td><code>ATLAS_SEARCH_INDEX</code></td>
+<td><code>default</code></td>
+<td>Atlas Search (Lucene) index for fulltext/hybrid</td>
+</tr>
+<tr>
+<td><code>ATLAS_TEXT_KEY</code></td>
+<td><code>raw_text</code></td>
+<td>Field holding chunk text</td>
+</tr>
+<tr>
+<td><code>ATLAS_EMBEDDING_KEY</code></td>
+<td><code>embedding</code></td>
+<td>Field holding the vector</td>
+</tr>
+<tr>
+<td><code>ATLAS_RELEVANCE_FN</code></td>
+<td><code>cosine</code></td>
+<td>Similarity function</td>
+</tr>
+<tr>
+<td><code>ATLAS_DIMENSIONS</code></td>
+<td><code>1024</code></td>
+<td>Vector dimensions (must match index and embedder)</td>
+</tr>
+</tbody>
+</table>
+<h3 id="embedding-provider">Embedding provider</h3>
+<table>
+<thead>
+<tr>
+<th>Provider</th>
+<th>Required env vars</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>voyageai</code> <em>(default)</em></td>
+<td><code>VOYAGE_API_KEY</code>, <code>EMBEDDINGS_MODEL</code> (<code>voyage-4</code>)</td>
+</tr>
+<tr>
+<td><code>gemini</code></td>
+<td><code>GOOGLE_API_KEY</code>, <code>EMBEDDINGS_MODEL</code> (e.g. <code>text-embedding-004</code>)</td>
+</tr>
+<tr>
+<td><code>auto</code> (server-side Atlas)</td>
+<td><code>EMBEDDINGS_MODEL</code> only — no API key needed</td>
+</tr>
+<tr>
+<td><code>openai</code></td>
+<td><code>OPENAI_API_KEY</code>, <code>EMBEDDINGS_MODEL</code></td>
+</tr>
+</tbody>
+</table>
+<p><code>EMBEDDINGS_OUTPUT_DIMENSION</code> must equal <code>ATLAS_DIMENSIONS</code>.</p>
+<h4 id="two-embedding-modes-must-match-your-atlas-index-type">Two embedding modes (must match your Atlas index type)</h4>
+<ul>
+<li><strong>Mode A — client-side</strong> (default): the app embeds queries locally. Requires
+  a <code>vector</code>-type index. Keep <code>ATLAS_EMBEDDING_KEY</code>, <code>ATLAS_DIMENSIONS</code>, and
+  <code>ATLAS_RELEVANCE_FN</code> set.</li>
+<li><strong>Mode B — server-side AutoEmbeddings</strong>: Atlas embeds internally. Set
+  <code>EMBEDDINGS_PROVIDER=auto</code>, <code>ATLAS_EMBEDDING_KEY=</code> (empty),
+  <code>ATLAS_DIMENSIONS=-1</code>, <code>ATLAS_RELEVANCE_FN=</code> (empty), and point
+  <code>ATLAS_VECTOR_INDEX</code> at an <code>autoEmbed</code>-type index.</li>
+</ul>
+<p>Dev escape hatch: <code>SEARCHAAS_SKIP_PROVIDER_INDEX_CHECK=1</code> bypasses startup
+validation. Do not use in production.</p>
+<h3 id="planner-llm">Planner LLM</h3>
+<table>
+<thead>
+<tr>
+<th>Provider</th>
+<th>Key env vars</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>gemini</code> <em>(recommended for Google Cloud)</em></td>
+<td><code>GOOGLE_API_KEY</code>, <code>PLANNER_MODEL</code> (e.g. <code>gemini-2.0-flash</code>)</td>
+</tr>
+<tr>
+<td><code>openai</code></td>
+<td><code>OPENAI_API_KEY</code>, <code>PLANNER_MODEL</code></td>
+</tr>
+<tr>
+<td><code>anthropic</code></td>
+<td><code>ANTHROPIC_API_KEY</code>, <code>PLANNER_MODEL</code></td>
+</tr>
+<tr>
+<td><code>bedrock</code></td>
+<td><code>BEDROCK_MODEL</code>, <code>BEDROCK_REGION_NAME</code></td>
+</tr>
+</tbody>
+</table>
+<h3 id="retrieval-strategy">Retrieval strategy</h3>
+<table>
+<thead>
+<tr>
+<th>Env var</th>
+<th>Default</th>
+<th>Options</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>RETRIEVAL_DEFAULT_STRATEGY</code></td>
+<td><code>hybrid</code></td>
+<td><code>vector</code>, <code>fulltext</code>, <code>hybrid</code>, <code>graph</code>, <code>parent_doc</code>, <code>metadata</code></td>
+</tr>
+<tr>
+<td><code>RETRIEVAL_HYBRID_VECTOR_WEIGHT</code></td>
+<td><code>0.6</code></td>
+<td>hybrid vector weight</td>
+</tr>
+<tr>
+<td><code>RETRIEVAL_HYBRID_FULLTEXT_WEIGHT</code></td>
+<td><code>0.4</code></td>
+<td>hybrid fulltext weight</td>
+</tr>
+<tr>
+<td><code>RETRIEVAL_VECTOR_NUM_CANDIDATES</code></td>
+<td><code>200</code></td>
+<td>vector oversampling</td>
+</tr>
+</tbody>
+</table>
+<blockquote>
+<p><code>hybrid</code> requires <strong>MongoDB 8.0+</strong> (uses native <code>$rankFusion</code>).</p>
+</blockquote>
+<hr />
+<h2 id="manage-tear-down">Manage / tear down</h2>
+<div class="highlight"><pre><span></span><code><span class="nv">PROJECT</span><span class="o">=</span>my-gcp-project
+<span class="nv">REGION</span><span class="o">=</span>us-central1
+
+<span class="c1"># List engines</span>
+venv/bin/python<span class="w"> </span>-<span class="w"> </span><span class="s">&lt;&lt;&#39;PY&#39;</span>
+<span class="s">import vertexai</span>
+<span class="s">from vertexai import agent_engines</span>
+<span class="s">vertexai.init(project=&quot;my-gcp-project&quot;, location=&quot;us-central1&quot;)</span>
+<span class="s">for e in agent_engines.list():</span>
+<span class="s">    print(e.resource_name, e.display_name)</span>
+<span class="s">PY</span>
+
+<span class="c1"># Delete the engine</span>
+venv/bin/python<span class="w"> </span>-<span class="w"> </span><span class="s">&lt;&lt;&#39;PY&#39;</span>
+<span class="s">import vertexai</span>
+<span class="s">from vertexai import agent_engines</span>
+<span class="s">vertexai.init(project=&quot;my-gcp-project&quot;, location=&quot;us-central1&quot;)</span>
+<span class="s">agent_engines.delete(&quot;projects/my-gcp-project/locations/us-central1/reasoningEngines/&lt;id&gt;&quot;)</span>
+<span class="s">PY</span>
+
+<span class="c1"># Delete the staging bucket (also removes staged artifacts)</span>
+gcloud<span class="w"> </span>storage<span class="w"> </span>buckets<span class="w"> </span>delete<span class="w"> </span>gs://<span class="si">${</span><span class="nv">PROJECT</span><span class="si">}</span>-agent-engine-staging<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--project<span class="w"> </span><span class="nv">$PROJECT</span><span class="w"> </span>--quiet
+</code></pre></div>
+
+<hr />
+<h2 id="notes-caveats">Notes / caveats</h2>
+<ul>
+<li><strong>Server-side build.</strong> <code>AgentEngine.create()</code> uploads the pickled agent,
+  <code>searchaas</code> package, and requirements to the staging bucket; the managed
+  service then pip-installs requirements and boots the runtime. Expect
+  ~5–15 minutes per deploy.</li>
+<li><strong>Python version.</strong> The remote runtime Python matches the local interpreter
+  (3.10–3.13 supported). Use the repo <code>./venv</code> (3.13) — it is the default.</li>
+<li><strong>Cold starts.</strong> The first <code>query</code> on a fresh engine builds the SearchaaS
+  container (Atlas connection, embedder, planner) — allow 30–60 s. Subsequent
+  calls are warm.</li>
+<li><strong>Secrets.</strong> Atlas URI and API keys are referenced via Secret Manager
+  <code>SecretRef</code> env vars and injected at runtime — they are never baked into
+  the pickled agent or printed by the deploy script.</li>
+<li><strong>Updates.</strong> Pass <code>AGENT_ENGINE_ID=&lt;id&gt;</code> (or <code>--engine-id</code>) to update the
+  same engine in place; without it, each deploy creates a new engine resource.</li>
+</ul>
+</main>
+<script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+<script>if (window.mermaid) mermaid.initialize({startOnLoad: true, theme: "neutral"});</script>
+</body>
+</html>

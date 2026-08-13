@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SearchaaS — Google Cloud Deployment · SearchaaS Docs</title>
+<link rel="stylesheet" href="../../../pages/assets/style.css">
+<link rel="stylesheet" href="../../../pages/assets/pygments.css">
+</head>
+<body>
+<header class="topbar">
+  <a class="brand" href="../../../index.html">SearchaaS Docs</a>
+  <a class="back" href="../../../index.html">← All docs</a>
+</header>
+<main class="content">
+<h1 id="searchaas-google-cloud-deployment">SearchaaS — Google Cloud Deployment</h1>
+<p>Three deployment targets are available under this directory:</p>
+<table>
+<thead>
+<tr>
+<th>Target</th>
+<th>Folder</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Cloud Run</strong></td>
+<td><a href="cloud_run/README.html"><code>cloud_run/</code></a></td>
+<td>Standard serverless containers — default deployment</td>
+</tr>
+<tr>
+<td><strong>Agent Engine</strong></td>
+<td><a href="agent_runtime/README.html"><code>agent_runtime/</code></a></td>
+<td>Vertex AI Agent Engine (Reasoning Engine) — the Gemini agent platform's managed agent runtime</td>
+</tr>
+<tr>
+<td><strong>Agents (apps)</strong></td>
+<td><a href="agents/README.html"><code>agents/</code></a></td>
+<td>Apps from <code>agents/</code> (e.g. Employee Support Copilot) as Cloud Run services wired to either backend</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="which-should-i-use">Which should I use?</h2>
+<div class="highlight"><pre><span></span><code>Start here
+    │
+    ├─ I want to deploy the full application
+    │  (React UI + REST API + MCP server)
+    │                    │
+    │          ┌─────────┴──────────┐
+    │          │                    │
+    │   Three services         One service
+    │   (independent scale)   (simpler, single URL)
+    │          │                    │
+    │    cloud_run/            cloud_run/
+    │    deploy.sh             deploy-combined.sh
+    │
+    ├─ I want a managed agent on the Gemini
+    │  agent platform (Vertex AI Agent Engine)
+    │                     │
+    │               agent_runtime/
+    │               deploy.sh
+    │
+    └─ I want to deploy an app from agents/
+       (e.g. the Employee Support Copilot UI)
+                     │
+                agents/
+                deploy.sh
+</code></pre></div>
+
+<hr />
+<h2 id="quick-start">Quick start</h2>
+<h3 id="default-cloud-run-three-services">Default — Cloud Run (three services)</h3>
+<div class="highlight"><pre><span></span><code><span class="nb">export</span><span class="w"> </span><span class="nv">ATLAS_URI</span><span class="o">=</span><span class="s1">&#39;mongodb+srv://...&#39;</span>
+<span class="nb">export</span><span class="w"> </span><span class="nv">ATLAS_DB</span><span class="o">=</span><span class="s1">&#39;your_database&#39;</span>
+
+./deployment/google/cloud_run/deploy.sh<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--project<span class="w"> </span>my-gcp-project<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--region<span class="w"> </span>us-central1
+</code></pre></div>
+
+<h3 id="default-cloud-run-combined-single-service">Default — Cloud Run (combined single service)</h3>
+<div class="highlight"><pre><span></span><code>./deployment/google/cloud_run/deploy-combined.sh<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--project<span class="w"> </span>my-gcp-project<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--region<span class="w"> </span>us-central1
+</code></pre></div>
+
+<h3 id="vertex-ai-agent-engine-reasoning-engine">Vertex AI Agent Engine (Reasoning Engine)</h3>
+<div class="highlight"><pre><span></span><code><span class="nb">export</span><span class="w"> </span><span class="nv">ATLAS_URI</span><span class="o">=</span><span class="s1">&#39;mongodb+srv://...&#39;</span>
+<span class="nb">export</span><span class="w"> </span><span class="nv">ATLAS_DB</span><span class="o">=</span><span class="s1">&#39;your_database&#39;</span>
+<span class="nb">export</span><span class="w"> </span><span class="nv">GOOGLE_API_KEY</span><span class="o">=</span><span class="s1">&#39;your-gemini-key&#39;</span><span class="w">   </span><span class="c1"># if using Gemini as LLM</span>
+
+./deployment/google/agent_runtime/deploy.sh<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--project<span class="w"> </span>my-gcp-project<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--region<span class="w"> </span>us-central1<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--yes
+</code></pre></div>
+
+<hr />
+<h2 id="prerequisites-all-targets">Prerequisites (all targets)</h2>
+<ul>
+<li><a href="https://cloud.google.com/sdk/docs/install">gcloud CLI</a> authenticated (<code>gcloud auth login</code>)</li>
+<li>Docker with <code>buildx</code> support</li>
+<li>GCP project with billing enabled</li>
+<li><code>.env</code> file at the repo root (copy from <code>.env.example</code> and fill in secrets)</li>
+</ul>
+<hr />
+<h2 id="directory-layout">Directory layout</h2>
+<div class="highlight"><pre><span></span><code>deployment/google/
+├── README.md                   ← this file
+│
+├── cloud_run/                  ← Standard Cloud Run deployment
+│   ├── README.md
+│   ├── deploy.sh               Three-service deploy (API + MCP + Frontend)
+│   ├── deploy-combined.sh      Single combined-image deploy
+│   ├── Dockerfile              FastMCP server image
+│   ├── Dockerfile.api          FastAPI REST server image
+│   ├── Dockerfile.frontend     React SPA via nginx
+│   ├── Dockerfile.combined     All-in-one combined image
+│   ├── docker-entrypoint-combined.sh
+│   ├── docker-entrypoint-frontend.sh
+│   ├── nginx.conf              nginx config for frontend-only service
+│   ├── nginx-combined.conf     nginx config for combined service
+│   └── supervisord.conf        (reference — not used by default entrypoint)
+│
+└── agent_runtime/              ← Vertex AI Agent Engine (Reasoning Engine)
+    ├── README.md
+    ├── deploy.sh               End-to-end Agent Engine deploy (confirmation gate)
+    ├── deploy_agent_engine.py  SearchaaSAgent wrapper + AgentEngine create/update
+    └── requirements-deploy.txt Deploy-time deps (Vertex AI SDK + cloudpickle)
+
+└── agents/                     ← Apps from agents/ (Employee Support Copilot)
+    ├── README.md
+    ├── deploy.sh               Cloud Run deploy + Agent Engine wiring + smoke test
+    └── Dockerfile              Next.js standalone image (context: agents/employee-support-copilot)
+</code></pre></div>
+</main>
+<script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+<script>if (window.mermaid) mermaid.initialize({startOnLoad: true, theme: "neutral"});</script>
+</body>
+</html>

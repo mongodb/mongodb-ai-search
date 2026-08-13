@@ -1,0 +1,314 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LOAD_TEST_REPORT · SearchaaS Docs</title>
+<link rel="stylesheet" href="../../../pages/assets/style.css">
+<link rel="stylesheet" href="../../../pages/assets/pygments.css">
+</head>
+<body>
+<header class="topbar">
+  <a class="brand" href="../../../index.html">SearchaaS Docs</a>
+  <a class="back" href="../../../index.html">← All docs</a>
+</header>
+<main class="content">
+<div class="highlight"><pre><span></span><code># SearchaaS Load Test Report
+
+**Generated:** 2026-07-24 18:59 UTC  
+**Host:** https://searchaas-api-787220387490.us-central1.run.app/  
+**Collection:** `employee_support` · vector index: `employee_support_vector_index` · search index: `employee_support_search_index`  
+**Concurrency:** 200 virtual users · think time 1.0–4.0 s  
+**Duration:** 100 s
+
+---
+
+## 1. Overall Verdict
+
+🔴 **FAIL** — Failure rate exceeds threshold. Server needs tuning before production use.
+
+---
+
+## 2. Load Generator Machine Config
+
+| Property | Value |
+</code></pre></div>
+
+<p>|---|---|
+| OS | Darwin Darwin (arm64) |
+| CPU (logical) | 10 vCPU |
+| CPU (physical) | 10 cores |
+| CPU freq (max) | 3.23 GHz |
+| RAM total | 16.0 GB |
+| RAM available | 4.3 GB |
+| Python | 3.13.2 |
+| Locust workers | 1 (master) |</p>
+<div class="highlight"><pre><span></span><code>---
+
+## 3. Executive Summary
+
+| Metric | Value |
+|---|---|
+| Total requests | 3,647 |
+| Failures | **105 (2.9%)** |
+| TPS (transactions/sec) | **36.6** |
+| Successful TPS | **35.5** |
+| p50 latency | **440 ms** |
+| p95 latency | **5500 ms** |
+| p99 latency | **7800 ms** |
+| Max latency | **9733 ms** |
+| Run duration | **100 s** |
+
+---
+
+## 4. Capacity Analysis &amp; Maximum Sustainable Load
+
+⚠️ Minor failures (2.9%). Effective throughput of successful requests: **35.5 TPS**. Reduce concurrency by ~12% for a stable baseline.
+</code></pre></div>
+
+<h3 id="tps-by-endpoint">TPS by endpoint</h3>
+<table>
+<thead>
+<tr>
+<th>Endpoint</th>
+<th>TPS</th>
+<th>p50 (ms)</th>
+<th>Fail %</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>POST /retrieve/hybrid [HR]</code></td>
+<td>6.30</td>
+<td>460</td>
+<td>⚠️ 3%</td>
+</tr>
+<tr>
+<td><code>POST /retrieve/hybrid [IT]</code></td>
+<td>5.85</td>
+<td>460</td>
+<td>⚠️ 4%</td>
+</tr>
+<tr>
+<td><code>POST /retrieve/vector [HR]</code></td>
+<td>4.27</td>
+<td>450</td>
+<td>⚠️ 3%</td>
+</tr>
+<tr>
+<td><code>POST /retrieve/vector [IT]</code></td>
+<td>4.23</td>
+<td>450</td>
+<td>⚠️ 1%</td>
+</tr>
+<tr>
+<td><code>POST /retrieve/fulltext [IT]</code></td>
+<td>3.07</td>
+<td>340</td>
+<td>✅ 0%</td>
+</tr>
+<tr>
+<td><code>POST /retrieve/fulltext [HR]</code></td>
+<td>2.90</td>
+<td>330</td>
+<td>✅ 0%</td>
+</tr>
+<tr>
+<td><code>POST /retrieve/hybrid [top_k var]</code></td>
+<td>2.43</td>
+<td>470</td>
+<td>⚠️ 3%</td>
+</tr>
+<tr>
+<td><code>POST /retrieve/vector [vague]</code></td>
+<td>2.26</td>
+<td>450</td>
+<td>⚠️ 4%</td>
+</tr>
+<tr>
+<td><code>POST /retrieve [auto, HR]</code></td>
+<td>1.49</td>
+<td>410</td>
+<td>⚠️ 4%</td>
+</tr>
+<tr>
+<td><code>POST /retrieve [auto, IT]</code></td>
+<td>1.33</td>
+<td>460</td>
+<td>⚠️ 5%</td>
+</tr>
+<tr>
+<td><code>GET /health</code></td>
+<td>1.22</td>
+<td>290</td>
+<td>✅ 0%</td>
+</tr>
+<tr>
+<td><code>GET /settings</code></td>
+<td>0.77</td>
+<td>290</td>
+<td>✅ 0%</td>
+</tr>
+<tr>
+<td><code>POST /retrieve [auto, summarize=false]</code></td>
+<td>0.44</td>
+<td>450</td>
+<td>❌ 9%</td>
+</tr>
+</tbody>
+</table>
+<h3 id="capacity-model-littles-law">Capacity model (Little's Law)</h3>
+<div class="highlight"><pre><span></span><code>  TPS  = N / (think_time + response_time)
+       = 200 / (2.5s + 0.44s)
+       = 68.0 TPS  ← theoretical max at this concurrency
+
+  Observed TPS : 36.6  (2.9% failure rate)
+  Run duration : 100 s
+  Total reqs   : 3,647  (success: 3,542  fail: 105)
+</code></pre></div>
+
+<div class="highlight"><pre><span></span><code>---
+
+## 5. Per-Endpoint Statistics
+
+| Endpoint | Reqs | Failures | Avg (ms) | p50 | p90 | p95 | p99 | Max | TPS |
+|---|---|---|---|---|---|---|---|---|---|
+| `GET /health` | 122 | 0 | 351 | 290 | 310 | 420 | 3400 | 3506 | 1.22 |
+</code></pre></div>
+
+<p>| <code>POST /retrieve [auto, HR]</code> | 149 | <strong>6</strong> (4.0%) | 949 | 410 | 1500 | 7700 | 7900 | 8844 | 1.49 |
+| <code>POST /retrieve [auto, IT]</code> | 133 | <strong>7</strong> (5.3%) | 1122 | 460 | 1600 | 7700 | 7900 | 8932 | 1.33 |
+| <code>POST /retrieve [auto, summarize=false]</code> | 44 | <strong>4</strong> (9.1%) | 1404 | 450 | 5500 | 7600 | 7700 | 7666 | 0.44 |
+| <code>POST /retrieve/fulltext [HR]</code> | 289 | 0 | 413 | 330 | 420 | 460 | 4000 | 4145 | 2.90 |
+| <code>POST /retrieve/fulltext [IT]</code> | 306 | 0 | 422 | 340 | 410 | 490 | 3400 | 4360 | 3.07 |
+| <code>POST /retrieve/hybrid [HR]</code> | 628 | <strong>20</strong> (3.2%) | 1153 | 460 | 3600 | 7600 | 7900 | 9698 | 6.30 |
+| <code>POST /retrieve/hybrid [IT]</code> | 584 | <strong>28</strong> (4.8%) | 1196 | 460 | 3600 | 7700 | 7900 | 9664 | 5.85 |
+| <code>POST /retrieve/hybrid [top_k var]</code> | 242 | <strong>8</strong> (3.3%) | 1080 | 470 | 1600 | 5500 | 8700 | 9733 | 2.43 |
+| <code>POST /retrieve/vector [HR]</code> | 426 | <strong>16</strong> (3.8%) | 1128 | 450 | 1700 | 7600 | 7700 | 9425 | 4.27 |
+| <code>POST /retrieve/vector [IT]</code> | 422 | <strong>6</strong> (1.4%) | 966 | 450 | 1600 | 3700 | 7700 | 8346 | 4.23 |
+| <code>POST /retrieve/vector [vague]</code> | 225 | <strong>10</strong> (4.4%) | 1124 | 450 | 3600 | 7600 | 7800 | 9321 | 2.26 |
+| <code>GET /settings</code> | 77 | 0 | 327 | 290 | 410 | 470 | 1900 | 1913 | 0.77 |</p>
+<div class="highlight"><pre><span></span><code>---
+
+## 6. Tail Latency Spread (p99 / p50 ratio)
+
+A healthy endpoint has a spread &lt; 5×. Anything ≥ 10× indicates sporadic severe outliers.
+
+| Endpoint | p50 (ms) | p99 (ms) | Max (ms) | Spread | Status |
+|---|---|---|---|---|---|
+| `/retrieve [auto, HR]` | 410 | 7900 | 8844 | 19.3× | 🔴 |
+</code></pre></div>
+
+<p>| <code>/retrieve [auto, IT]</code> | 460 | 7900 | 8932 | 17.2× | 🔴 |
+| <code>/retrieve [auto, summarize=false]</code> | 450 | 7700 | 7666 | 17.1× | 🔴 |
+| <code>/retrieve/fulltext [HR]</code> | 330 | 4000 | 4145 | 12.1× | 🔴 |
+| <code>/retrieve/fulltext [IT]</code> | 340 | 3400 | 4360 | 10.0× | 🔴 |
+| <code>/retrieve/hybrid [HR]</code> | 460 | 7900 | 9698 | 17.2× | 🔴 |
+| <code>/retrieve/hybrid [IT]</code> | 460 | 7900 | 9664 | 17.2× | 🔴 |
+| <code>/retrieve/hybrid [top_k var]</code> | 470 | 8700 | 9733 | 18.5× | 🔴 |
+| <code>/retrieve/vector [HR]</code> | 450 | 7700 | 9425 | 17.1× | 🔴 |
+| <code>/retrieve/vector [IT]</code> | 450 | 7700 | 8346 | 17.1× | 🔴 |
+| <code>/retrieve/vector [vague]</code> | 450 | 7800 | 9321 | 17.3× | 🔴 |</p>
+<div class="highlight"><pre><span></span><code>🟢 &lt; 5× &amp;nbsp; 🟡 5–10× &amp;nbsp; 🔴 ≥ 10×
+
+---
+
+## 7. SLA Assessment
+
+| Endpoint | p50 | p95 | p99 |
+|---|---|---|---|
+| `GET /health` | ❌ 290 ms (≤50) | ❌ 420 ms (≤200) | ❌ 3400 ms (≤500) |
+</code></pre></div>
+
+<p>| <code>POST /retrieve [auto, HR]</code> | ✅ 410 ms (≤2000) | ❌ 7700 ms (≤3000) | ❌ 7900 ms (≤5000) |
+| <code>POST /retrieve [auto, IT]</code> | ✅ 460 ms (≤2000) | ❌ 7700 ms (≤3000) | ❌ 7900 ms (≤5000) |
+| <code>POST /retrieve [auto, summarize=false]</code> | ✅ 450 ms (≤5000) | ✅ 7600 ms (≤8000) | ✅ 7700 ms (≤10000) |
+| <code>POST /retrieve/fulltext [HR]</code> | ✅ 330 ms (≤500) | ✅ 460 ms (≤800) | ❌ 4000 ms (≤1000) |
+| <code>POST /retrieve/fulltext [IT]</code> | ✅ 340 ms (≤500) | ✅ 490 ms (≤800) | ❌ 3400 ms (≤1000) |
+| <code>POST /retrieve/hybrid [HR]</code> | ✅ 460 ms (≤800) | ❌ 7600 ms (≤1500) | ❌ 7900 ms (≤3000) |
+| <code>POST /retrieve/hybrid [IT]</code> | ✅ 460 ms (≤800) | ❌ 7700 ms (≤1500) | ❌ 7900 ms (≤3000) |
+| <code>POST /retrieve/hybrid [top_k var]</code> | ✅ 470 ms (≤800) | ❌ 5500 ms (≤1500) | ❌ 8700 ms (≤3000) |
+| <code>POST /retrieve/vector [HR]</code> | ✅ 450 ms (≤800) | ❌ 7600 ms (≤1500) | ❌ 7700 ms (≤3000) |
+| <code>POST /retrieve/vector [IT]</code> | ✅ 450 ms (≤800) | ❌ 3700 ms (≤1500) | ❌ 7700 ms (≤3000) |
+| <code>POST /retrieve/vector [vague]</code> | ✅ 450 ms (≤800) | ❌ 7600 ms (≤1500) | ❌ 7800 ms (≤3000) |
+| <code>GET /settings</code> | ❌ 290 ms (≤50) | ❌ 470 ms (≤200) | ❌ 1900 ms (≤500) |</p>
+<div class="highlight"><pre><span></span><code>**SLA thresholds used:**
+
+| Group | p50 | p95 | p99 |
+|---|---|---|---|
+| Infrastructure (`/health`, `/settings`) | 50 ms | 200 ms | 500 ms |
+| Fulltext (`/retrieve/fulltext`) | 500 ms | 800 ms | 1,000 ms |
+| Vector (`/retrieve/vector`) | 800 ms | 1,500 ms | 3,000 ms |
+| Hybrid (`/retrieve/hybrid`) | 800 ms | 1,500 ms | 3,000 ms |
+| Auto-route (`/retrieve`) | 2,000 ms | 3,000 ms | 5,000 ms |
+| Summarize (`/retrieve` + summarize) | 5,000 ms | 8,000 ms | 10,000 ms |
+
+---
+
+## 8. Findings &amp; Recommendations
+
+- ❌ High failure rate (2.88%) — server is struggling; reduce concurrency or fix errors.
+</code></pre></div>
+
+<ul>
+<li>❌ <strong>High tail latency</strong> on <code>/retrieve [auto, HR]</code>: p99 (7900 ms) is 19× the p50 (410 ms). Likely cause: LLM call (QueryUnderstanding + RetrievalPlanner) has no timeout — slow Gemini responses hang the thread. Fix: set <code>planner.llm_timeout_s</code> in searchaas.yaml (default 5 s) and redeploy.</li>
+<li>⚠️ <strong>Max latency spike</strong> on <code>/retrieve [auto, HR]</code>: 8844 ms absolute max recorded. Consider a client-side timeout of 4 s.</li>
+<li>❌ <strong>High tail latency</strong> on <code>/retrieve [auto, IT]</code>: p99 (7900 ms) is 17× the p50 (460 ms). Likely cause: LLM call (QueryUnderstanding + RetrievalPlanner) has no timeout — slow Gemini responses hang the thread. Fix: set <code>planner.llm_timeout_s</code> in searchaas.yaml (default 5 s) and redeploy.</li>
+<li>⚠️ <strong>Max latency spike</strong> on <code>/retrieve [auto, IT]</code>: 8932 ms absolute max recorded. Consider a client-side timeout of 4 s.</li>
+<li>❌ <strong>High tail latency</strong> on <code>/retrieve [auto, summarize=false]</code>: p99 (7700 ms) is 17× the p50 (450 ms). Likely cause: LLM call (QueryUnderstanding + RetrievalPlanner) has no timeout — slow Gemini responses hang the thread. Fix: set <code>planner.llm_timeout_s</code> in searchaas.yaml (default 5 s) and redeploy.</li>
+<li>⚠️ <strong>Max latency spike</strong> on <code>/retrieve [auto, summarize=false]</code>: 7666 ms absolute max recorded. Consider a client-side timeout of 4 s.</li>
+<li>❌ <strong>High tail latency</strong> on <code>/retrieve/fulltext [HR]</code>: p99 (4000 ms) is 12× the p50 (330 ms). Likely cause: Atlas HNSW cold-cache miss or connection pool exhaustion. Fix: ensure <code>retrieval.max_time_ms</code> is set in searchaas.yaml and raise <code>ATLAS_MAX_POOL</code> if pool is saturated.</li>
+<li>⚠️ <strong>Max latency spike</strong> on <code>/retrieve/fulltext [HR]</code>: 4145 ms absolute max recorded. Consider a client-side timeout of 4 s.</li>
+<li>❌ <strong>High tail latency</strong> on <code>/retrieve/fulltext [IT]</code>: p99 (3400 ms) is 10× the p50 (340 ms). Likely cause: Atlas HNSW cold-cache miss or connection pool exhaustion. Fix: ensure <code>retrieval.max_time_ms</code> is set in searchaas.yaml and raise <code>ATLAS_MAX_POOL</code> if pool is saturated.</li>
+<li>⚠️ <strong>Max latency spike</strong> on <code>/retrieve/fulltext [IT]</code>: 4360 ms absolute max recorded. Consider a client-side timeout of 4 s.</li>
+<li>❌ <strong>High tail latency</strong> on <code>/retrieve/hybrid [HR]</code>: p99 (7900 ms) is 17× the p50 (460 ms). Likely cause: Atlas HNSW cold-cache miss or connection pool exhaustion. Fix: ensure <code>retrieval.max_time_ms</code> is set in searchaas.yaml and raise <code>ATLAS_MAX_POOL</code> if pool is saturated.</li>
+<li>⚠️ <strong>Max latency spike</strong> on <code>/retrieve/hybrid [HR]</code>: 9698 ms absolute max recorded. Consider a client-side timeout of 4 s.</li>
+<li>❌ <strong>High tail latency</strong> on <code>/retrieve/hybrid [IT]</code>: p99 (7900 ms) is 17× the p50 (460 ms). Likely cause: Atlas HNSW cold-cache miss or connection pool exhaustion. Fix: ensure <code>retrieval.max_time_ms</code> is set in searchaas.yaml and raise <code>ATLAS_MAX_POOL</code> if pool is saturated.</li>
+<li>⚠️ <strong>Max latency spike</strong> on <code>/retrieve/hybrid [IT]</code>: 9664 ms absolute max recorded. Consider a client-side timeout of 4 s.</li>
+<li>❌ <strong>High tail latency</strong> on <code>/retrieve/hybrid [top_k var]</code>: p99 (8700 ms) is 19× the p50 (470 ms). Likely cause: Atlas HNSW cold-cache miss or connection pool exhaustion. Fix: ensure <code>retrieval.max_time_ms</code> is set in searchaas.yaml and raise <code>ATLAS_MAX_POOL</code> if pool is saturated.</li>
+<li>⚠️ <strong>Max latency spike</strong> on <code>/retrieve/hybrid [top_k var]</code>: 9733 ms absolute max recorded. Consider a client-side timeout of 4 s.</li>
+<li>❌ <strong>High tail latency</strong> on <code>/retrieve/vector [HR]</code>: p99 (7700 ms) is 17× the p50 (450 ms). Likely cause: Atlas HNSW cold-cache miss or connection pool exhaustion. Fix: ensure <code>retrieval.max_time_ms</code> is set in searchaas.yaml and raise <code>ATLAS_MAX_POOL</code> if pool is saturated.</li>
+<li>⚠️ <strong>Max latency spike</strong> on <code>/retrieve/vector [HR]</code>: 9425 ms absolute max recorded. Consider a client-side timeout of 4 s.</li>
+<li>❌ <strong>High tail latency</strong> on <code>/retrieve/vector [IT]</code>: p99 (7700 ms) is 17× the p50 (450 ms). Likely cause: Atlas HNSW cold-cache miss or connection pool exhaustion. Fix: ensure <code>retrieval.max_time_ms</code> is set in searchaas.yaml and raise <code>ATLAS_MAX_POOL</code> if pool is saturated.</li>
+<li>⚠️ <strong>Max latency spike</strong> on <code>/retrieve/vector [IT]</code>: 8346 ms absolute max recorded. Consider a client-side timeout of 4 s.</li>
+<li>❌ <strong>High tail latency</strong> on <code>/retrieve/vector [vague]</code>: p99 (7800 ms) is 17× the p50 (450 ms). Likely cause: Atlas HNSW cold-cache miss or connection pool exhaustion. Fix: ensure <code>retrieval.max_time_ms</code> is set in searchaas.yaml and raise <code>ATLAS_MAX_POOL</code> if pool is saturated.</li>
+<li>⚠️ <strong>Max latency spike</strong> on <code>/retrieve/vector [vague]</code>: 9321 ms absolute max recorded. Consider a client-side timeout of 4 s.</li>
+<li>ℹ️ <strong>Hybrid overhead over fulltext</strong>: +128 ms at p50 (463 ms vs 335 ms). This is the RRF fusion cost — acceptable.</li>
+<li>ℹ️ <strong>Auto-route NLU overhead</strong>: +-108 ms avg (1035 ms vs 1143 ms for explicit hybrid). Each auto call runs QueryUnderstanding + RetrievalPlanner (2 LLM calls).</li>
+<li>
+<p>ℹ️ <strong>Summarization cost</strong>: +369 ms avg (1404 ms with summarize vs 1035 ms without). Keep <code>summarize=false</code> by default.</p>
+<hr />
+<h2 id="9-report-artefacts">9. Report Artefacts</h2>
+<table>
+<thead>
+<tr>
+<th>File</th>
+<th>Path</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>load_report.html</code></td>
+<td>/Users/venkatesh.shanbhag/Documents/AI-Search/searchaas/tests/load_report.html</td>
+</tr>
+<tr>
+<td><code>load_report_stats.csv</code></td>
+<td>/Users/venkatesh.shanbhag/Documents/AI-Search/searchaas/tests/load_report_stats.csv</td>
+</tr>
+<tr>
+<td><code>load_report_stats_history.csv</code></td>
+<td>/Users/venkatesh.shanbhag/Documents/AI-Search/searchaas/tests/load_report_stats_history.csv</td>
+</tr>
+<tr>
+<td><code>load_report_failures.csv</code></td>
+<td>/Users/venkatesh.shanbhag/Documents/AI-Search/searchaas/tests/load_report_failures.csv</td>
+</tr>
+</tbody>
+</table>
+</li>
+</ul>
+</main>
+<script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+<script>if (window.mermaid) mermaid.initialize({startOnLoad: true, theme: "neutral"});</script>
+</body>
+</html>

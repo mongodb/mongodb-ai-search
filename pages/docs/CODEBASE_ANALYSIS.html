@@ -1,0 +1,615 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SearchaaS Codebase Analysis · SearchaaS Docs</title>
+<link rel="stylesheet" href="../../pages/assets/style.css">
+<link rel="stylesheet" href="../../pages/assets/pygments.css">
+</head>
+<body>
+<header class="topbar">
+  <a class="brand" href="../../index.html">SearchaaS Docs</a>
+  <a class="back" href="../../index.html">← All docs</a>
+</header>
+<main class="content">
+<h1 id="searchaas-codebase-analysis">SearchaaS Codebase Analysis</h1>
+<h2 id="project-overview">Project Overview</h2>
+<p><strong>SearchaaS</strong> is a MongoDB Atlas-backed retrieval platform built around the <strong>Factory pattern</strong>. It's a Phase 1 implementation that provides a production-ready retrieval system with multiple search strategies and intelligent query planning.</p>
+<p><strong>Key Features:</strong>
+- Multi-strategy retrieval (Vector / Full-text / Hybrid / Graph / Parent-doc)
+- Query understanding &amp; entity extraction
+- AI-driven retrieval planning
+- YAML-based configuration
+- Multiple UI surfaces (FastAPI REST, FastMCP, React)
+- TypeScript/React frontend with modern design system</p>
+<hr />
+<h2 id="1-project-structure-layout">1. Project Structure &amp; Layout</h2>
+<h3 id="root-directory">Root Directory</h3>
+<div class="highlight"><pre><span></span><code>AI-Search/
+├── searchaas/                    # Main Python backend package
+├── requirements.txt              # Python dependencies
+├── README.md                     # Project documentation
+├── Instructions.md               # Detailed architecture guide
+├── .env &amp; .env.example          # Environment configuration
+└── venv/                        # Python virtual environment
+</code></pre></div>
+
+<h3 id="python-backend-structure-searchaas">Python Backend Structure (<code>searchaas/</code>)</h3>
+<div class="highlight"><pre><span></span><code>searchaas/
+├── config/                      # YAML config + loader (single source of truth)
+│   ├── loader.py               # Load &amp; parse searchaas.yaml
+│   └── searchaas.yaml          # Configuration file
+├── infrastructure/              # AtlasFactory for MongoDB connectivity
+│   └── factory.py              # MongoDB client management
+├── domain/                      # Pydantic models
+│   ├── chunk.py                # Document/chunk models
+│   └── source_ref.py           # Source reference models
+├── embeddings/                  # EmbeddingFactory (multi-provider support)
+│   └── factory.py              # Handles Gemini, Bedrock Titan, OpenAI, etc.
+├── llm/                        # LLMFactory (multi-provider LLM support)
+│   └── factory.py              # Gemini, Azure/OpenAI, Anthropic, Bedrock
+├── query_understanding/         # Query processing layer
+│   ├── rewriter.py            # Query rewriting &amp; normalization
+│   ├── extractor.py           # Entity &amp; metadata extraction
+│   └── intent.py              # Intent classification
+├── planning/                    # RetrievalPlanner + PolicyStore
+│   ├── engine.py              # Planner logic
+│   └── policy.py              # Atlas-managed policy store
+├── retrieval/                   # RetrieverFactory (strategy implementations)
+│   ├── vector.py              # Vector search
+│   ├── fulltext.py            # Full-text search
+│   ├── hybrid.py              # Hybrid (vector + fulltext)
+│   ├── graph.py               # Graph-based retrieval
+│   └── parent_doc.py          # Parent document retrieval
+├── app/                         # Application container &amp; bootstrapping
+│   └── bootstrap.py            # build_container() - wires all factories
+├── api/                         # FastAPI REST surface
+│   └── app.py                  # FastAPI application definition
+├── mcp_server/                  # FastMCP surface (JSON-RPC over SSE)
+│   └── server.py              # MCP protocol implementation
+├── ui_react/                    # React + TypeScript frontend
+│   └── (see section 3 below)   # Modern UI with Vite + TailwindCSS
+├── observability/               # Logging &amp; diagnostics
+│   └── logging.py             # Structured logging configuration
+└── diagnose.py                 # Diagnostic tools
+</code></pre></div>
+
+<hr />
+<h2 id="2-technology-stack">2. Technology Stack</h2>
+<h3 id="backend-python">Backend (Python)</h3>
+<ul>
+<li><strong>Framework:</strong> FastAPI (REST) + FastMCP (JSON-RPC over SSE)</li>
+<li><strong>Database:</strong> MongoDB Atlas with PyMongo + Motor</li>
+<li><strong>Core Libraries:</strong></li>
+<li>LangChain 0.3+ (core, community, mongodb integration)</li>
+<li>Pydantic 2.6+ (data validation)</li>
+<li>
+<p>UVicorn (ASGI server)</p>
+</li>
+<li>
+<p><strong>LLM &amp; Embedding Providers (pluggable via YAML):</strong></p>
+</li>
+<li><strong>Embeddings:</strong> Voyage AI, Google Gemini, OpenAI, Azure OpenAI, Cohere, HuggingFace, Bedrock Titan</li>
+<li><strong>LLMs:</strong> Google Gemini, OpenAI, Azure OpenAI, Anthropic, Amazon Bedrock</li>
+</ul>
+<h3 id="frontend-typescriptreact">Frontend (TypeScript/React)</h3>
+<ul>
+<li><strong>Framework:</strong> React 18.3.1</li>
+<li><strong>Build Tool:</strong> Vite 8.0.12</li>
+<li><strong>Language:</strong> TypeScript 6.0.2</li>
+<li><strong>Styling:</strong> Custom CSS with design tokens (no Tailwind)</li>
+<li><strong>Additional Libraries:</strong></li>
+<li>
+<p>js-yaml (for YAML parsing in config editor)</p>
+</li>
+<li>
+<p><strong>Design System:</strong> MongoDB LeafyGreen UI principles (custom implementation)</p>
+</li>
+</ul>
+<h3 id="development-tools">Development Tools</h3>
+<ul>
+<li><strong>Package Manager:</strong> npm with pnpm lockfile support</li>
+<li><strong>Linting:</strong> ESLint with React-specific rules</li>
+<li><strong>Type Checking:</strong> TypeScript with strict compiler options</li>
+</ul>
+<hr />
+<h2 id="3-react-ui-ui_react-detailed-structure">3. React UI (<code>ui_react/</code>) - Detailed Structure</h2>
+<h3 id="directory-layout">Directory Layout</h3>
+<div class="highlight"><pre><span></span><code>ui_react/
+├── src/
+│   ├── App.tsx                 # Main app component (container)
+│   ├── main.tsx                # React DOM entry point
+│   ├── styles.css              # Global styles + design tokens
+│   ├── components/
+│   │   ├── Header.tsx          # Top bar with project title &amp; backend info
+│   │   ├── ConfigPane.tsx      # Collapsible side pane for YAML config editor
+│   │   ├── QueryPanel.tsx      # Query input &amp; retrieval strategy selection
+│   │   ├── IntentPanel.tsx     # Query understanding output display
+│   │   ├── SummaryPanel.tsx    # LLM-generated summary of results
+│   │   ├── ResultsList.tsx     # Individual result cards with metadata
+│   │   ├── PipelinePanel.tsx   # MongoDB aggregation pipeline visualization
+│   │   └── UI.tsx              # Reusable UI component library
+│   └── lib/
+│       ├── types.ts            # TypeScript type definitions &amp; constants
+│       ├── api.ts              # FastAPI + MCP client implementation
+│       ├── defaults.ts         # Default configuration values
+│       └── pipeline.ts         # Pipeline visualization logic
+├── index.html                  # HTML entry point
+├── vite.config.ts             # Vite build configuration
+├── tsconfig.json              # TypeScript configuration
+├── package.json               # Dependencies &amp; scripts
+└── eslint.config.js           # Linting rules
+</code></pre></div>
+
+<h3 id="component-architecture">Component Architecture</h3>
+<h4 id="layout-structure-apptsx">Layout Structure (App.tsx)</h4>
+<p>The main application uses a <strong>2-column grid layout</strong>:</p>
+<div class="highlight"><pre><span></span><code>┌─────────────────────────────────────────┐
+│         Header                          │
+├──────────────┬──────────────────────────┤
+│              │                          │
+│ ConfigPane   │     Main Area            │
+│ (Sidebar)    │  ┌──────────┬─────────┐ │
+│              │  │  Query   │ Results │ │
+│              │  │  Panel   │ Panels  │ │
+│              │  └──────────┴─────────┘ │
+│              │                          │
+└──────────────┴──────────────────────────┘
+</code></pre></div>
+
+<p><strong>Grid CSS:</strong>
+- <code>grid-template-columns: 360px 1fr</code> (expanded)
+- <code>grid-template-columns: 52px 1fr</code> (collapsed)
+- Sidebar collapses to a vertical rail on smaller screens</p>
+<h4 id="key-components">Key Components</h4>
+<h5 id="1-headertsx">1. <strong>Header.tsx</strong></h5>
+<ul>
+<li>Displays project title: "SearchaaS — Retrieval Tester"</li>
+<li>Shows MongoDB Atlas info &amp; current backend (FastAPI or FastMCP)</li>
+<li>Minimal, informational component</li>
+</ul>
+<h5 id="2-configpanetsx-collapsible-sidebar">2. <strong>ConfigPane.tsx</strong> (Collapsible Sidebar)</h5>
+<p><strong>Responsibilities:</strong>
+- YAML configuration editor with tabs for different config sections
+- Live validation of required <code>atlas.*</code> fields per retrieval strategy
+- Visual indicators (chips) for missing required fields
+- Download <code>searchaas.yaml</code> functionality</p>
+<p><strong>Tabs:</strong>
+- <strong>Atlas:</strong> Connection URI, database, collection, indices, embedding configuration
+- <strong>Embeddings:</strong> Provider selection (Voyage AI, Gemini, OpenAI, etc.) + provider config
+- <strong>Planner:</strong> LLM provider selection + LLM config + default top_k
+- <strong>Retrieval:</strong> Default strategy, hybrid weights, vector candidates
+- <strong>Server:</strong> Host, port, MCP settings, logging level</p>
+<p><strong>Features:</strong>
+- Collapsible to a "rail" showing just icons
+- Real-time YAML validation
+- Chip-based required field indicators
+- Preview YAML in a disclosure component</p>
+<h5 id="3-querypaneltsx">3. <strong>QueryPanel.tsx</strong></h5>
+<p><strong>Responsibilities:</strong>
+- Backend selection toggle (FastAPI REST ↔ FastMCP)
+- Endpoint URL inputs for both backends
+- Retrieval strategy dropdown + visual chips
+- Top-K parameter slider
+- Query text input (4-row textarea)
+- Optional metadata filters (JSON) with validation
+- Run search button</p>
+<p><strong>Key States:</strong>
+- <code>backend</code>: "fastapi" or "mcp"
+- <code>strategy</code>: "auto", "vector", "fulltext", "hybrid", "graph", "parent-doc"
+- <code>topK</code>: 1-50
+- <code>filtersText</code>: JSON string (with error state)
+- <code>loading</code>: Shows spinner during execution</p>
+<h5 id="4-intentpaneltsx">4. <strong>IntentPanel.tsx</strong></h5>
+<p><strong>Displays query understanding output:</strong>
+- <strong>Intent Classification:</strong> Shows detected intent (exact_lookup, semantic_search, etc.)
+- <strong>Strategy Mapping:</strong> Compares planner-chosen strategy with intent-expected strategy
+- <strong>Raw vs. Rewritten:</strong> Shows original query and LLM-rewritten version
+- <strong>Entities:</strong> Extracted named entities (max 14 shown)
+- <strong>Inferred Filters:</strong> Metadata filters extracted by LLM</p>
+<p><strong>Color-coded feedback:</strong>
+- Green chip if chosen strategy matches expected
+- Yellow/red warning if mismatch</p>
+<h5 id="5-summarypaneltsx">5. <strong>SummaryPanel.tsx</strong></h5>
+<p><strong>Displays LLM-generated summary:</strong>
+- Shows server-provided summary (if available)
+- Falls back to top result preview if no summary available
+- Gracefully handles missing results</p>
+<h5 id="6-resultslisttsx">6. <strong>ResultsList.tsx</strong></h5>
+<p><strong>Renders individual result cards:</strong>
+- Ranked list (Result 1, Result 2, etc.)
+- Truncated content preview (800 chars by default)
+- "Show full" / "Show less" toggle for long results
+- Metadata display with "Show metadata" toggle
+- JSON formatting for metadata</p>
+<h5 id="7-pipelinepaneltsx">7. <strong>PipelinePanel.tsx</strong></h5>
+<p><strong>Displays MongoDB aggregation pipeline:</strong>
+- JSON visualization of the full pipeline
+- Download as <code>{strategy}-pipeline.json</code>
+- Copy-to-clipboard button for the code block
+- Shows the reconstructed pipeline for the resolved strategy</p>
+<h5 id="8-uitsx-component-library">8. <strong>UI.tsx</strong> (Component Library)</h5>
+<p>Reusable UI primitives styled with custom CSS:</p>
+<p><strong>Form Controls:</strong>
+- <code>Button</code> - with variants (default, primary, ghost), sizes (default, sm), loading state
+- <code>TextInput</code>, <code>TextArea</code>, <code>NumberInput</code> - form inputs
+- <code>Select</code> - dropdown with flexible option format
+- <code>Slider</code> - range input with min/max/step
+- <code>Field</code> - wrapper with label, required indicator, hint text</p>
+<p><strong>Display Components:</strong>
+- <code>Chip</code> - inline badges with color variants (gray, accent, green, blue, amber, red, purple)
+- <code>Banner</code> - alert box with severity (info, success, warn, danger)
+- <code>CodeBlock</code> - syntax-highlighted code with copy button
+- <code>Latency</code> - performance badge (fast/mid/slow)</p>
+<p><strong>Interaction Components:</strong>
+- <code>Segmented</code> - button group for mutually exclusive options
+- <code>Tabs</code> - tab navigation
+- <code>Disclosure</code> - collapsible content panel</p>
+<hr />
+<h2 id="4-styling-approach">4. Styling Approach</h2>
+<h3 id="design-system-custom-css">Design System (Custom CSS)</h3>
+<p><strong>No Tailwind CSS</strong> — uses custom CSS variables for a cohesive design token system.</p>
+<h4 id="color-palette">Color Palette</h4>
+<div class="highlight"><pre><span></span><code><span class="p">:</span><span class="nd">root</span><span class="w"> </span><span class="p">{</span>
+<span class="w">  </span><span class="c">/* Canvas */</span>
+<span class="w">  </span><span class="nv">--bg</span><span class="p">:</span><span class="w">           </span><span class="mh">#F2F4F9</span><span class="p">;</span><span class="w">      </span><span class="c">/* Light background */</span>
+<span class="w">  </span><span class="nv">--surface</span><span class="p">:</span><span class="w">      </span><span class="mh">#FFFFFF</span><span class="p">;</span><span class="w">      </span><span class="c">/* Card/panel backgrounds */</span>
+<span class="w">  </span><span class="nv">--surface-2</span><span class="p">:</span><span class="w">    </span><span class="mh">#F8F9FC</span><span class="p">;</span><span class="w">      </span><span class="c">/* Secondary surface */</span>
+
+<span class="w">  </span><span class="c">/* Borders */</span>
+<span class="w">  </span><span class="nv">--border</span><span class="p">:</span><span class="w">       </span><span class="mh">#E4E7EE</span><span class="p">;</span><span class="w">      </span><span class="c">/* Primary border */</span>
+<span class="w">  </span><span class="nv">--border-soft</span><span class="p">:</span><span class="w">  </span><span class="mh">#EDF0F7</span><span class="p">;</span><span class="w">      </span><span class="c">/* Soft border */</span>
+
+<span class="w">  </span><span class="c">/* Text */</span>
+<span class="w">  </span><span class="nv">--text</span><span class="p">:</span><span class="w">         </span><span class="mh">#11182B</span><span class="p">;</span><span class="w">      </span><span class="c">/* Primary text */</span>
+<span class="w">  </span><span class="nv">--text-2</span><span class="p">:</span><span class="w">       </span><span class="mh">#49546A</span><span class="p">;</span><span class="w">      </span><span class="c">/* Secondary text */</span>
+<span class="w">  </span><span class="nv">--text-3</span><span class="p">:</span><span class="w">       </span><span class="mh">#8892A4</span><span class="p">;</span><span class="w">      </span><span class="c">/* Tertiary text (muted) */</span>
+
+<span class="w">  </span><span class="c">/* Accent: Violet-Indigo Gradient */</span>
+<span class="w">  </span><span class="nv">--accent</span><span class="p">:</span><span class="w">       </span><span class="mh">#5C47F5</span><span class="p">;</span><span class="w">      </span><span class="c">/* Primary action */</span>
+<span class="w">  </span><span class="nv">--accent-2</span><span class="p">:</span><span class="w">     </span><span class="mh">#7C3AED</span><span class="p">;</span><span class="w">      </span><span class="c">/* Accent hover/active */</span>
+<span class="w">  </span><span class="nv">--accent-soft</span><span class="p">:</span><span class="w">  </span><span class="mh">#EEF0FF</span><span class="p">;</span><span class="w">      </span><span class="c">/* Soft accent background */</span>
+<span class="w">  </span><span class="nv">--accent-glow</span><span class="p">:</span><span class="w">  </span><span class="nb">rgba</span><span class="p">(</span><span class="mi">92</span><span class="p">,</span><span class="w"> </span><span class="mi">71</span><span class="p">,</span><span class="w"> </span><span class="mi">245</span><span class="p">,</span><span class="w"> </span><span class="mf">0.18</span><span class="p">);</span><span class="w"> </span><span class="c">/* Accent shadow */</span>
+
+<span class="w">  </span><span class="c">/* Status Colors */</span>
+<span class="w">  </span><span class="nv">--green</span><span class="p">:</span><span class="w">        </span><span class="mh">#059669</span><span class="p">;</span><span class="w">  </span><span class="nv">--green-bg</span><span class="p">:</span><span class="w"> </span><span class="mh">#ECFDF5</span><span class="p">;</span><span class="w">    </span><span class="nv">--green-border</span><span class="p">:</span><span class="w"> </span><span class="mh">#A7F3D0</span><span class="p">;</span>
+<span class="w">  </span><span class="nv">--blue</span><span class="p">:</span><span class="w">         </span><span class="mh">#2563EB</span><span class="p">;</span><span class="w">  </span><span class="nv">--blue-bg</span><span class="p">:</span><span class="w">  </span><span class="mh">#EFF6FF</span><span class="p">;</span><span class="w">    </span><span class="nv">--blue-border</span><span class="p">:</span><span class="w">  </span><span class="mh">#BFDBFE</span><span class="p">;</span>
+<span class="w">  </span><span class="nv">--amber</span><span class="p">:</span><span class="w">        </span><span class="mh">#D97706</span><span class="p">;</span><span class="w">  </span><span class="nv">--amber-bg</span><span class="p">:</span><span class="w"> </span><span class="mh">#FFFBEB</span><span class="p">;</span><span class="w">    </span><span class="nv">--amber-border</span><span class="p">:</span><span class="w"> </span><span class="mh">#FDE68A</span><span class="p">;</span>
+<span class="w">  </span><span class="nv">--red</span><span class="p">:</span><span class="w">          </span><span class="mh">#DC2626</span><span class="p">;</span><span class="w">  </span><span class="nv">--red-bg</span><span class="p">:</span><span class="w">   </span><span class="mh">#FEF2F2</span><span class="p">;</span><span class="w">    </span><span class="nv">--red-border</span><span class="p">:</span><span class="w">   </span><span class="mh">#FECACA</span><span class="p">;</span>
+<span class="w">  </span><span class="nv">--purple</span><span class="p">:</span><span class="w">       </span><span class="mh">#7C3AED</span><span class="p">;</span><span class="w">  </span><span class="nv">--purple-bg</span><span class="p">:</span><span class="mh">#F5F3FF</span><span class="p">;</span><span class="w">    </span><span class="nv">--purple-border</span><span class="p">:</span><span class="mh">#DDD6FE</span><span class="p">;</span>
+
+<span class="w">  </span><span class="c">/* Sizing &amp; Spacing */</span>
+<span class="w">  </span><span class="nv">--radius</span><span class="p">:</span><span class="w">       </span><span class="mi">12</span><span class="kt">px</span><span class="p">;</span><span class="w">     </span><span class="c">/* Button border radius */</span>
+<span class="w">  </span><span class="nv">--radius-sm</span><span class="p">:</span><span class="w">    </span><span class="mi">8</span><span class="kt">px</span><span class="p">;</span><span class="w">      </span><span class="c">/* Input border radius */</span>
+<span class="w">  </span><span class="nv">--radius-xs</span><span class="p">:</span><span class="w">    </span><span class="mi">6</span><span class="kt">px</span><span class="p">;</span><span class="w">      </span><span class="c">/* Small elements */</span>
+
+<span class="w">  </span><span class="c">/* Shadows */</span>
+<span class="w">  </span><span class="nv">--shadow-xs</span><span class="p">:</span><span class="w">    </span><span class="mi">0</span><span class="w"> </span><span class="mi">1</span><span class="kt">px</span><span class="w"> </span><span class="mi">2</span><span class="kt">px</span><span class="w"> </span><span class="nb">rgba</span><span class="p">(</span><span class="mi">17</span><span class="p">,</span><span class="mi">24</span><span class="p">,</span><span class="mi">43</span><span class="p">,</span><span class="mf">0.05</span><span class="p">);</span>
+<span class="w">  </span><span class="nv">--shadow-sm</span><span class="p">:</span><span class="w">    </span><span class="mi">0</span><span class="w"> </span><span class="mi">2</span><span class="kt">px</span><span class="w"> </span><span class="mi">6</span><span class="kt">px</span><span class="w"> </span><span class="nb">rgba</span><span class="p">(</span><span class="mi">17</span><span class="p">,</span><span class="mi">24</span><span class="p">,</span><span class="mi">43</span><span class="p">,</span><span class="mf">0.07</span><span class="p">);</span>
+<span class="w">  </span><span class="nv">--shadow-md</span><span class="p">:</span><span class="w">    </span><span class="mi">0</span><span class="w"> </span><span class="mi">6</span><span class="kt">px</span><span class="w"> </span><span class="mi">18</span><span class="kt">px</span><span class="w"> </span><span class="nb">rgba</span><span class="p">(</span><span class="mi">17</span><span class="p">,</span><span class="mi">24</span><span class="p">,</span><span class="mi">43</span><span class="p">,</span><span class="mf">0.09</span><span class="p">);</span>
+<span class="w">  </span><span class="nv">--shadow-float</span><span class="p">:</span><span class="w"> </span><span class="mi">0</span><span class="w"> </span><span class="mi">12</span><span class="kt">px</span><span class="w"> </span><span class="mi">40</span><span class="kt">px</span><span class="w"> </span><span class="nb">rgba</span><span class="p">(</span><span class="mi">17</span><span class="p">,</span><span class="mi">24</span><span class="p">,</span><span class="mi">43</span><span class="p">,</span><span class="mf">0.13</span><span class="p">);</span>
+<span class="p">}</span>
+</code></pre></div>
+
+<h4 id="typography">Typography</h4>
+<p><strong>Fonts:</strong>
+- <strong>UI:</strong> Inter (400, 500, 600, 700)
+- <strong>Monospace:</strong> JetBrains Mono (400, 500)</p>
+<p><strong>Base Font Size:</strong> 13.5px with 1.6 line-height</p>
+<h4 id="responsive-patterns">Responsive Patterns</h4>
+<ul>
+<li><strong>Sidebar:</strong> 360px wide (collapsible to 52px rail)</li>
+<li><strong>Main area:</strong> 1fr flexible width</li>
+<li><strong>Cards:</strong> 16px padding, 8px gap between sections</li>
+<li><strong>Form fields:</strong> 100% width in flex containers with <code>grid-template-columns: 1fr 1fr</code> for side-by-side pairs</li>
+</ul>
+<h4 id="key-style-classes">Key Style Classes</h4>
+<div class="highlight"><pre><span></span><code><span class="c">/* Layout */</span>
+<span class="p">.</span><span class="nc">app-shell</span><span class="w">               </span><span class="c">/* Main grid container */</span>
+<span class="p">.</span><span class="nc">sidebar</span><span class="w">                 </span><span class="c">/* Left navigation pane */</span>
+<span class="p">.</span><span class="nc">main-area</span><span class="w">              </span><span class="c">/* Right content area */</span>
+<span class="p">.</span><span class="nc">two-col</span><span class="w">                </span><span class="c">/* 2-column layout within main */</span>
+
+<span class="c">/* Cards &amp; Containers */</span>
+<span class="p">.</span><span class="nc">card</span><span class="w">                   </span><span class="c">/* Main content panel */</span>
+<span class="p">.</span><span class="nc">card</span><span class="p">.</span><span class="nc">empty-state</span><span class="w">       </span><span class="c">/* Empty state placeholder */</span>
+<span class="p">.</span><span class="nc">flex</span><span class="w">                   </span><span class="c">/* Flexbox container */</span>
+<span class="p">.</span><span class="nc">flex-between</span><span class="w">           </span><span class="c">/* Flex with space-between */</span>
+
+<span class="c">/* Forms */</span>
+<span class="p">.</span><span class="nc">field</span><span class="w">                  </span><span class="c">/* Field container */</span>
+<span class="p">.</span><span class="nc">field-label</span><span class="w">            </span><span class="c">/* Field label styling */</span>
+<span class="p">.</span><span class="nc">input</span><span class="o">,</span><span class="w"> </span><span class="p">.</span><span class="nc">textarea</span><span class="o">,</span><span class="w"> </span><span class="p">.</span><span class="nc">select</span><span class="w"> </span><span class="c">/* Form inputs */</span>
+<span class="p">.</span><span class="nc">slider</span><span class="w">                 </span><span class="c">/* Range input */</span>
+
+<span class="c">/* Status &amp; Info */</span>
+<span class="p">.</span><span class="nc">banner</span><span class="w">                 </span><span class="c">/* Alert boxes */</span>
+<span class="p">.</span><span class="nc">chip</span><span class="w">                   </span><span class="c">/* Inline badges */</span>
+<span class="p">.</span><span class="nc">latency</span><span class="w">               </span><span class="c">/* Performance indicator */</span>
+
+<span class="c">/* Panels */</span>
+<span class="p">.</span><span class="nc">intent-panel</span><span class="w">           </span><span class="c">/* Intent display section */</span>
+<span class="p">.</span><span class="nc">summary-panel</span><span class="w">          </span><span class="c">/* Summary display section */</span>
+<span class="p">.</span><span class="nc">result</span><span class="w">                 </span><span class="c">/* Individual result card */</span>
+<span class="p">.</span><span class="nc">code-block</span><span class="w">            </span><span class="c">/* Code formatting */</span>
+</code></pre></div>
+
+<hr />
+<h2 id="5-data-flow-api-integration">5. Data Flow &amp; API Integration</h2>
+<h3 id="state-management-apptsx">State Management (App.tsx)</h3>
+<p>The main App component manages all application state using React hooks:</p>
+<div class="highlight"><pre><span></span><code><span class="c1">// Configuration</span>
+<span class="kd">const</span><span class="w"> </span><span class="p">[</span><span class="nx">config</span><span class="p">,</span><span class="w"> </span><span class="nx">setConfig</span><span class="p">]</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="nx">useState</span><span class="o">&lt;</span><span class="nx">AppConfig</span><span class="o">&gt;</span><span class="p">(</span><span class="nx">DEFAULT_CONFIG</span><span class="p">);</span>
+<span class="kd">const</span><span class="w"> </span><span class="p">[</span><span class="nx">collapsed</span><span class="p">,</span><span class="w"> </span><span class="nx">setCollapsed</span><span class="p">]</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="nx">useState</span><span class="p">(</span><span class="kc">false</span><span class="p">);</span>
+
+<span class="c1">// Backend selection</span>
+<span class="kd">const</span><span class="w"> </span><span class="p">[</span><span class="nx">backend</span><span class="p">,</span><span class="w"> </span><span class="nx">setBackend</span><span class="p">]</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="nx">useState</span><span class="o">&lt;</span><span class="nx">Backend</span><span class="o">&gt;</span><span class="p">(</span><span class="s2">&quot;fastapi&quot;</span><span class="p">);</span>
+<span class="kd">const</span><span class="w"> </span><span class="p">[</span><span class="nx">fastapiUrl</span><span class="p">,</span><span class="w"> </span><span class="nx">setFastapiUrl</span><span class="p">]</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="nx">useState</span><span class="p">(</span><span class="s2">&quot;http://localhost:8000&quot;</span><span class="p">);</span>
+<span class="kd">const</span><span class="w"> </span><span class="p">[</span><span class="nx">mcpUrl</span><span class="p">,</span><span class="w"> </span><span class="nx">setMcpUrl</span><span class="p">]</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="nx">useState</span><span class="p">(</span><span class="s2">&quot;http://localhost:8001/mcp&quot;</span><span class="p">);</span>
+
+<span class="c1">// Query parameters</span>
+<span class="kd">const</span><span class="w"> </span><span class="p">[</span><span class="nx">strategy</span><span class="p">,</span><span class="w"> </span><span class="nx">setStrategy</span><span class="p">]</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="nx">useState</span><span class="o">&lt;</span><span class="nx">Strategy</span><span class="o">&gt;</span><span class="p">(</span><span class="s2">&quot;auto&quot;</span><span class="p">);</span>
+<span class="kd">const</span><span class="w"> </span><span class="p">[</span><span class="nx">topK</span><span class="p">,</span><span class="w"> </span><span class="nx">setTopK</span><span class="p">]</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="nx">useState</span><span class="p">(</span><span class="mf">20</span><span class="p">);</span>
+<span class="kd">const</span><span class="w"> </span><span class="p">[</span><span class="nx">query</span><span class="p">,</span><span class="w"> </span><span class="nx">setQuery</span><span class="p">]</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="nx">useState</span><span class="p">(</span><span class="s2">&quot;&quot;</span><span class="p">);</span>
+<span class="kd">const</span><span class="w"> </span><span class="p">[</span><span class="nx">filtersText</span><span class="p">,</span><span class="w"> </span><span class="nx">setFiltersText</span><span class="p">]</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="nx">useState</span><span class="p">(</span><span class="s2">&quot;{}&quot;</span><span class="p">);</span>
+
+<span class="c1">// Response &amp; loading states</span>
+<span class="kd">const</span><span class="w"> </span><span class="p">[</span><span class="nx">loading</span><span class="p">,</span><span class="w"> </span><span class="nx">setLoading</span><span class="p">]</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="nx">useState</span><span class="p">(</span><span class="kc">false</span><span class="p">);</span>
+<span class="kd">const</span><span class="w"> </span><span class="p">[</span><span class="nx">error</span><span class="p">,</span><span class="w"> </span><span class="nx">setError</span><span class="p">]</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="nx">useState</span><span class="o">&lt;</span><span class="kt">string</span><span class="w"> </span><span class="o">|</span><span class="w"> </span><span class="kc">null</span><span class="o">&gt;</span><span class="p">(</span><span class="kc">null</span><span class="p">);</span>
+<span class="kd">const</span><span class="w"> </span><span class="p">[</span><span class="nx">response</span><span class="p">,</span><span class="w"> </span><span class="nx">setResponse</span><span class="p">]</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="nx">useState</span><span class="o">&lt;</span><span class="nx">RetrieveResponse</span><span class="w"> </span><span class="o">|</span><span class="w"> </span><span class="kc">null</span><span class="o">&gt;</span><span class="p">(</span><span class="kc">null</span><span class="p">);</span>
+</code></pre></div>
+
+<h3 id="api-client-libapits">API Client (lib/api.ts)</h3>
+<p>Two backend implementations:</p>
+<h4 id="fastapi-rest">FastAPI (REST)</h4>
+<div class="highlight"><pre><span></span><code><span class="k">async</span><span class="w"> </span><span class="kd">function</span><span class="w"> </span><span class="nx">runFastAPI</span><span class="p">(</span>
+<span class="w">  </span><span class="nx">apiBase</span><span class="o">:</span><span class="w"> </span><span class="kt">string</span><span class="p">,</span>
+<span class="w">  </span><span class="nx">strategy</span><span class="o">:</span><span class="w"> </span><span class="kt">Strategy</span><span class="p">,</span>
+<span class="w">  </span><span class="nx">payload</span><span class="o">:</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="nx">query</span><span class="o">:</span><span class="w"> </span><span class="kt">string</span><span class="p">;</span><span class="w"> </span><span class="nx">top_k</span><span class="o">:</span><span class="w"> </span><span class="kt">number</span><span class="p">;</span><span class="w"> </span><span class="nx">filters</span><span class="o">:</span><span class="w"> </span><span class="kt">Record</span><span class="o">&lt;</span><span class="kt">string</span><span class="p">,</span><span class="w"> </span><span class="nx">unknown</span><span class="o">&gt;</span><span class="w"> </span><span class="p">}</span>
+<span class="p">)</span><span class="o">:</span><span class="w"> </span><span class="nb">Promise</span><span class="o">&lt;</span><span class="nx">RetrieveResponse</span><span class="o">&gt;</span>
+</code></pre></div>
+
+<ul>
+<li>POST to <code>/retrieve/{strategy}</code> or <code>/retrieve</code> for auto</li>
+<li>Direct JSON request/response</li>
+</ul>
+<h4 id="mcp-model-context-protocol">MCP (Model Context Protocol)</h4>
+<div class="highlight"><pre><span></span><code><span class="k">async</span><span class="w"> </span><span class="kd">function</span><span class="w"> </span><span class="nx">runMcp</span><span class="p">(</span>
+<span class="w">  </span><span class="nx">mcpUrl</span><span class="o">:</span><span class="w"> </span><span class="kt">string</span><span class="p">,</span>
+<span class="w">  </span><span class="nx">strategy</span><span class="o">:</span><span class="w"> </span><span class="kt">Strategy</span><span class="p">,</span>
+<span class="w">  </span><span class="nx">payload</span><span class="o">:</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="nx">query</span><span class="o">:</span><span class="w"> </span><span class="kt">string</span><span class="p">;</span><span class="w"> </span><span class="nx">top_k</span><span class="o">:</span><span class="w"> </span><span class="kt">number</span><span class="p">;</span><span class="w"> </span><span class="nx">filters</span><span class="o">:</span><span class="w"> </span><span class="kt">Record</span><span class="o">&lt;</span><span class="kt">string</span><span class="p">,</span><span class="w"> </span><span class="nx">unknown</span><span class="o">&gt;</span><span class="w"> </span><span class="p">}</span>
+<span class="p">)</span><span class="o">:</span><span class="w"> </span><span class="nb">Promise</span><span class="o">&lt;</span><span class="nx">RetrieveResponse</span><span class="o">&gt;</span>
+</code></pre></div>
+
+<ul>
+<li>JSON-RPC 2.0 over Server-Sent Events (SSE)</li>
+<li>Session-based: <code>initialize</code> → <code>notifications/initialized</code> → <code>tools/call</code></li>
+<li>Stateful session management with <code>_sessions</code> Map</li>
+</ul>
+<h3 id="types-libtypests">Types (lib/types.ts)</h3>
+<p>Core TypeScript definitions:</p>
+<div class="highlight"><pre><span></span><code><span class="k">export</span><span class="w"> </span><span class="kr">type</span><span class="w"> </span><span class="nx">Strategy</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s2">&quot;auto&quot;</span><span class="w"> </span><span class="o">|</span><span class="w"> </span><span class="s2">&quot;vector&quot;</span><span class="w"> </span><span class="o">|</span><span class="w"> </span><span class="s2">&quot;fulltext&quot;</span><span class="w"> </span><span class="o">|</span><span class="w"> </span><span class="s2">&quot;hybrid&quot;</span><span class="w"> </span><span class="o">|</span><span class="w"> </span><span class="s2">&quot;graph&quot;</span><span class="w"> </span><span class="o">|</span><span class="w"> </span><span class="s2">&quot;parent-doc&quot;</span><span class="p">;</span>
+
+<span class="k">export</span><span class="w"> </span><span class="kd">interface</span><span class="w"> </span><span class="nx">AppConfig</span><span class="w"> </span><span class="p">{</span>
+<span class="w">  </span><span class="nx">atlas</span><span class="o">:</span><span class="w"> </span><span class="kt">AtlasConfig</span><span class="p">;</span><span class="w">           </span><span class="c1">// MongoDB connection &amp; indices</span>
+<span class="w">  </span><span class="nx">embeddings</span><span class="o">:</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="nx">provider</span><span class="o">:</span><span class="w"> </span><span class="kt">string</span><span class="p">;</span><span class="w"> </span><span class="nx">config</span><span class="o">:</span><span class="w"> </span><span class="kt">Record</span><span class="o">&lt;</span><span class="kt">string</span><span class="p">,</span><span class="w"> </span><span class="nx">unknown</span><span class="o">&gt;</span><span class="w"> </span><span class="p">};</span>
+<span class="w">  </span><span class="nx">planner</span><span class="o">:</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="nx">llm_provider</span><span class="o">:</span><span class="w"> </span><span class="kt">string</span><span class="p">;</span><span class="w"> </span><span class="nx">config</span><span class="o">:</span><span class="w"> </span><span class="kt">Record</span><span class="o">&lt;</span><span class="kt">string</span><span class="p">,</span><span class="w"> </span><span class="nx">unknown</span><span class="o">&gt;</span><span class="p">;</span><span class="w"> </span><span class="nx">default_top_k</span><span class="o">:</span><span class="w"> </span><span class="kt">number</span><span class="w"> </span><span class="p">};</span>
+<span class="w">  </span><span class="nx">retrieval</span><span class="o">:</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="p">...</span><span class="w"> </span><span class="p">};</span><span class="w">           </span><span class="c1">// Strategy-specific settings</span>
+<span class="w">  </span><span class="nx">server</span><span class="o">:</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="p">...</span><span class="w"> </span><span class="p">};</span><span class="w">              </span><span class="c1">// Host, port, MCP config</span>
+<span class="p">}</span>
+
+<span class="k">export</span><span class="w"> </span><span class="kd">interface</span><span class="w"> </span><span class="nx">RetrieveResponse</span><span class="w"> </span><span class="p">{</span>
+<span class="w">  </span><span class="nx">strategy</span><span class="o">:</span><span class="w"> </span><span class="kt">string</span><span class="p">;</span><span class="w">             </span><span class="c1">// Resolved strategy</span>
+<span class="w">  </span><span class="nx">plan</span><span class="o">:</span><span class="w"> </span><span class="kt">Record</span><span class="o">&lt;</span><span class="kt">string</span><span class="p">,</span><span class="w"> </span><span class="nx">unknown</span><span class="o">&gt;</span><span class="p">;</span><span class="c1">// MongoDB aggregation pipeline</span>
+<span class="w">  </span><span class="nx">results</span><span class="o">:</span><span class="w"> </span><span class="kt">RetrieveResult</span><span class="p">[];</span><span class="w">    </span><span class="c1">// Search results</span>
+<span class="w">  </span><span class="nx">understood_query?</span><span class="o">:</span><span class="w"> </span><span class="kt">UnderstoodQuery</span><span class="w"> </span><span class="o">|</span><span class="w"> </span><span class="kc">null</span><span class="p">;</span>
+<span class="w">  </span><span class="nx">summary?</span><span class="o">:</span><span class="w"> </span><span class="kt">string</span><span class="w"> </span><span class="o">|</span><span class="w"> </span><span class="kc">null</span><span class="p">;</span><span class="w">      </span><span class="c1">// LLM-generated summary</span>
+<span class="p">}</span>
+
+<span class="k">export</span><span class="w"> </span><span class="kd">interface</span><span class="w"> </span><span class="nx">UnderstoodQuery</span><span class="w"> </span><span class="p">{</span>
+<span class="w">  </span><span class="nx">raw</span><span class="o">:</span><span class="w"> </span><span class="kt">string</span><span class="p">;</span>
+<span class="w">  </span><span class="nx">corrected?</span><span class="o">:</span><span class="w"> </span><span class="kt">string</span><span class="p">;</span>
+<span class="w">  </span><span class="nx">rewritten</span><span class="o">:</span><span class="w"> </span><span class="kt">string</span><span class="p">;</span>
+<span class="w">  </span><span class="nx">entities</span><span class="o">:</span><span class="w"> </span><span class="kt">string</span><span class="p">[];</span>
+<span class="w">  </span><span class="nx">metadata_filters</span><span class="o">:</span><span class="w"> </span><span class="kt">Record</span><span class="o">&lt;</span><span class="kt">string</span><span class="p">,</span><span class="w"> </span><span class="nx">unknown</span><span class="o">&gt;</span><span class="p">;</span>
+<span class="w">  </span><span class="nx">intent</span><span class="o">:</span><span class="w"> </span><span class="kt">string</span><span class="p">;</span>
+<span class="p">}</span>
+</code></pre></div>
+
+<h3 id="default-configuration-libdefaultsts">Default Configuration (lib/defaults.ts)</h3>
+<div class="highlight"><pre><span></span><code><span class="k">export</span><span class="w"> </span><span class="kd">const</span><span class="w"> </span><span class="nx">DEFAULT_CONFIG</span><span class="o">:</span><span class="w"> </span><span class="kt">AppConfig</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">{</span>
+<span class="w">  </span><span class="nx">atlas</span><span class="o">:</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="nx">uri</span><span class="o">:</span><span class="w"> </span><span class="s2">&quot;${ATLAS_URI}&quot;</span><span class="p">,</span>
+<span class="w">    </span><span class="nx">database</span><span class="o">:</span><span class="w"> </span><span class="s2">&quot;${ATLAS_DB:-amazon}&quot;</span><span class="p">,</span>
+<span class="w">    </span><span class="nx">collection</span><span class="o">:</span><span class="w"> </span><span class="s2">&quot;products-updated&quot;</span><span class="p">,</span>
+<span class="w">    </span><span class="nx">vector_index</span><span class="o">:</span><span class="w"> </span><span class="s2">&quot;voyage_vector_index&quot;</span><span class="p">,</span>
+<span class="w">    </span><span class="nx">search_index</span><span class="o">:</span><span class="w"> </span><span class="s2">&quot;default&quot;</span><span class="p">,</span>
+<span class="w">    </span><span class="nx">text_key</span><span class="o">:</span><span class="w"> </span><span class="s2">&quot;text&quot;</span><span class="p">,</span>
+<span class="w">    </span><span class="nx">embedding_key</span><span class="o">:</span><span class="w"> </span><span class="s2">&quot;embedding-vectors&quot;</span><span class="p">,</span>
+<span class="w">    </span><span class="nx">relevance_score_fn</span><span class="o">:</span><span class="w"> </span><span class="s2">&quot;cosine&quot;</span><span class="p">,</span>
+<span class="w">    </span><span class="nx">dimensions</span><span class="o">:</span><span class="w"> </span><span class="kt">512</span><span class="p">,</span>
+<span class="w">  </span><span class="p">},</span>
+<span class="w">  </span><span class="nx">embeddings</span><span class="o">:</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="nx">provider</span><span class="o">:</span><span class="w"> </span><span class="s2">&quot;voyageai&quot;</span><span class="p">,</span><span class="w"> </span><span class="nx">config</span><span class="o">:</span><span class="w"> </span><span class="p">{...}</span><span class="w"> </span><span class="p">},</span>
+<span class="w">  </span><span class="nx">planner</span><span class="o">:</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="nx">llm_provider</span><span class="o">:</span><span class="w"> </span><span class="s2">&quot;gemini&quot;</span><span class="p">,</span><span class="w"> </span><span class="nx">config</span><span class="o">:</span><span class="w"> </span><span class="p">{...},</span><span class="w"> </span><span class="nx">default_top_k</span><span class="o">:</span><span class="w"> </span><span class="kt">20</span><span class="w"> </span><span class="p">},</span>
+<span class="w">  </span><span class="nx">retrieval</span><span class="o">:</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="nx">default_strategy</span><span class="o">:</span><span class="w"> </span><span class="s2">&quot;hybrid&quot;</span><span class="p">,</span><span class="w"> </span><span class="nx">hybrid</span><span class="o">:</span><span class="w"> </span><span class="p">{...},</span><span class="w"> </span><span class="nx">vector</span><span class="o">:</span><span class="w"> </span><span class="p">{...}</span><span class="w"> </span><span class="p">},</span>
+<span class="w">  </span><span class="nx">server</span><span class="o">:</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="nx">host</span><span class="o">:</span><span class="w"> </span><span class="s2">&quot;0.0.0.0&quot;</span><span class="p">,</span><span class="w"> </span><span class="nx">port</span><span class="o">:</span><span class="w"> </span><span class="kt">8000</span><span class="p">,</span><span class="w"> </span><span class="p">...</span><span class="w"> </span><span class="p">}</span>
+<span class="p">};</span>
+</code></pre></div>
+
+<hr />
+<h2 id="6-build-development-setup">6. Build &amp; Development Setup</h2>
+<h3 id="build-configuration-viteconfigts">Build Configuration (vite.config.ts)</h3>
+<div class="highlight"><pre><span></span><code><span class="k">export</span><span class="w"> </span><span class="k">default</span><span class="w"> </span><span class="nx">defineConfig</span><span class="p">({</span>
+<span class="w">  </span><span class="nx">plugins</span><span class="o">:</span><span class="w"> </span><span class="p">[</span><span class="nx">react</span><span class="p">()],</span>
+<span class="p">})</span>
+</code></pre></div>
+
+<ul>
+<li>Standard Vite React setup with Hot Module Replacement (HMR)</li>
+<li>TypeScript support via Vite's native loader</li>
+<li>Fast development server with instant refresh</li>
+</ul>
+<h3 id="scripts-packagejson">Scripts (package.json)</h3>
+<div class="highlight"><pre><span></span><code><span class="p">{</span>
+<span class="w">  </span><span class="nt">&quot;scripts&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="nt">&quot;dev&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;vite&quot;</span><span class="p">,</span><span class="w">                    </span><span class="c1">// Start dev server (localhost:5173)</span>
+<span class="w">    </span><span class="nt">&quot;build&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;tsc -b &amp;&amp; vite build&quot;</span><span class="p">,</span><span class="w">  </span><span class="c1">// TypeScript + Vite build</span>
+<span class="w">    </span><span class="nt">&quot;lint&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;eslint .&quot;</span><span class="p">,</span><span class="w">               </span><span class="c1">// ESLint check</span>
+<span class="w">    </span><span class="nt">&quot;preview&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;vite preview&quot;</span><span class="w">         </span><span class="c1">// Preview production build</span>
+<span class="w">  </span><span class="p">}</span>
+<span class="p">}</span>
+</code></pre></div>
+
+<h3 id="typescript-configuration-tsconfigjson">TypeScript Configuration (tsconfig.json)</h3>
+<ul>
+<li>Multi-project setup with references:</li>
+<li><code>tsconfig.app.json</code> - Application code</li>
+<li><code>tsconfig.node.json</code> - Build tool code</li>
+<li>Strict mode enabled</li>
+<li>JSX set to <code>react-jsx</code> (React 17+ automatic runtime)</li>
+</ul>
+<hr />
+<h2 id="7-key-features-workflows">7. Key Features &amp; Workflows</h2>
+<h3 id="query-execution-flow">Query Execution Flow</h3>
+<div class="highlight"><pre><span></span><code>User Input (QueryPanel)
+    ↓
+Parse &amp; validate filters (JSON)
+    ↓
+Select backend &amp; strategy
+    ↓
+API Call (FastAPI or MCP)
+    ↓
+Backend Processing:
+  1. Query Understanding (entity extraction, intent classification)
+  2. Retrieval Planning (if auto mode)
+  3. Retrieve documents (vector/fulltext/hybrid/graph/parent-doc)
+  4. Summarize results (LLM)
+  ↓
+Response Object:
+  - Strategy chosen
+  - Query understanding output
+  - Results list
+  - Summary
+  - MongoDB aggregation pipeline
+  ↓
+Display Results:
+  - IntentPanel (query understanding)
+  - SummaryPanel (LLM summary)
+  - ResultsList (individual cards)
+  - PipelinePanel (aggregation pipeline)
+</code></pre></div>
+
+<h3 id="configuration-management">Configuration Management</h3>
+<ol>
+<li><strong>Live Editing:</strong> ConfigPane allows editing all config sections with live YAML preview</li>
+<li><strong>Required Fields:</strong> Dynamically validated per strategy</li>
+<li><strong>YAML Export:</strong> Download current state as <code>searchaas.yaml</code></li>
+<li><strong>Provider Selection:</strong> Dropdown for embeddings &amp; LLM providers with nested config</li>
+</ol>
+<h3 id="retrieval-strategies">Retrieval Strategies</h3>
+<ul>
+<li><strong>Vector:</strong> Semantic similarity using embeddings</li>
+<li><strong>Full-text:</strong> Lexical search with Atlas Search index</li>
+<li><strong>Hybrid:</strong> Combination of vector + full-text with configurable weights</li>
+<li><strong>Graph:</strong> Entity-based retrieval (requires special indexing)</li>
+<li><strong>Parent-doc:</strong> Retrieve parent documents based on chunk similarity</li>
+<li><strong>Auto:</strong> Planner-driven selection based on query intent</li>
+</ul>
+<hr />
+<h2 id="8-current-limitations-design-notes">8. Current Limitations &amp; Design Notes</h2>
+<h3 id="css-first-approach">CSS-First Approach</h3>
+<ul>
+<li>No UI framework (no LeafyGreen npm package used)</li>
+<li>All styles in single <code>styles.css</code> file</li>
+<li>Design tokens as CSS variables for consistency</li>
+<li>Custom component implementations for full control</li>
+</ul>
+<h3 id="state-management">State Management</h3>
+<ul>
+<li>Flat component hierarchy with props drilling</li>
+<li>Suitable for current complexity</li>
+<li>Could benefit from Context API or state management library if features expand</li>
+</ul>
+<h3 id="styling-cohesion">Styling Cohesion</h3>
+<ul>
+<li>Intentional design system with clear token hierarchy</li>
+<li>Consistent spacing, colors, and typography</li>
+<li>Ready for scaling to larger applications</li>
+</ul>
+<h3 id="testing-infrastructure">Testing Infrastructure</h3>
+<ul>
+<li>ESLint configured but no unit/integration tests visible</li>
+<li>Suitable for adding Jest/Vitest in future</li>
+</ul>
+<hr />
+<h2 id="9-file-inventory-summary">9. File Inventory Summary</h2>
+<h3 id="reacttypescript-files-15-total">React/TypeScript Files (15 total)</h3>
+<div class="highlight"><pre><span></span><code>Components (8):
+  - App.tsx                  (162 lines)
+  - Header.tsx              (15 lines)
+  - ConfigPane.tsx          (355 lines)
+  - QueryPanel.tsx          (169 lines)
+  - IntentPanel.tsx         (60 lines)
+  - SummaryPanel.tsx        (30 lines)
+  - ResultsList.tsx         (46 lines)
+  - PipelinePanel.tsx       (33 lines)
+  - UI.tsx                  (155 lines)
+
+Library (4):
+  - main.tsx                (10 lines)
+  - api.ts                  (134 lines)
+  - types.ts                (103 lines)
+  - defaults.ts             (45 lines)
+  - pipeline.ts             (not yet examined)
+
+Configuration (3):
+  - tsconfig.json
+  - vite.config.ts
+  - index.html
+</code></pre></div>
+
+<h3 id="styling">Styling</h3>
+<ul>
+<li><strong>styles.css</strong> (639 lines)</li>
+<li>Design tokens</li>
+<li>Component classes</li>
+<li>Layout utilities</li>
+<li>Responsive patterns</li>
+</ul>
+<hr />
+<h2 id="10-key-takeaways">10. Key Takeaways</h2>
+<h3 id="architecture-strengths">Architecture Strengths</h3>
+<p>✅ Clear separation of concerns (config, API, components)
+✅ Type-safe with full TypeScript coverage
+✅ Design system via CSS variables for consistency
+✅ Pluggable backends (FastAPI vs MCP)
+✅ Factory pattern in Python allows component swapping via YAML
+✅ React UI (LeafyGreen / MongoDB Design System)</p>
+<h3 id="uiux-highlights">UI/UX Highlights</h3>
+<p>✅ Modern, clean interface inspired by MongoDB LeafyGreen
+✅ Collapsible sidebar for configuration
+✅ Visual feedback for required fields and validation
+✅ Multi-step result visualization (intent → summary → results → pipeline)
+✅ JSON/YAML code blocks with copy functionality
+✅ Color-coded status indicators</p>
+<h3 id="technology-choices">Technology Choices</h3>
+<p>✅ React 18 for component framework
+✅ Vite for fast development experience
+✅ TypeScript for type safety
+✅ Custom CSS for design system control
+✅ FastAPI + MCP for flexible backend connectivity
+✅ MongoDB Atlas as primary data store</p>
+<h3 id="development-notes">Development Notes</h3>
+<ul>
+<li><strong>Entry Point:</strong> <code>main.tsx</code> → React DOM root → <code>App.tsx</code></li>
+<li><strong>Build:</strong> Vite + TypeScript compilation</li>
+<li><strong>Dev Server:</strong> <code>npm run dev</code> (typically port 5173)</li>
+<li><strong>Backend URLs:</strong> Configurable (FastAPI: 8000, MCP: 8001)</li>
+<li><strong>CORS:</strong> Enabled for localhost development</li>
+</ul>
+</main>
+<script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+<script>if (window.mermaid) mermaid.initialize({startOnLoad: true, theme: "neutral"});</script>
+</body>
+</html>

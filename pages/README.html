@@ -1,0 +1,658 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SearchaaS — Phase 1 · SearchaaS Docs</title>
+<link rel="stylesheet" href="../pages/assets/style.css">
+<link rel="stylesheet" href="../pages/assets/pygments.css">
+</head>
+<body>
+<header class="topbar">
+  <a class="brand" href="../index.html">SearchaaS Docs</a>
+  <a class="back" href="../index.html">← All docs</a>
+</header>
+<main class="content">
+<h1 id="searchaas-phase-1">SearchaaS — Phase 1</h1>
+<p>MongoDB Atlas-backed retrieval platform built around the <strong>Factory pattern</strong>.
+Phase 1 ships: query understanding (rewriting, entity &amp; typed-fact extraction,
+intent), AI-driven retrieval planning with Atlas-managed guardrails, six
+retrieval strategies (vector / full-text / hybrid / graph / parent-doc /
+metadata), YAML-driven configuration, a FastAPI REST surface, a FastMCP tool
+surface, real aggregation-pipeline capture, and a React testing UI.</p>
+<p>Every concern is swappable through YAML — switching embeddings, LLMs, indexes,
+or retrieval strategy is a config change, not a code change.</p>
+<p>See <a href="docs/Instructions.html">docs/Instructions.md</a> for the full architecture and Phase 2 roadmap.</p>
+<h2 id="layout">Layout</h2>
+<div class="highlight"><pre><span></span><code>mongodb-ai-search/
+├── README.md                 # this file
+├── requirements.txt          # Python dependencies
+├── pytest.ini                # pytest configuration
+├── .env.example              # environment-variable template (copy to .env)
+├── docs/                     # architecture &amp; reference documentation
+│   ├── Instructions.md           # full architecture spec + Phase 2 roadmap
+│   ├── ARCHITECTURE_DIAGRAMS.md  # system/flow diagrams
+│   ├── CODEBASE_ANALYSIS.md      # module-by-module walkthrough
+│   ├── QUICK_REFERENCE.md        # cheat sheet
+│   ├── DOCUMENTATION_INDEX.md    # index of the docs
+│   └── known-issues.md           # known limitations &amp; gotchas
+├── deployment/               # cloud deployment artifacts
+│   ├── aws/                      # S3 UI + ECS Express (default) + Bedrock AgentCore
+│   ├── azure/                    # Container Apps + AI Foundry (Bicep)
+│   └── google/                   # Cloud Run (combined or separate services)
+└── searchaas/                # application package
+    ├── config/               # YAML config + loader (single source of truth; ${VAR:-default} expansion)
+    ├── infrastructure/       # AtlasFactory (Mongo client / db / collections, ping, stats)
+    ├── domain/               # Pydantic models (Chunk, SourceRef)
+    ├── embeddings/           # EmbeddingFactory (auto/AutoEmbeddings, Voyage, OpenAI, Gemini, Titan, Cohere, ...)
+    ├── llm/                  # LLMFactory (Gemini, Azure/OpenAI, Anthropic, Bedrock)
+    ├── query_understanding/  # QueryUnderstandingLayer + FactStore (rewrite, entities, typed facts, sort, intent)
+    ├── planning/             # RetrievalPlanner + Atlas-managed PolicyStore
+    ├── retrieval/            # RetrieverFactory (vector/fulltext/hybrid/graph/parent_doc/metadata)
+    ├── observability/        # structured logging + pipeline_capture (real Atlas aggregation capture)
+    ├── app/                  # Container / bootstrap — wires every factory from AppConfig
+    ├── api/                  # FastAPI surface
+    ├── mcp_server/           # FastMCP surface
+    ├── ui_react/             # React + Vite retrieval-testing UI
+    ├── tests/                # pytest suite
+    ├── facts.py              # query-fact routing → Atlas pre-filters vs in-memory post-filters
+    ├── filtering.py          # filter allowlist sanitization (drops non-indexable paths)
+    ├── utils.py              # shared serialization / summarization helpers
+    └── diagnose.py           # `python -m searchaas.diagnose` self-check CLI
+</code></pre></div>
+
+<h2 id="setup">Setup</h2>
+<div class="highlight"><pre><span></span><code>python<span class="w"> </span>-m<span class="w"> </span>venv<span class="w"> </span>.venv<span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span><span class="nb">source</span><span class="w"> </span>.venv/bin/activate
+pip<span class="w"> </span>install<span class="w"> </span>-r<span class="w"> </span>requirements.txt
+cp<span class="w"> </span>.env.example<span class="w"> </span>.env<span class="w">         </span><span class="c1"># fill in ATLAS_URI, provider keys, ...</span>
+</code></pre></div>
+
+<p>Edit <code>searchaas/config/searchaas.yaml</code> to pick providers/models/indexes. The
+default build runs <strong>server-side AutoEmbeddings</strong> (Atlas embeds the query and
+document text internally, <code>embeddings.provider: auto</code>, <code>voyage-4</code> model) with
+<strong>Gemini</strong> as the planner LLM. Every value is <code>${VAR:-default}</code>-driven, so you
+can retune collections, indexes, dimensions, providers, models, and strategy
+via environment variables — no image rebuild required.</p>
+<p>Two embedding modes are supported and cross-validated at startup:</p>
+<ul>
+<li><strong>Mode B — AutoEmbeddings (active default):</strong> <code>provider: auto</code>,
+  <code>embedding_key: null</code>, <code>dimensions: -1</code>; requires an <code>autoEmbed</code> Atlas index.</li>
+<li><strong>Mode A — client-side embeddings:</strong> e.g. <code>provider: voyageai</code>, with
+  <code>embedding_key</code>/<code>dimensions</code>/<code>relevance_score_fn</code> matching a <code>vector</code> index.</li>
+</ul>
+<p>The bootstrap layer (<code>searchaas/app/bootstrap.py</code>) refuses to start on a
+provider↔index-type mismatch.</p>
+<p><strong>Supported providers</strong></p>
+<ul>
+<li>Embeddings: <code>auto</code>, <code>azure_openai</code>, <code>openai</code>, <code>voyageai</code>, <code>voyage_multimodal</code>,
+  <code>cohere</code>, <code>huggingface</code>, <code>gemini</code>, <code>bedrock_titan</code>.</li>
+<li>Planner LLM: <code>gemini</code>, <code>azure_openai</code>, <code>openai</code>, <code>anthropic</code>, <code>bedrock</code>.</li>
+</ul>
+<h2 id="run">Run</h2>
+<div class="highlight"><pre><span></span><code><span class="c1"># REST API</span>
+uvicorn<span class="w"> </span>searchaas.api.app:app<span class="w"> </span>--host<span class="w"> </span><span class="m">0</span>.0.0.0<span class="w"> </span>--port<span class="w"> </span><span class="m">8000</span>
+
+<span class="c1"># FastMCP server</span>
+python<span class="w"> </span>-m<span class="w"> </span>searchaas.mcp_server.server
+
+<span class="c1"># React UI (from searchaas/ui_react)</span>
+npm<span class="w"> </span>install<span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span>npm<span class="w"> </span>run<span class="w"> </span>dev
+
+<span class="c1"># Self-check (Atlas ping, collection stats, embedder probe)</span>
+python<span class="w"> </span>-m<span class="w"> </span>searchaas.diagnose
+</code></pre></div>
+
+<h2 id="rest-api">REST API</h2>
+<p>FastAPI surface (<code>searchaas/api/app.py</code>). Every <code>/retrieve*</code> response includes
+the chosen <code>strategy</code>, the <code>plan</code>, <code>results</code>, the <code>understood_query</code>, an LLM
+<code>summary</code>, per-stage <code>timings</code>, and the <strong>real captured Atlas aggregation
+<code>pipeline</code></strong> that produced the results.</p>
+<table>
+<thead>
+<tr>
+<th>Method</th>
+<th>Path</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>GET</code></td>
+<td><code>/health</code></td>
+<td>Liveness; reports embeddings/LLM providers and default strategy</td>
+</tr>
+<tr>
+<td><code>GET</code></td>
+<td><code>/settings</code></td>
+<td>Full active config (secrets redacted) — lets the UI reflect live state</td>
+</tr>
+<tr>
+<td><code>POST</code></td>
+<td><code>/settings</code></td>
+<td>Apply config changes from the UI and rebuild the container</td>
+</tr>
+<tr>
+<td><code>GET</code></td>
+<td><code>/diagnose</code></td>
+<td>Full self-check: Atlas ping, collection stats, embedder probe</td>
+</tr>
+<tr>
+<td><code>POST</code></td>
+<td><code>/diagnose/vector</code></td>
+<td>Instrumented per-stage vector-search report</td>
+</tr>
+<tr>
+<td><code>POST</code></td>
+<td><code>/retrieve/vector</code></td>
+<td>Fixed vector (<code>$vectorSearch</code> ANN) strategy</td>
+</tr>
+<tr>
+<td><code>POST</code></td>
+<td><code>/retrieve/fulltext</code></td>
+<td>Fixed full-text (<code>$search</code>) strategy</td>
+</tr>
+<tr>
+<td><code>POST</code></td>
+<td><code>/retrieve/hybrid</code></td>
+<td>Fixed hybrid — native <code>$rankFusion</code> (MongoDB 8.0+)</td>
+</tr>
+<tr>
+<td><code>POST</code></td>
+<td><code>/retrieve/graph</code></td>
+<td>Fixed GraphRAG (<code>$graphLookup</code>) strategy</td>
+</tr>
+<tr>
+<td><code>POST</code></td>
+<td><code>/retrieve/parent-doc</code></td>
+<td>Fixed parent-document strategy</td>
+</tr>
+<tr>
+<td><code>POST</code></td>
+<td><code>/retrieve/metadata</code></td>
+<td>Structured <code>$match</code>/<code>$sort</code>/<code>$limit</code> (rankings, superlatives, exact lookups)</td>
+</tr>
+<tr>
+<td><code>POST</code></td>
+<td><code>/retrieve</code></td>
+<td>Auto mode: understand → plan → retrieve → summarize</td>
+</tr>
+<tr>
+<td><code>POST</code></td>
+<td><code>/query</code></td>
+<td>Alias for <code>/retrieve</code></td>
+</tr>
+</tbody>
+</table>
+<p>Request body (<code>RetrieveRequest</code>): <code>query</code>, <code>top_k</code> (1–100), optional <code>filters</code>,
+and optional per-request <code>atlas</code> / <code>retrieval</code> overrides.</p>
+<h2 id="retrieval-strategies">Retrieval strategies</h2>
+<p><code>RetrieverFactory</code> (<code>searchaas/retrieval/factory.py</code>) dispatches on the plan's
+strategy:</p>
+<table>
+<thead>
+<tr>
+<th>Strategy</th>
+<th>What it does</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>vector</code></td>
+<td><code>$vectorSearch</code> ANN with pre-filters and candidate oversampling</td>
+</tr>
+<tr>
+<td><code>fulltext</code></td>
+<td>Lexical <code>$search</code> on the text field</td>
+</tr>
+<tr>
+<td><code>hybrid</code></td>
+<td>Native <strong><code>$rankFusion</code></strong> fusing vector + full-text server-side (MongoDB 8.0+)</td>
+</tr>
+<tr>
+<td><code>graph</code></td>
+<td>Multi-hop <code>$graphLookup</code> traversal over <code>entities</code> (GraphRAG)</td>
+</tr>
+<tr>
+<td><code>parent_doc</code></td>
+<td>Child-chunk match returning the parent document</td>
+</tr>
+<tr>
+<td><code>metadata</code></td>
+<td>Pure-MQL <code>$match</code> → <code>$sort</code> → <code>$limit</code> for non-semantic / superlative / ordering queries — no vector or text search</td>
+</tr>
+</tbody>
+</table>
+<p>The <strong>metadata</strong> stage answers questions like "top-rated movies since 2015" or
+exact-value lookups entirely with structured aggregation. Query understanding
+routes to it when intent is <code>ordering</code>/<code>lookup</code> and a sort or metadata filter is
+present; a <code>$type: "number"</code> guard keeps empty/missing values from sorting ahead
+of real numbers.</p>
+<h2 id="query-understanding-planning">Query understanding &amp; planning</h2>
+<ul>
+<li><strong>QueryUnderstandingLayer</strong> (<code>query_understanding/layer.py</code>) — one LLM call
+  yields rewrite, entities, typed <code>facts</code> (<code>{field, op, value}</code>), a validated
+  Mongo <code>sort</code>, a <code>limit</code>, and an <code>intent</code>. Typed facts are canonicalized to
+  indexed paths and split into fast Atlas <strong>pre-filters</strong> vs in-memory
+  <strong>post-filters</strong> (<code>facts.py</code>). L1 in-process cache + L2 persistent
+  <strong>FactStore</strong> (<code>query_facts</code> collection, audit log).</li>
+<li><strong>RetrievalPlanner</strong> (<code>planning/engine.py</code>) — proposes a draft plan, merges
+  understood-query metadata/sort/limit, forces <code>metadata</code> for structured intent,
+  then clamps via the PolicyStore.</li>
+<li><strong>PolicyStore</strong> (<code>planning/policy.py</code>) — Atlas-managed guardrails
+  (<code>retrieval_policies</code> collection): clamps strategy to an allowlist, <code>top_k</code> to
+  a min/max, and applies a metadata whitelist to filters.</li>
+<li><strong>Pipeline capture</strong> (<code>observability/pipeline_capture.py</code>) — a pymongo command
+  listener records the actual <code>aggregate</code> pipeline executed for each retrieval
+  (query vectors summarized); surfaced in the API <code>pipeline</code> field and the UI.</li>
+</ul>
+<h2 id="testing-the-mcp-server-curl-postman">Testing the MCP Server (cURL / Postman)</h2>
+<p>The MCP server uses the <strong>Streamable HTTP</strong> transport (default endpoint
+<code>http://localhost:8001/mcp</code>) and follows the JSON-RPC 2.0 protocol. You can
+exercise it with any HTTP client (cURL, Postman, Insomnia, HTTPie, ...).</p>
+<blockquote>
+<p>⚠️ <strong>Trailing-slash gotcha.</strong> The server mounts at <code>/mcp</code>. Hitting
+<code>http://localhost:8001/mcp/</code> returns:</p>
+<p><code>HTTP/1.1 307 Temporary Redirect
+location: http://localhost:8001/mcp</code></p>
+<p>cURL/Postman will not replay the <code>POST</code> body on a 307 by default — the
+follow-up becomes a <code>GET</code> and the call silently fails. <strong>Always use
+<code>/mcp</code> (no trailing slash).</strong> If you must follow the redirect, add
+<code>-L --post301 --post302 --post303</code> to cURL, or enable
+<em>Automatically follow redirects</em> + <em>Follow original HTTP method</em> in
+Postman (Settings → General).</p>
+</blockquote>
+<h3 id="required-headers">Required headers</h3>
+<p>Every request <strong>must</strong> include:</p>
+<div class="highlight"><pre><span></span><code>Content-Type: application/json
+Accept: application/json, text/event-stream
+</code></pre></div>
+
+<p>Responses are returned as <strong>Server-Sent Events</strong> (SSE). When using cURL,
+add <code>-N</code> (no buffering) to stream them.</p>
+<h3 id="1-initialize-a-session">1. Initialize a session</h3>
+<p>The first call must be <code>initialize</code>. The response includes an
+<code>mcp-session-id</code> header that you must echo on every subsequent request.</p>
+<div class="highlight"><pre><span></span><code>curl<span class="w"> </span>-N<span class="w"> </span>-X<span class="w"> </span>POST<span class="w"> </span>http://localhost:8001/mcp<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>-H<span class="w"> </span><span class="s2">&quot;Content-Type: application/json&quot;</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>-H<span class="w"> </span><span class="s2">&quot;Accept: application/json, text/event-stream&quot;</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>-D<span class="w"> </span>-<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>-d<span class="w"> </span><span class="s1">&#39;{</span>
+<span class="s1">    &quot;jsonrpc&quot;: &quot;2.0&quot;,</span>
+<span class="s1">    &quot;id&quot;: 1,</span>
+<span class="s1">    &quot;method&quot;: &quot;initialize&quot;,</span>
+<span class="s1">    &quot;params&quot;: {</span>
+<span class="s1">      &quot;protocolVersion&quot;: &quot;2024-11-05&quot;,</span>
+<span class="s1">      &quot;capabilities&quot;: {},</span>
+<span class="s1">      &quot;clientInfo&quot;: {&quot;name&quot;: &quot;curl&quot;, &quot;version&quot;: &quot;1.0&quot;}</span>
+<span class="s1">    }</span>
+<span class="s1">  }&#39;</span>
+</code></pre></div>
+
+<p>Grab the <code>mcp-session-id</code> value from the response headers, then send the
+<code>notifications/initialized</code> notification:</p>
+<div class="highlight"><pre><span></span><code>curl<span class="w"> </span>-N<span class="w"> </span>-X<span class="w"> </span>POST<span class="w"> </span>http://localhost:8001/mcp<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>-H<span class="w"> </span><span class="s2">&quot;Content-Type: application/json&quot;</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>-H<span class="w"> </span><span class="s2">&quot;Accept: application/json, text/event-stream&quot;</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>-H<span class="w"> </span><span class="s2">&quot;mcp-session-id: f927b6cbfa8a489cafaa88b7b39c0529&quot;</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>-d<span class="w"> </span><span class="s1">&#39;{</span>
+<span class="s1">    &quot;jsonrpc&quot;: &quot;2.0&quot;,</span>
+<span class="s1">    &quot;method&quot;: &quot;notifications/initialized&quot;,</span>
+<span class="s1">    &quot;params&quot;: {}</span>
+<span class="s1">  }&#39;</span>
+</code></pre></div>
+
+<h3 id="2-list-available-tools">2. List available tools</h3>
+<div class="highlight"><pre><span></span><code>curl<span class="w"> </span>-N<span class="w"> </span>-X<span class="w"> </span>POST<span class="w"> </span>http://localhost:8001/mcp<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>-H<span class="w"> </span><span class="s2">&quot;Content-Type: application/json&quot;</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>-H<span class="w"> </span><span class="s2">&quot;Accept: application/json, text/event-stream&quot;</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>-H<span class="w"> </span><span class="s2">&quot;mcp-session-id: &lt;SESSION_ID&gt;&quot;</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>-d<span class="w"> </span><span class="s1">&#39;{</span>
+<span class="s1">    &quot;jsonrpc&quot;: &quot;2.0&quot;,</span>
+<span class="s1">    &quot;id&quot;: 2,</span>
+<span class="s1">    &quot;method&quot;: &quot;tools/list&quot;,</span>
+<span class="s1">    &quot;params&quot;: {}</span>
+<span class="s1">  }&#39;</span>
+</code></pre></div>
+
+<p>You should see: <code>vector_search</code>, <code>fulltext_search</code>, <code>hybrid_search</code>,
+<code>graph_search</code>, <code>parent_doc_search</code>, <code>metadata_search</code>, <code>auto_search</code>.</p>
+<h3 id="3-call-a-tool">3. Call a tool</h3>
+<div class="highlight"><pre><span></span><code>curl<span class="w"> </span>-N<span class="w"> </span>-X<span class="w"> </span>POST<span class="w"> </span>http://localhost:8001/mcp<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>-H<span class="w"> </span><span class="s2">&quot;Content-Type: application/json&quot;</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>-H<span class="w"> </span><span class="s2">&quot;Accept: application/json, text/event-stream&quot;</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>-H<span class="w"> </span><span class="s2">&quot;mcp-session-id: &lt;SESSION_ID&gt;&quot;</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>-d<span class="w"> </span><span class="s1">&#39;{</span>
+<span class="s1">    &quot;jsonrpc&quot;: &quot;2.0&quot;,</span>
+<span class="s1">    &quot;id&quot;: 3,</span>
+<span class="s1">    &quot;method&quot;: &quot;tools/call&quot;,</span>
+<span class="s1">    &quot;params&quot;: {</span>
+<span class="s1">      &quot;name&quot;: &quot;hybrid_search&quot;,</span>
+<span class="s1">      &quot;arguments&quot;: {</span>
+<span class="s1">        &quot;query&quot;: &quot;What is vector search in MongoDB Atlas?&quot;,</span>
+<span class="s1">        &quot;top_k&quot;: 5</span>
+<span class="s1">      }</span>
+<span class="s1">    }</span>
+<span class="s1">  }&#39;</span>
+</code></pre></div>
+
+<p>Every tool shares the same argument signature:</p>
+<div class="highlight"><pre><span></span><code><span class="p">{</span><span class="w"> </span><span class="nt">&quot;name&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;vector_search&quot;</span><span class="p">,</span><span class="w">     </span><span class="nt">&quot;arguments&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="nt">&quot;query&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;...&quot;</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;top_k&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">10</span><span class="w"> </span><span class="p">}</span><span class="w"> </span><span class="p">}</span>
+<span class="p">{</span><span class="w"> </span><span class="nt">&quot;name&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;fulltext_search&quot;</span><span class="p">,</span><span class="w">   </span><span class="nt">&quot;arguments&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="nt">&quot;query&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;...&quot;</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;top_k&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">10</span><span class="w"> </span><span class="p">}</span><span class="w"> </span><span class="p">}</span>
+<span class="p">{</span><span class="w"> </span><span class="nt">&quot;name&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;graph_search&quot;</span><span class="p">,</span><span class="w">      </span><span class="nt">&quot;arguments&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="nt">&quot;query&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;...&quot;</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;top_k&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">10</span><span class="w"> </span><span class="p">}</span><span class="w"> </span><span class="p">}</span>
+<span class="p">{</span><span class="w"> </span><span class="nt">&quot;name&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;parent_doc_search&quot;</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;arguments&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="nt">&quot;query&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;...&quot;</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;top_k&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">10</span><span class="w"> </span><span class="p">}</span><span class="w"> </span><span class="p">}</span>
+<span class="p">{</span><span class="w"> </span><span class="nt">&quot;name&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;metadata_search&quot;</span><span class="p">,</span><span class="w">   </span><span class="nt">&quot;arguments&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="nt">&quot;query&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;...&quot;</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;top_k&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">10</span><span class="w"> </span><span class="p">}</span><span class="w"> </span><span class="p">}</span>
+<span class="p">{</span><span class="w"> </span><span class="nt">&quot;name&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;auto_search&quot;</span><span class="p">,</span><span class="w">       </span><span class="nt">&quot;arguments&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="nt">&quot;query&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;...&quot;</span><span class="p">,</span><span class="w"> </span><span class="nt">&quot;top_k&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">10</span><span class="w"> </span><span class="p">}</span><span class="w"> </span><span class="p">}</span>
+</code></pre></div>
+
+<p>Each tool also accepts optional <code>filters</code> (dict), <code>atlas</code> (per-request Atlas
+overrides), and <code>retrieval</code> (per-request retrieval overrides). For example,
+<code>"filters": {"source": "docs"}</code> constrains results by metadata.</p>
+<h3 id="using-postman">Using Postman</h3>
+<ol>
+<li>Create a <strong>POST</strong> request to <code>http://localhost:8001/mcp</code>.</li>
+<li>Under <strong>Headers</strong>, add:
+   - <code>Content-Type: application/json</code>
+   - <code>Accept: application/json, text/event-stream</code></li>
+<li>Send the <code>initialize</code> body (see step 1 above) and copy <code>mcp-session-id</code>
+   from the response headers.</li>
+<li>Add a new header <code>mcp-session-id: &lt;SESSION_ID&gt;</code> to all subsequent requests.</li>
+<li>Postman renders SSE responses inline — expand the <code>data:</code> frame to see
+   the JSON-RPC payload.</li>
+</ol>
+<blockquote>
+<p>Tip: save the requests as a Postman collection and use a collection
+variable (<code>{{sessionId}}</code>) populated from the <code>initialize</code> response via a
+<strong>Tests</strong> script:</p>
+<p><code>js
+pm.collectionVariables.set("sessionId", pm.response.headers.get("mcp-session-id"));</code></p>
+</blockquote>
+<h3 id="quick-sanity-check">Quick sanity check</h3>
+<p>If the server is running you can hit it with:</p>
+<div class="highlight"><pre><span></span><code>curl<span class="w"> </span>-i<span class="w"> </span>http://localhost:8001/mcp<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>-H<span class="w"> </span><span class="s2">&quot;Accept: application/json, text/event-stream&quot;</span>
+</code></pre></div>
+
+<p>A <code>405</code> or <code>400</code> response (rather than connection refused) confirms the
+server is up; MCP requires <code>POST</code> with a valid JSON-RPC body. A plain
+<code>GET /healthz</code> route is also exposed for load-balancer health checks.</p>
+<h2 id="react-testing-ui">React testing UI</h2>
+<p><code>searchaas/ui_react</code> is a Vite + TypeScript + React playground for both
+backends. It shows conversation turns, per-turn results, the LLM summary, an
+understood-query intent panel (rewrite, entities, filters, chosen strategy),
+latency timings, and the real captured MongoDB aggregation pipeline. Backend
+URLs are injected at runtime via <code>public/config.js</code> (so one build points at any
+backend), falling back to <code>http://localhost:8000</code> and
+<code>http://localhost:8001/mcp</code>.</p>
+<div class="highlight"><pre><span></span><code><span class="nb">cd</span><span class="w"> </span>searchaas/ui_react
+npm<span class="w"> </span>install
+npm<span class="w"> </span>run<span class="w"> </span>dev<span class="w">        </span><span class="c1"># dev server</span>
+npm<span class="w"> </span>run<span class="w"> </span>build<span class="w">      </span><span class="c1"># production build → dist/</span>
+</code></pre></div>
+
+<h2 id="end-to-end-flow">End-to-end flow</h2>
+<pre class="mermaid">flowchart TD
+    YAML[&quot;searchaas.yaml&quot;] --&gt; AppConfig[&quot;AppConfig (loader)&quot;]
+    AppConfig --&gt; AtlasFactory[&quot;AtlasFactory&quot;]
+    AppConfig --&gt; EmbeddingFactory[&quot;EmbeddingFactory&quot;]
+    AppConfig --&gt; LLMFactory[&quot;LLMFactory&quot;]
+
+    AtlasFactory --&gt; Collection[(&quot;Atlas collection&quot;)]
+    EmbeddingFactory --&gt; Embeddings[&quot;Embeddings&quot;]
+    LLMFactory --&gt; ChatModel[&quot;ChatModel&quot;]
+
+    Collection --&gt; VectorStore[&quot;MongoDBAtlasVectorSearch&quot;]
+    Embeddings --&gt; VectorStore
+
+    ChatModel --&gt; QUL[&quot;QueryUnderstandingLayer + FactStore&quot;]
+    ChatModel --&gt; Planner[&quot;RetrievalPlanner + PolicyStore&quot;]
+    VectorStore --&gt; RetrieverFactory[&quot;RetrieverFactory&quot;]
+    Collection --&gt; RetrieverFactory
+    ChatModel --&gt; RetrieverFactory
+
+    QUL --&gt; Surfaces
+    Planner --&gt; Surfaces
+    RetrieverFactory --&gt; Surfaces
+
+    subgraph Surfaces[&quot;Surfaces&quot;]
+        FastAPI[&quot;FastAPI&quot;]
+        FastMCP[&quot;FastMCP&quot;]
+        UI[&quot;React UI&quot;]
+    end
+
+    Surfaces -.-&gt;|real pipeline capture| Pipeline[&quot;Captured Atlas aggregation&quot;]
+</pre>
+<p><strong>Components</strong></p>
+<ul>
+<li><strong>searchaas.yaml</strong> — The single source of truth for providers, models,
+  indexes, and runtime options. Every value is <code>${VAR:-default}</code>-driven so the
+  deployment can be retuned via environment variables without a rebuild.</li>
+<li><strong>AppConfig (loader)</strong> — Parses the YAML, expands environment variables, and
+  produces the validated Pydantic config that wires the entire container.</li>
+<li><strong>AtlasFactory</strong> — Builds the MongoDB client, database, and collection
+  handles from the Atlas config, and exposes health/stats helpers.</li>
+<li><strong>EmbeddingFactory</strong> — Constructs the query-embedding provider (auto /
+  AutoEmbeddings, Voyage, OpenAI, Gemini, Titan, ...) selected in config.</li>
+<li><strong>LLMFactory</strong> — Constructs the chat model (Gemini, OpenAI, Anthropic,
+  Bedrock, ...) used by query understanding and planning.</li>
+<li><strong>Atlas collection</strong> — The MongoDB collection holding the documents/chunks
+  and their vector/search indexes that every retriever queries.</li>
+<li><strong>Embeddings</strong> — The concrete embedder that turns a query into a vector (or
+  defers to server-side AutoEmbeddings in auto mode).</li>
+<li><strong>ChatModel</strong> — The concrete LLM instance shared by the understanding and
+  planning layers for reasoning over the query.</li>
+<li><strong>MongoDBAtlasVectorSearch</strong> — The LangChain vector store binding the
+  collection and embeddings together for <code>$vectorSearch</code> retrieval.</li>
+<li><strong>QueryUnderstandingLayer + FactStore</strong> — Rewrites the query and extracts
+  entities, typed facts, sort, limit, and intent; the FactStore caches and
+  audits those results in the <code>query_facts</code> collection.</li>
+<li><strong>RetrievalPlanner + PolicyStore</strong> — Chooses the retrieval strategy and
+  parameters from the understood query, then clamps the plan against
+  Atlas-managed guardrails (allowed strategies, top_k bounds, filter whitelist).</li>
+<li><strong>RetrieverFactory</strong> — Instantiates the chosen retriever
+  (vector / fulltext / hybrid / graph / parent_doc / metadata) and runs it
+  against the vector store and collection.</li>
+<li><strong>Surfaces (FastAPI / FastMCP / React UI)</strong> — The REST API, MCP tool server,
+  and testing UI that expose retrieval to clients; all share the same wired
+  container.</li>
+<li><strong>Captured Atlas aggregation</strong> — The observability layer records the real
+  aggregation pipeline each retrieval executed and returns it in responses for
+  transparency and debugging.</li>
+</ul>
+<hr />
+<h2 id="deployment">Deployment</h2>
+<p>Deployment artifacts live under <code>deployment/</code>. Three cloud targets are
+available; each folder has its own README/guide with full details, config
+knobs, and teardown.</p>
+<table>
+<thead>
+<tr>
+<th>Target</th>
+<th>Folder</th>
+<th>Guide</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>AWS</strong></td>
+<td><a href="https://github.com/mongodb/mongodb-enterprise-search/blob/main/deployment/aws"><code>deployment/aws/</code></a></td>
+<td><a href="deployment/aws/README.html">deployment/aws/README.md</a></td>
+</tr>
+<tr>
+<td><strong>Azure</strong></td>
+<td><a href="https://github.com/mongodb/mongodb-enterprise-search/blob/main/deployment/azure"><code>deployment/azure/</code></a></td>
+<td><a href="deployment/azure/DEPLOYMENT.html">deployment/azure/DEPLOYMENT.md</a></td>
+</tr>
+<tr>
+<td><strong>Google Cloud Run</strong></td>
+<td><a href="https://github.com/mongodb/mongodb-enterprise-search/blob/main/deployment/google"><code>deployment/google/</code></a></td>
+<td>see below</td>
+</tr>
+</tbody>
+</table>
+<h3 id="aws">AWS</h3>
+<p>Three independent pieces — see the <a href="deployment/aws/README.html">AWS deployment guide</a>
+for full details:</p>
+<table>
+<thead>
+<tr>
+<th>#</th>
+<th>What</th>
+<th>Where it runs</th>
+<th>Script</th>
+<th>Guide</th>
+<th>Default?</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>1</td>
+<td>React UI</td>
+<td>S3 static website (existing bucket)</td>
+<td><a href="https://github.com/mongodb/mongodb-enterprise-search/blob/main/deployment/aws/s3-ui/deploy.sh"><code>s3-ui/deploy.sh</code></a></td>
+<td><a href="deployment/aws/s3-ui/README.html">s3-ui/README.md</a></td>
+<td>yes</td>
+</tr>
+<tr>
+<td>2</td>
+<td>FastAPI + FastMCP backends</td>
+<td>ECS <strong>Express Mode</strong></td>
+<td><a href="https://github.com/mongodb/mongodb-enterprise-search/blob/main/deployment/aws/ecs/deploy.sh"><code>ecs/deploy.sh</code></a></td>
+<td><a href="deployment/aws/ecs/README.html">ecs/README.md</a></td>
+<td><strong>yes</strong></td>
+</tr>
+<tr>
+<td>3</td>
+<td>FastMCP backend (alternative)</td>
+<td>Bedrock <strong>AgentCore Runtime</strong></td>
+<td><a href="https://github.com/mongodb/mongodb-enterprise-search/blob/main/deployment/aws/agentcore/deploy.sh"><code>agentcore/deploy.sh</code></a></td>
+<td><a href="deployment/aws/agentcore/README.html">agentcore/README.md</a></td>
+<td>no — opt-in</td>
+</tr>
+</tbody>
+</table>
+<div class="highlight"><pre><span></span><code><span class="nb">export</span><span class="w"> </span><span class="nv">AWS_REGION</span><span class="o">=</span>us-east-1
+<span class="nb">export</span><span class="w"> </span><span class="nv">ATLAS_URI</span><span class="o">=</span><span class="s1">&#39;mongodb+srv://USER:PASS@cluster.mongodb.net/?retryWrites=true&#39;</span>
+<span class="nb">export</span><span class="w"> </span><span class="nv">ATLAS_DB</span><span class="o">=</span><span class="s1">&#39;your_database_name&#39;</span>
+
+<span class="c1"># 1. Deploy the backends (default: ECS Express Mode). Prints two HTTPS URLs.</span>
+./deployment/aws/ecs/deploy.sh
+
+<span class="c1"># 2. Deploy the UI to your existing S3 bucket, pointing at those URLs.</span>
+./deployment/aws/s3-ui/deploy.sh<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--bucket<span class="w"> </span>my-existing-ui-bucket<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--api-url<span class="w"> </span><span class="s2">&quot;https://searchaas-fastapi.ecs.</span><span class="si">${</span><span class="nv">AWS_REGION</span><span class="si">}</span><span class="s2">.on.aws&quot;</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--mcp-url<span class="w"> </span><span class="s2">&quot;https://searchaas-fastmcp.ecs.</span><span class="si">${</span><span class="nv">AWS_REGION</span><span class="si">}</span><span class="s2">.on.aws/mcp&quot;</span>
+
+<span class="c1"># Optional: FastMCP on Bedrock AgentCore (requires typed confirmation)</span>
+./deployment/aws/agentcore/deploy.sh
+</code></pre></div>
+
+<h3 id="azure">Azure</h3>
+<p>Deploys the three surfaces to <strong>Azure Container Apps</strong> and wires the MCP
+endpoint into an <strong>AI Foundry</strong> agent. Infrastructure (resource group, ACR, Log
+Analytics, Container Apps Environment, managed identity, three Container Apps) is
+provisioned by subscription-scope Bicep with a readiness gate. Full walkthrough:
+<a href="deployment/azure/DEPLOYMENT.html">Azure deployment guide</a>.</p>
+<div class="highlight"><pre><span></span><code><span class="c1"># 1. Create resource group + ACR</span>
+az<span class="w"> </span>deployment<span class="w"> </span>sub<span class="w"> </span>create<span class="w"> </span>--name<span class="w"> </span>searchaas-acr<span class="w"> </span>--location<span class="w"> </span>centralindia<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--template-file<span class="w"> </span>deployment/azure/infra/acr.bicep<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--parameters<span class="w"> </span>deployment/azure/infra/main.parameters.json
+<span class="nv">ACR_NAME</span><span class="o">=</span><span class="k">$(</span>az<span class="w"> </span>deployment<span class="w"> </span>sub<span class="w"> </span>show<span class="w"> </span>-n<span class="w"> </span>searchaas-acr<span class="w"> </span>--query<span class="w"> </span>properties.outputs.acrName.value<span class="w"> </span>-o<span class="w"> </span>tsv<span class="k">)</span>
+
+<span class="c1"># 2. Build &amp; push all three images (server-side in ACR)</span>
+./deployment/azure/scripts/build-and-push.sh<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$ACR_NAME</span><span class="s2">&quot;</span><span class="w"> </span>latest
+
+<span class="c1"># 3. Deploy infra + Container Apps</span>
+az<span class="w"> </span>deployment<span class="w"> </span>sub<span class="w"> </span>create<span class="w"> </span>--name<span class="w"> </span>searchaas<span class="w"> </span>--location<span class="w"> </span>centralindia<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--template-file<span class="w"> </span>deployment/azure/infra/main.bicep<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--parameters<span class="w"> </span>deployment/azure/infra/main.parameters.json<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--parameters<span class="w"> </span><span class="nv">atlasUri</span><span class="o">=</span><span class="s2">&quot;</span><span class="nv">$ATLAS_URI</span><span class="s2">&quot;</span><span class="w"> </span><span class="nv">voyageApiKey</span><span class="o">=</span><span class="s2">&quot;</span><span class="nv">$VOYAGE_API_KEY</span><span class="s2">&quot;</span><span class="w"> </span><span class="se">\</span>
+<span class="w">      </span><span class="nv">openaiApiKey</span><span class="o">=</span><span class="s2">&quot;</span><span class="nv">$OPENAI_API_KEY</span><span class="s2">&quot;</span><span class="w"> </span><span class="nv">mcpApiKey</span><span class="o">=</span><span class="s2">&quot;</span><span class="nv">$MCP_API_KEY</span><span class="s2">&quot;</span>
+</code></pre></div>
+
+<p>The MCP endpoint is Bearer-gated (<code>MCP_API_KEY</code>). See the
+<a href="deployment/azure/DEPLOYMENT.html">Azure deployment guide</a> for config overrides and
+AI Foundry agent setup, and its <a href="https://github.com/mongodb/mongodb-enterprise-search/blob/main/deployment/azure/infra">Bicep templates</a> and
+<a href="https://github.com/mongodb/mongodb-enterprise-search/blob/main/deployment/azure/scripts/build-and-push.sh">build/push script</a>.</p>
+<h3 id="google-cloud-run">Google Cloud Run</h3>
+<p><strong>Prerequisites:</strong> <a href="https://cloud.google.com/sdk/docs/install">gcloud CLI</a>
+authenticated, Docker running, a GCP project with billing, and a populated
+<code>.env</code>.</p>
+<p><strong>Option A — Single service (recommended).</strong> One image, one URL; nginx serves
+the React SPA and proxies API/MCP traffic to internal backends (no CORS config).
+Script: <a href="https://github.com/mongodb/mongodb-enterprise-search/blob/main/deployment/google/cloud_run/deploy-combined.sh"><code>deployment/google/cloud_run/deploy-combined.sh</code></a>.</p>
+<div class="highlight"><pre><span></span><code>chmod<span class="w"> </span>+x<span class="w"> </span>deployment/google/cloud_run/deploy-combined.sh
+./deployment/google/cloud_run/deploy-combined.sh<span class="w"> </span>--project<span class="w"> </span>&lt;PROJECT_ID&gt;<span class="w"> </span>--region<span class="w"> </span>&lt;REGION&gt;
+</code></pre></div>
+
+<table>
+<thead>
+<tr>
+<th>Endpoint</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>/</code></td>
+<td>React UI</td>
+</tr>
+<tr>
+<td><code>/retrieve</code>, <code>/health</code>, <code>/diagnose</code>, <code>/docs</code></td>
+<td>FastAPI REST</td>
+</tr>
+<tr>
+<td><code>/mcp</code></td>
+<td>FastMCP (JSON-RPC over SSE)</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Option B — Separate services.</strong> Three independent Cloud Run services, useful
+to scale the API and MCP independently from the frontend.
+Script: <a href="https://github.com/mongodb/mongodb-enterprise-search/blob/main/deployment/google/cloud_run/deploy.sh"><code>deployment/google/cloud_run/deploy.sh</code></a>.</p>
+<div class="highlight"><pre><span></span><code>chmod<span class="w"> </span>+x<span class="w"> </span>deployment/google/cloud_run/deploy.sh
+./deployment/google/cloud_run/deploy.sh<span class="w"> </span>--project<span class="w"> </span>&lt;PROJECT_ID&gt;<span class="w"> </span>--region<span class="w"> </span>&lt;REGION&gt;
+</code></pre></div>
+
+<table>
+<thead>
+<tr>
+<th>Cloud Run service</th>
+<th>URL path</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>searchaas-api</code></td>
+<td><code>/retrieve*</code>, <code>/health</code>, <code>/docs</code></td>
+<td>FastAPI REST server</td>
+</tr>
+<tr>
+<td><code>searchaas-mcp</code></td>
+<td><code>/mcp</code></td>
+<td>FastMCP server</td>
+</tr>
+<tr>
+<td><code>searchaas-frontend</code></td>
+<td><code>/</code></td>
+<td>React SPA (pre-configured with backend URLs)</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Update frontend backend URLs after deploy:</strong></p>
+<div class="highlight"><pre><span></span><code>gcloud<span class="w"> </span>run<span class="w"> </span>services<span class="w"> </span>update<span class="w"> </span>searchaas-frontend<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--region<span class="o">=</span>&lt;REGION&gt;<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--update-env-vars<span class="o">=</span><span class="s2">&quot;SEARCHAAS_API_URL=https://searchaas-api-xyz.run.app,SEARCHAAS_MCP_URL=https://searchaas-mcp-xyz.run.app/mcp&quot;</span>
+</code></pre></div>
+
+<p><strong>Update CORS allowed origins:</strong></p>
+<div class="highlight"><pre><span></span><code>gcloud<span class="w"> </span>run<span class="w"> </span>services<span class="w"> </span>update<span class="w"> </span>searchaas-api<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--region<span class="o">=</span>&lt;REGION&gt;<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--update-env-vars<span class="o">=</span><span class="s2">&quot;CORS_ORIGINS=https://searchaas-frontend-xyz.run.app&quot;</span>
+</code></pre></div>
+</main>
+<script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+<script>if (window.mermaid) mermaid.initialize({startOnLoad: true, theme: "neutral"});</script>
+</body>
+</html>

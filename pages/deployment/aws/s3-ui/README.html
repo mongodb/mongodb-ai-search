@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Deploy the React UI to S3 (static website) · SearchaaS Docs</title>
+<link rel="stylesheet" href="../../../../pages/assets/style.css">
+<link rel="stylesheet" href="../../../../pages/assets/pygments.css">
+</head>
+<body>
+<header class="topbar">
+  <a class="brand" href="../../../../index.html">SearchaaS Docs</a>
+  <a class="back" href="../../../../index.html">← All docs</a>
+</header>
+<main class="content">
+<h1 id="deploy-the-react-ui-to-s3-static-website">Deploy the React UI to S3 (static website)</h1>
+<p>Deploys <code>searchaas/ui_react</code> to an <strong>existing</strong> S3 bucket as a static website.</p>
+<blockquote>
+<p><strong>The script never creates a bucket.</strong> You supply the name of a bucket you
+already own. If it can't reach the bucket, it stops and tells you how to
+create one yourself.</p>
+</blockquote>
+<h2 id="how-the-ui-gets-its-backend-urls">How the UI gets its backend URLs</h2>
+<p>The SPA reads its backend endpoints at <strong>runtime</strong> from
+<code>window.__SEARCHAAS_CONFIG__</code>, which is set by a <code>config.js</code> loaded in
+<code>index.html</code>. This script generates that <code>config.js</code> from the URLs you pass, so
+the same build can point at any backend — no rebuild needed to change URLs.</p>
+<div class="highlight"><pre><span></span><code>FASTAPI_URL → App.tsx fastapiUrl
+MCP_URL     → App.tsx mcpUrl
+MCP_API_KEY → App.tsx mcpApiKey
+</code></pre></div>
+
+<h2 id="usage">Usage</h2>
+<div class="highlight"><pre><span></span><code><span class="c1"># Fully specified</span>
+./deployment/aws/s3-ui/deploy.sh<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--bucket<span class="w"> </span>my-existing-ui-bucket<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--region<span class="w"> </span>us-east-1<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--api-url<span class="w"> </span><span class="s2">&quot;https://searchaas-fastapi.ecs.us-east-1.on.aws&quot;</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--mcp-url<span class="w"> </span><span class="s2">&quot;https://searchaas-fastmcp.ecs.us-east-1.on.aws/mcp&quot;</span>
+
+<span class="c1"># Interactive — prompts for the bucket and (optionally) the backend URLs</span>
+./deployment/aws/s3-ui/deploy.sh
+</code></pre></div>
+
+<p>Environment variable equivalents: <code>S3_BUCKET</code>, <code>AWS_REGION</code>, <code>VITE_API_URL</code>
+(or <code>API_URL</code>), <code>VITE_MCP_URL</code> (or <code>MCP_URL</code>), <code>MCP_API_KEY</code>.</p>
+<h2 id="what-it-does">What it does</h2>
+<ol>
+<li>Resolves and <strong>verifies</strong> the target bucket exists (via <code>head-bucket</code>).</li>
+<li>Detects the bucket's region for the correct website endpoint hostname.</li>
+<li>Builds the UI (<code>npm ci &amp;&amp; npm run build</code>).</li>
+<li>Writes <code>dist/config.js</code> with your backend URLs.</li>
+<li>Enables static website hosting (index + SPA fallback to <code>index.html</code>).</li>
+<li>Syncs <code>dist/</code> — hashed assets get a 1-year immutable cache;
+   <code>index.html</code> and <code>config.js</code> get <code>no-cache</code> so URL changes take effect
+   immediately.</li>
+<li>Prints the website URL.</li>
+</ol>
+<h2 id="bucket-must-allow-public-reads">Bucket must allow public reads</h2>
+<p>Static-website objects must be publicly readable. If the site returns 403,
+open up public access and attach a read policy (the script prints these exact
+commands on completion):</p>
+<div class="highlight"><pre><span></span><code>aws<span class="w"> </span>s3api<span class="w"> </span>put-public-access-block<span class="w"> </span>--bucket<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$BUCKET</span><span class="s2">&quot;</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--public-access-block-configuration<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span><span class="s2">&quot;BlockPublicAcls=false,IgnorePublicAcls=false,BlockPublicPolicy=false,RestrictPublicBuckets=false&quot;</span>
+
+aws<span class="w"> </span>s3api<span class="w"> </span>put-bucket-policy<span class="w"> </span>--bucket<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$BUCKET</span><span class="s2">&quot;</span><span class="w"> </span>--policy<span class="w"> </span><span class="s1">&#39;{</span>
+<span class="s1">  &quot;Version&quot;:&quot;2012-10-17&quot;,</span>
+<span class="s1">  &quot;Statement&quot;:[{&quot;Sid&quot;:&quot;PublicReadGetObject&quot;,&quot;Effect&quot;:&quot;Allow&quot;,</span>
+<span class="s1">    &quot;Principal&quot;:&quot;*&quot;,&quot;Action&quot;:&quot;s3:GetObject&quot;,</span>
+<span class="s1">    &quot;Resource&quot;:&quot;arn:aws:s3:::YOUR_BUCKET/*&quot;}]}&#39;</span>
+</code></pre></div>
+
+<h2 id="http-vs-https">HTTP vs HTTPS</h2>
+<p>S3 website endpoints are <strong>HTTP-only</strong>; the ECS Express Mode backend URLs are
+<strong>HTTPS</strong>. An HTTP page calling HTTPS APIs is allowed by browsers (the reverse
+is blocked), so this pairing works.</p>
+</main>
+<script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+<script>if (window.mermaid) mermaid.initialize({startOnLoad: true, theme: "neutral"});</script>
+</body>
+</html>
