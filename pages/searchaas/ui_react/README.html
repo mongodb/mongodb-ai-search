@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SearchaaS — React UI · SearchaaS Docs</title>
+<link rel="stylesheet" href="../../../pages/assets/style.css">
+<link rel="stylesheet" href="../../../pages/assets/pygments.css">
+</head>
+<body>
+<header class="topbar">
+  <a class="brand" href="../../../index.html">SearchaaS Docs</a>
+  <a class="back" href="../../../index.html">← All docs</a>
+</header>
+<main class="content">
+<h1 id="searchaas-react-ui">SearchaaS — React UI</h1>
+<p>A LeafyGreen-styled React + Vite + TypeScript front-end for the SearchaaS
+Phase 1 backends (FastAPI REST + FastMCP Streamable HTTP).</p>
+<h2 id="run">Run</h2>
+<div class="highlight"><pre><span></span><code>npm<span class="w"> </span>install
+npm<span class="w"> </span>run<span class="w"> </span>dev<span class="w">          </span><span class="c1"># → http://localhost:5173</span>
+</code></pre></div>
+
+<p>Backends expected (run from the repo root):</p>
+<div class="highlight"><pre><span></span><code>uvicorn<span class="w"> </span>searchaas.api.app:app<span class="w"> </span>--host<span class="w"> </span><span class="m">0</span>.0.0.0<span class="w"> </span>--port<span class="w"> </span><span class="m">8000</span>
+python<span class="w"> </span>-m<span class="w"> </span>searchaas.mcp_server.server
+</code></pre></div>
+
+<p>Both backends enable CORS for any <code>http://localhost:*</code> origin, so the dev
+server can talk to them directly.</p>
+<h2 id="layout">Layout</h2>
+<table>
+<thead>
+<tr>
+<th>Region</th>
+<th>What it does</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Side pane</strong> (left)</td>
+<td>Live YAML config editor with collapse / expand. Required <code>atlas.*</code> fields are highlighted per strategy. Download produces <code>searchaas.yaml</code>.</td>
+</tr>
+<tr>
+<td><strong>Header</strong> (top)</td>
+<td>Branded hero with active backend.</td>
+</tr>
+<tr>
+<td><strong>Query panel</strong> (right)</td>
+<td>Backend toggle, strategy + top_k, query box, filters, run button.</td>
+</tr>
+<tr>
+<td><strong>Intent panel</strong></td>
+<td>Shown when auto mode returns an <code>understood_query</code> — intent, rewritten query, entities, inferred filters, and the planner-chosen strategy compared to the intent's typical mapping.</td>
+</tr>
+<tr>
+<td><strong>Summary panel</strong></td>
+<td>LLM-generated summary of the top results (falls back to the first result snippet if absent).</td>
+</tr>
+<tr>
+<td><strong>Results</strong></td>
+<td>Result tiles with optional <code>show full</code> / <code>show metadata</code>.</td>
+</tr>
+<tr>
+<td><strong>Planner output</strong></td>
+<td>Collapsible JSON.</td>
+</tr>
+<tr>
+<td><strong>Pipeline</strong></td>
+<td>Reconstructed MongoDB aggregation pipeline driven by the current YAML, copy/download-friendly.</td>
+</tr>
+</tbody>
+</table>
+<h2 id="stack">Stack</h2>
+<ul>
+<li><strong>React 18</strong> (LeafyGreen tracks React 18)</li>
+<li><strong>Vite + TypeScript</strong></li>
+<li><strong>LeafyGreen UI</strong> (<code>@leafygreen-ui/*</code>) — see <a href="https://github.com/mongodb/leafygreen-ui">mongodb/leafygreen-ui</a> and <a href="https://www.mongodb.design">mongodb.design</a></li>
+<li><strong>js-yaml</strong> for client-side YAML serialization</li>
+</ul>
+<h2 id="notes">Notes</h2>
+<ul>
+<li>The MCP client handles the full Streamable HTTP handshake (<code>initialize</code> →
+  <code>notifications/initialized</code> → <code>tools/call</code>) and parses SSE responses.
+  Session ids are cached per endpoint and auto-recover on stale-session errors.</li>
+<li>The aggregation pipeline shown is a faithful reconstruction of what
+  <code>langchain-mongodb</code> issues against Atlas (so it can be copied into
+  Compass / <code>mongosh</code>); it's built client-side from the live YAML config.</li>
+</ul>
+</main>
+<script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+<script>if (window.mermaid) mermaid.initialize({startOnLoad: true, theme: "neutral"});</script>
+</body>
+</html>

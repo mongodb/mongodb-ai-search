@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AWS Deployment · SearchaaS Docs</title>
+<link rel="stylesheet" href="../../../pages/assets/style.css">
+<link rel="stylesheet" href="../../../pages/assets/pygments.css">
+</head>
+<body>
+<header class="topbar">
+  <a class="brand" href="../../../index.html">SearchaaS Docs</a>
+  <a class="back" href="../../../index.html">← All docs</a>
+</header>
+<main class="content">
+<h1 id="aws-deployment">AWS Deployment</h1>
+<p>Deploy SearchaaS on AWS. Three independent pieces:</p>
+<table>
+<thead>
+<tr>
+<th>#</th>
+<th>What</th>
+<th>Where it runs</th>
+<th>Script</th>
+<th>Default?</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>1</td>
+<td>React UI (<code>ui_react</code>)</td>
+<td>S3 static website (existing bucket)</td>
+<td><code>s3-ui/deploy.sh</code></td>
+<td>yes</td>
+</tr>
+<tr>
+<td>2</td>
+<td>FastAPI + FastMCP backends</td>
+<td>Amazon ECS <strong>Express Mode</strong></td>
+<td><code>ecs/deploy.sh</code></td>
+<td><strong>yes</strong></td>
+</tr>
+<tr>
+<td>3</td>
+<td>FastMCP backend (alternative)</td>
+<td>Amazon Bedrock <strong>AgentCore Runtime</strong></td>
+<td><code>agentcore/deploy.sh</code></td>
+<td><strong>no — opt-in only</strong></td>
+</tr>
+</tbody>
+</table>
+<p>The <strong>default backend</strong> is ECS Express Mode (option 2). AgentCore (option 3) is
+a separate, explicitly-confirmed alternative for the FastMCP surface — it is
+never deployed unless you run its script and confirm.</p>
+<h2 id="layout">Layout</h2>
+<div class="highlight"><pre><span></span><code>deployment/aws/
+├── README.md                      ← this file
+├── Dockerfile                     ← shared FastAPI/FastMCP image (used by ECS)
+├── trust-ecs.json                 ← ECS task trust policy (reference)
+├── s3-ui/                         ← (1) UI on S3
+│   ├── deploy.sh
+│   └── README.md
+├── ecs/                           ← (2) DEFAULT backend: ECS Express Mode
+│   ├── deploy.sh
+│   ├── primary-container-fastapi.json
+│   ├── primary-container-fastmcp.json
+│   └── README.md
+└── agentcore/                     ← (3) OPT-IN: FastMCP on Bedrock AgentCore
+    ├── Dockerfile                 ← ARM64, MCP at :8000/mcp
+    ├── deploy.sh
+    └── README.md
+</code></pre></div>
+
+<h2 id="prerequisites">Prerequisites</h2>
+<ul>
+<li>AWS CLI v2, configured (<code>aws configure</code>)</li>
+<li>Docker with <code>buildx</code> (for backend images)</li>
+<li>Node.js + npm (for the UI build)</li>
+<li>A MongoDB Atlas cluster: export <code>ATLAS_URI</code> and <code>ATLAS_DB</code></li>
+</ul>
+<h2 id="typical-order">Typical order</h2>
+<div class="highlight"><pre><span></span><code><span class="nb">export</span><span class="w"> </span><span class="nv">AWS_REGION</span><span class="o">=</span>us-east-1
+<span class="nb">export</span><span class="w"> </span><span class="nv">ATLAS_URI</span><span class="o">=</span><span class="s1">&#39;mongodb+srv://USER:PASS@cluster.mongodb.net/?retryWrites=true&#39;</span>
+<span class="nb">export</span><span class="w"> </span><span class="nv">ATLAS_DB</span><span class="o">=</span><span class="s1">&#39;your_database_name&#39;</span>
+
+<span class="c1"># 1. Deploy the backends (default: ECS Express Mode). Prints two HTTPS URLs.</span>
+./deployment/aws/ecs/deploy.sh
+
+<span class="c1"># 2. Deploy the UI to your existing S3 bucket, pointing at those URLs.</span>
+./deployment/aws/s3-ui/deploy.sh<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--bucket<span class="w"> </span>my-existing-ui-bucket<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--api-url<span class="w"> </span><span class="s2">&quot;https://searchaas-fastapi.ecs.</span><span class="si">${</span><span class="nv">AWS_REGION</span><span class="si">}</span><span class="s2">.on.aws&quot;</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--mcp-url<span class="w"> </span><span class="s2">&quot;https://searchaas-fastmcp.ecs.</span><span class="si">${</span><span class="nv">AWS_REGION</span><span class="si">}</span><span class="s2">.on.aws/mcp&quot;</span>
+</code></pre></div>
+
+<h3 id="optional-fastmcp-on-bedrock-agentcore-instead-of-in-addition-to-ecs">Optional: FastMCP on Bedrock AgentCore instead of / in addition to ECS</h3>
+<div class="highlight"><pre><span></span><code>./deployment/aws/agentcore/deploy.sh<span class="w">   </span><span class="c1"># requires typing &#39;deploy-agentcore&#39; to confirm</span>
+</code></pre></div>
+
+<p>See each subfolder's <code>README.md</code> for full details, config knobs, and teardown.</p>
+</main>
+<script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+<script>if (window.mermaid) mermaid.initialize({startOnLoad: true, theme: "neutral"});</script>
+</body>
+</html>

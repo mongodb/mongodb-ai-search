@@ -1,0 +1,362 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Deploy FastMCP on Amazon Bedrock AgentCore Runtime (opt-in) · SearchaaS Docs</title>
+<link rel="stylesheet" href="../../../../pages/assets/style.css">
+<link rel="stylesheet" href="../../../../pages/assets/pygments.css">
+</head>
+<body>
+<header class="topbar">
+  <a class="brand" href="../../../../index.html">SearchaaS Docs</a>
+  <a class="back" href="../../../../index.html">← All docs</a>
+</header>
+<main class="content">
+<h1 id="deploy-fastmcp-on-amazon-bedrock-agentcore-runtime-opt-in">Deploy FastMCP on Amazon Bedrock AgentCore Runtime (opt-in)</h1>
+<blockquote>
+<p><strong>This is NOT the default deployment.</strong> The default backend target is
+<strong>ECS Express Mode</strong> (<code>deployment/aws/ecs/</code>). Deploy to AgentCore only when
+you explicitly want to — the script refuses to run without confirmation.</p>
+</blockquote>
+<p>Amazon Bedrock AgentCore Runtime can host MCP servers directly. This packages
+the existing SearchaaS FastMCP surface (<code>searchaas/mcp_server/server.py</code>) as an
+ARM64 container and registers it as an AgentCore runtime with the <strong>MCP</strong>
+protocol.</p>
+<p>Docs: <a href="https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-mcp.html">https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-mcp.html</a></p>
+<h2 id="agentcore-contract-this-deployment-satisfies">AgentCore contract this deployment satisfies</h2>
+<table>
+<thead>
+<tr>
+<th>Requirement</th>
+<th>How it's met</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Platform must be <code>linux/arm64</code></td>
+<td><code>Dockerfile</code> uses <code>--platform=linux/arm64</code>; build uses <code>buildx</code></td>
+</tr>
+<tr>
+<td>MCP served at <code>0.0.0.0:8000/mcp</code></td>
+<td><code>MCP_HOST=0.0.0.0</code>, <code>MCP_PORT=8000</code>, transport <code>streamable-http</code></td>
+</tr>
+<tr>
+<td>Image in ECR</td>
+<td>Script creates <code>searchaas-agentcore</code> repo and pushes the image</td>
+</tr>
+<tr>
+<td>Execution role</td>
+<td>Script creates <code>searchaas-agentcore-runtime-role</code> (ECR + logs + Bedrock)</td>
+</tr>
+<tr>
+<td>Protocol = MCP</td>
+<td><code>create-agent-runtime --protocol-configuration '{"serverProtocol":"MCP"}'</code></td>
+</tr>
+</tbody>
+</table>
+<h2 id="files">Files</h2>
+<table>
+<thead>
+<tr>
+<th>File</th>
+<th>Purpose</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>Dockerfile</code></td>
+<td>ARM64 image, FastMCP on <code>:8000/mcp</code> (build context = repo root)</td>
+</tr>
+<tr>
+<td><code>deploy.sh</code></td>
+<td>Opt-in end-to-end: confirm → IAM role → ECR push → create runtime (create-only)</td>
+</tr>
+</tbody>
+</table>
+<h2 id="run-it">Run it</h2>
+<div class="highlight"><pre><span></span><code><span class="nb">export</span><span class="w"> </span><span class="nv">AWS_REGION</span><span class="o">=</span>us-east-1
+<span class="nb">export</span><span class="w"> </span><span class="nv">ATLAS_URI</span><span class="o">=</span><span class="s1">&#39;mongodb+srv://USER:PASS@cluster.mongodb.net/?retryWrites=true&#39;</span>
+<span class="nb">export</span><span class="w"> </span><span class="nv">ATLAS_DB</span><span class="o">=</span><span class="s1">&#39;your_database_name&#39;</span>
+
+<span class="c1"># Interactive confirmation (type &#39;deploy-agentcore&#39; when prompted):</span>
+./deployment/aws/agentcore/deploy.sh
+
+<span class="c1"># Or skip the prompt in CI:</span>
+<span class="nv">YES</span><span class="o">=</span>yes<span class="w"> </span>./deployment/aws/agentcore/deploy.sh<span class="w"> </span>--yes
+</code></pre></div>
+
+<p>The script prints the <strong>agent runtime ARN</strong> and the <strong>invocation URL</strong>:</p>
+<div class="highlight"><pre><span></span><code>https://bedrock-agentcore.&lt;region&gt;.amazonaws.com/runtimes/&lt;ENCODED_ARN&gt;/invocations?qualifier=DEFAULT
+</code></pre></div>
+
+<blockquote>
+<p><strong>Create-only.</strong> <code>deploy.sh</code> calls <code>create-agent-runtime</code>. If a runtime with
+the same name (<code>AGENTCORE_RUNTIME_NAME</code>, default <code>searchaas_fastmcp</code>) already
+exists, AWS rejects the create. Delete the old runtime first (see
+<a href="#manage--tear-down">Manage / tear down</a>) or deploy under a new name.</p>
+</blockquote>
+<h2 id="configuration-options">Configuration options</h2>
+<p>Everything in <code>searchaas/config/searchaas.yaml</code> uses <code>${VAR:-default}</code> syntax, so
+you configure the runtime purely with <strong>environment variables</strong> — no image
+rebuild. <code>deploy.sh</code> forwards any of the variables below that you export into the
+runtime's <code>environmentVariables</code>; anything you leave unset falls back to the YAML
+default. Just export the vars and run the script:</p>
+<div class="highlight"><pre><span></span><code><span class="nb">export</span><span class="w"> </span><span class="nv">EMBEDDINGS_PROVIDER</span><span class="o">=</span>auto
+<span class="nb">export</span><span class="w"> </span><span class="nv">ATLAS_VECTOR_INDEX</span><span class="o">=</span>autoembed_index
+<span class="nb">export</span><span class="w"> </span><span class="nv">ATLAS_DIMENSIONS</span><span class="o">=</span>-1
+./deployment/aws/agentcore/deploy.sh<span class="w"> </span>--yes
+</code></pre></div>
+
+<p>The script prints the exact set of vars it forwarded (<code>==&gt; Forwarding runtime env vars: ...</code>).</p>
+<blockquote>
+<p><strong>Fixed by the AgentCore contract (not overridable here):</strong> <code>MCP_HOST=0.0.0.0</code>,
+<code>MCP_PORT=8000</code>, <code>MCP_TRANSPORT=streamable-http</code>. AgentCore requires MCP on
+<code>0.0.0.0:8000</code>, so the script pins these.</p>
+</blockquote>
+<h3 id="atlas-connection-index">Atlas connection &amp; index</h3>
+<table>
+<thead>
+<tr>
+<th>Env var</th>
+<th>Default</th>
+<th>Purpose</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>ATLAS_URI</code></td>
+<td><em>(required, secret)</em></td>
+<td><code>mongodb+srv://...</code> connection string</td>
+</tr>
+<tr>
+<td><code>ATLAS_DB</code></td>
+<td><code>amazon</code></td>
+<td>Database name</td>
+</tr>
+<tr>
+<td><code>ATLAS_COLLECTION</code></td>
+<td><code>pdf_multimodal_chunks</code></td>
+<td>Collection to search</td>
+</tr>
+<tr>
+<td><code>ATLAS_VECTOR_INDEX</code></td>
+<td><code>aisearch_vector_index</code></td>
+<td>Atlas Vector Search index name</td>
+</tr>
+<tr>
+<td><code>ATLAS_SEARCH_INDEX</code></td>
+<td><code>default</code></td>
+<td>Atlas Search (Lucene) index for fulltext/hybrid</td>
+</tr>
+<tr>
+<td><code>ATLAS_TEXT_KEY</code></td>
+<td><code>raw_text</code></td>
+<td>Field holding chunk text</td>
+</tr>
+<tr>
+<td><code>ATLAS_EMBEDDING_KEY</code></td>
+<td><code>embedding</code></td>
+<td>Field holding the vector (empty ⇒ null, for auto mode)</td>
+</tr>
+<tr>
+<td><code>ATLAS_RELEVANCE_FN</code></td>
+<td><code>cosine</code></td>
+<td>Similarity function (empty ⇒ null, for auto mode)</td>
+</tr>
+<tr>
+<td><code>ATLAS_DIMENSIONS</code></td>
+<td><code>1024</code></td>
+<td>Vector dimensions — must match the index and the embedder (<code>-1</code> for auto mode)</td>
+</tr>
+</tbody>
+</table>
+<h3 id="embedding-provider-query-embeddings">Embedding provider (query embeddings)</h3>
+<p>Set <code>EMBEDDINGS_PROVIDER</code>. This deployment documents the AWS-native and
+MongoDB/Voyage options; other providers exist in code but are omitted here.</p>
+<table>
+<thead>
+<tr>
+<th>Provider</th>
+<th>Required / key env vars</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>voyageai</code> <em>(default)</em></td>
+<td><code>VOYAGE_API_KEY</code>, <code>EMBEDDINGS_MODEL</code> (<code>voyage-4</code>), <code>EMBEDDINGS_OUTPUT_DIMENSION</code> (<code>1024</code>)</td>
+</tr>
+<tr>
+<td><code>auto</code> (server-side)</td>
+<td><code>EMBEDDINGS_MODEL</code> only — Atlas embeds internally; no API key</td>
+</tr>
+<tr>
+<td><code>bedrock_titan</code></td>
+<td><code>EMBEDDINGS_MODEL</code>/model id (e.g. <code>amazon.titan-embed-text-v2:0</code>), <code>BEDROCK_REGION_NAME</code> — uses the runtime role's Bedrock access</td>
+</tr>
+</tbody>
+</table>
+<p><code>EMBEDDINGS_OUTPUT_DIMENSION</code> <strong>must equal</strong> <code>ATLAS_DIMENSIONS</code>.</p>
+<p>The <code>deploy.sh</code> guard only requires <code>VOYAGE_API_KEY</code> when
+<code>EMBEDDINGS_PROVIDER</code> is <code>voyageai</code> or <code>voyage_multimodal</code>; switch the provider
+and the key is no longer needed.</p>
+<h4 id="two-embedding-modes-must-match-your-atlas-index-type">Two embedding modes (must match your Atlas index type)</h4>
+<p>The container <strong>hard-fails at startup</strong> if the provider doesn't match the live
+index type (<code>ProviderIndexMismatch</code>). Pick one:</p>
+<ul>
+<li><strong>Mode A — client-side embeddings</strong> (default): the app embeds queries
+  (Voyage / Bedrock Titan). Requires a <code>vector</code>-type index. Keep
+  <code>ATLAS_EMBEDDING_KEY</code>, a real <code>ATLAS_DIMENSIONS</code>, and <code>ATLAS_RELEVANCE_FN</code> set.</li>
+<li><strong>Mode B — server-side AutoEmbeddings</strong>: Atlas embeds using the model declared
+  in an <code>autoEmbed</code>-type index. Set <code>EMBEDDINGS_PROVIDER=auto</code>,
+  <code>ATLAS_EMBEDDING_KEY=</code> (empty), <code>ATLAS_DIMENSIONS=-1</code>, <code>ATLAS_RELEVANCE_FN=</code>
+  (empty), and point <code>ATLAS_VECTOR_INDEX</code> at the autoEmbed index whose declared
+  <code>model</code> equals <code>EMBEDDINGS_MODEL</code>.</li>
+</ul>
+<p>Dev-only escape hatch: <code>SEARCHAAS_SKIP_PROVIDER_INDEX_CHECK=1</code> bypasses this
+validation. Do not use in production.</p>
+<h3 id="planner-llm-query-understanding-retrieval-planning">Planner LLM (query understanding + retrieval planning)</h3>
+<p>Set <code>PLANNER_LLM_PROVIDER</code>. This deployment uses AWS Bedrock; other providers
+exist in code but are omitted here.</p>
+<table>
+<thead>
+<tr>
+<th>Provider</th>
+<th>Key env vars</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>bedrock</code> <em>(default)</em></td>
+<td><code>BEDROCK_MODEL</code> (default Claude Haiku), <code>BEDROCK_REGION_NAME</code> (<code>us-east-1</code>), <code>BEDROCK_TEMPERATURE</code> (<code>0.1</code>) — no key needed; the runtime role grants <code>bedrock:InvokeModel</code></td>
+</tr>
+</tbody>
+</table>
+<p><code>PLANNER_DEFAULT_TOP_K</code> (default <code>20</code>) controls default candidate count.</p>
+<h3 id="retrieval-strategy">Retrieval strategy</h3>
+<table>
+<thead>
+<tr>
+<th>Env var</th>
+<th>Default</th>
+<th>Options / notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>RETRIEVAL_DEFAULT_STRATEGY</code></td>
+<td><code>hybrid</code></td>
+<td><code>vector</code>, <code>fulltext</code>, <code>hybrid</code>, <code>graph</code>, <code>parent_doc</code></td>
+</tr>
+<tr>
+<td><code>RETRIEVAL_HYBRID_VECTOR_WEIGHT</code></td>
+<td><code>0.6</code></td>
+<td>hybrid vector weight</td>
+</tr>
+<tr>
+<td><code>RETRIEVAL_HYBRID_FULLTEXT_WEIGHT</code></td>
+<td><code>0.4</code></td>
+<td>hybrid fulltext weight</td>
+</tr>
+<tr>
+<td><code>RETRIEVAL_VECTOR_NUM_CANDIDATES</code></td>
+<td><code>200</code></td>
+<td>vector oversampling</td>
+</tr>
+</tbody>
+</table>
+<blockquote>
+<p><code>hybrid</code> uses native <code>$rankFusion</code>, which requires <strong>MongoDB 8.0+</strong>.</p>
+</blockquote>
+<h3 id="logging">Logging</h3>
+<table>
+<thead>
+<tr>
+<th>Env var</th>
+<th>Default</th>
+<th>Purpose</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>LOG_LEVEL</code></td>
+<td><code>info</code></td>
+<td>Application log level</td>
+</tr>
+</tbody>
+</table>
+<h3 id="example-switch-to-server-side-autoembeddings">Example: switch to server-side AutoEmbeddings</h3>
+<div class="highlight"><pre><span></span><code><span class="nb">export</span><span class="w"> </span><span class="nv">ATLAS_URI</span><span class="o">=</span><span class="s1">&#39;mongodb+srv://USER:PASS@cluster.mongodb.net/?retryWrites=true&#39;</span>
+<span class="nb">export</span><span class="w"> </span><span class="nv">ATLAS_DB</span><span class="o">=</span><span class="s1">&#39;your_database_name&#39;</span>
+<span class="nb">export</span><span class="w"> </span><span class="nv">EMBEDDINGS_PROVIDER</span><span class="o">=</span>auto
+<span class="nb">export</span><span class="w"> </span><span class="nv">EMBEDDINGS_MODEL</span><span class="o">=</span>voyage-4<span class="w">          </span><span class="c1"># must equal the index&#39;s autoEmbed model</span>
+<span class="nb">export</span><span class="w"> </span><span class="nv">ATLAS_VECTOR_INDEX</span><span class="o">=</span>autoembed_index
+<span class="nb">export</span><span class="w"> </span><span class="nv">ATLAS_EMBEDDING_KEY</span><span class="o">=</span><span class="w">               </span><span class="c1"># empty ⇒ null</span>
+<span class="nb">export</span><span class="w"> </span><span class="nv">ATLAS_RELEVANCE_FN</span><span class="o">=</span><span class="w">                </span><span class="c1"># empty ⇒ null</span>
+<span class="nb">export</span><span class="w"> </span><span class="nv">ATLAS_DIMENSIONS</span><span class="o">=</span>-1
+./deployment/aws/agentcore/deploy.sh<span class="w"> </span>--yes<span class="w">   </span><span class="c1"># no VOYAGE_API_KEY needed</span>
+</code></pre></div>
+
+<h2 id="invoke-the-deployed-mcp-server">Invoke the deployed MCP server</h2>
+<p>AgentCore fronts the runtime with OAuth-style bearer auth. A minimal Python
+client using the MCP SDK:</p>
+<div class="highlight"><pre><span></span><code><span class="kn">import</span><span class="w"> </span><span class="nn">asyncio</span><span class="o">,</span><span class="w"> </span><span class="nn">os</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">mcp</span><span class="w"> </span><span class="kn">import</span> <span class="n">ClientSession</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">mcp.client.streamable_http</span><span class="w"> </span><span class="kn">import</span> <span class="n">streamablehttp_client</span>
+
+<span class="k">async</span> <span class="k">def</span><span class="w"> </span><span class="nf">main</span><span class="p">():</span>
+    <span class="n">arn</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">environ</span><span class="p">[</span><span class="s2">&quot;AGENT_ARN&quot;</span><span class="p">]</span>
+    <span class="n">token</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">environ</span><span class="p">[</span><span class="s2">&quot;BEARER_TOKEN&quot;</span><span class="p">]</span>
+    <span class="n">region</span> <span class="o">=</span> <span class="n">os</span><span class="o">.</span><span class="n">environ</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;AWS_REGION&quot;</span><span class="p">,</span> <span class="s2">&quot;us-east-1&quot;</span><span class="p">)</span>
+    <span class="n">encoded</span> <span class="o">=</span> <span class="n">arn</span><span class="o">.</span><span class="n">replace</span><span class="p">(</span><span class="s2">&quot;:&quot;</span><span class="p">,</span> <span class="s2">&quot;%3A&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">replace</span><span class="p">(</span><span class="s2">&quot;/&quot;</span><span class="p">,</span> <span class="s2">&quot;</span><span class="si">%2F</span><span class="s2">&quot;</span><span class="p">)</span>
+    <span class="n">url</span> <span class="o">=</span> <span class="sa">f</span><span class="s2">&quot;https://bedrock-agentcore.</span><span class="si">{</span><span class="n">region</span><span class="si">}</span><span class="s2">.amazonaws.com/runtimes/</span><span class="si">{</span><span class="n">encoded</span><span class="si">}</span><span class="s2">/invocations?qualifier=DEFAULT&quot;</span>
+    <span class="n">headers</span> <span class="o">=</span> <span class="p">{</span><span class="s2">&quot;authorization&quot;</span><span class="p">:</span> <span class="sa">f</span><span class="s2">&quot;Bearer </span><span class="si">{</span><span class="n">token</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">,</span> <span class="s2">&quot;Content-Type&quot;</span><span class="p">:</span> <span class="s2">&quot;application/json&quot;</span><span class="p">}</span>
+    <span class="k">async</span> <span class="k">with</span> <span class="n">streamablehttp_client</span><span class="p">(</span><span class="n">url</span><span class="p">,</span> <span class="n">headers</span><span class="p">,</span> <span class="n">timeout</span><span class="o">=</span><span class="mi">120</span><span class="p">,</span> <span class="n">terminate_on_close</span><span class="o">=</span><span class="kc">False</span><span class="p">)</span> <span class="k">as</span> <span class="p">(</span><span class="n">r</span><span class="p">,</span> <span class="n">w</span><span class="p">,</span> <span class="n">_</span><span class="p">):</span>
+        <span class="k">async</span> <span class="k">with</span> <span class="n">ClientSession</span><span class="p">(</span><span class="n">r</span><span class="p">,</span> <span class="n">w</span><span class="p">)</span> <span class="k">as</span> <span class="n">s</span><span class="p">:</span>
+            <span class="k">await</span> <span class="n">s</span><span class="o">.</span><span class="n">initialize</span><span class="p">()</span>
+            <span class="nb">print</span><span class="p">(</span><span class="k">await</span> <span class="n">s</span><span class="o">.</span><span class="n">list_tools</span><span class="p">())</span>          <span class="c1"># vector_search, hybrid_search, ...</span>
+            <span class="nb">print</span><span class="p">(</span><span class="k">await</span> <span class="n">s</span><span class="o">.</span><span class="n">call_tool</span><span class="p">(</span><span class="s2">&quot;hybrid_search&quot;</span><span class="p">,</span> <span class="p">{</span><span class="s2">&quot;query&quot;</span><span class="p">:</span> <span class="s2">&quot;best rated hotels&quot;</span><span class="p">,</span> <span class="s2">&quot;top_k&quot;</span><span class="p">:</span> <span class="mi">5</span><span class="p">}))</span>
+
+<span class="n">asyncio</span><span class="o">.</span><span class="n">run</span><span class="p">(</span><span class="n">main</span><span class="p">())</span>
+</code></pre></div>
+
+<p>Set up a Cognito user pool (or another OAuth IdP) to mint <code>BEARER_TOKEN</code>; see
+the "Set up Cognito user pool" appendix in the AWS AgentCore MCP docs.</p>
+<h2 id="tools-exposed">Tools exposed</h2>
+<p>Same tools as the ECS FastMCP service (they share <code>searchaas/mcp_server/server.py</code>):
+<code>vector_search</code>, <code>fulltext_search</code>, <code>hybrid_search</code>, <code>graph_search</code>,
+<code>parent_doc_search</code>, <code>metadata_search</code>, <code>auto_search</code>.</p>
+<h2 id="manage-tear-down">Manage / tear down</h2>
+<div class="highlight"><pre><span></span><code><span class="nv">RUNTIME_ID</span><span class="o">=</span>&lt;from<span class="w"> </span>the<span class="w"> </span>ARN,<span class="w"> </span>the<span class="w"> </span>part<span class="w"> </span>after<span class="w"> </span>runtime/&gt;
+
+<span class="c1"># Status</span>
+aws<span class="w"> </span>bedrock-agentcore-control<span class="w"> </span>get-agent-runtime<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--region<span class="w"> </span><span class="nv">$AWS_REGION</span><span class="w"> </span>--agent-runtime-id<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$RUNTIME_ID</span><span class="s2">&quot;</span>
+
+<span class="c1"># Delete</span>
+aws<span class="w"> </span>bedrock-agentcore-control<span class="w"> </span>delete-agent-runtime<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--region<span class="w"> </span><span class="nv">$AWS_REGION</span><span class="w"> </span>--agent-runtime-id<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$RUNTIME_ID</span><span class="s2">&quot;</span>
+</code></pre></div>
+
+<h2 id="notes-caveats">Notes / caveats</h2>
+<ul>
+<li><strong>CLI version.</strong> <code>bedrock-agentcore-control</code> is a recent service. If you get
+  <code>Invalid choice: 'bedrock-agentcore-control'</code>, update AWS CLI v2.</li>
+<li><strong>ARM64 is mandatory.</strong> A native <code>docker build</code> on an x86 host produces an
+  amd64 image that AgentCore rejects. The script always uses
+  <code>buildx --platform linux/arm64 --push</code>.</li>
+<li><strong>Secrets.</strong> <code>ATLAS_URI</code> and any provider keys you forward (<code>VOYAGE_API_KEY</code>,
+  <code>GOOGLE_API_KEY</code>, <code>OPENAI_API_KEY</code>, <code>AZURE_OPENAI_API_KEY</code>, <code>COHERE_API_KEY</code>,
+  <code>ANTHROPIC_API_KEY</code>) are passed as plaintext environment variables to the
+  runtime. For production, prefer wiring secrets through AgentCore's supported
+  secret mechanisms (or AWS Secrets Manager) rather than plaintext env vars.</li>
+<li><strong>Alternative: <code>agentcore</code> CLI.</strong> AWS also ships an <code>agentcore</code> toolkit
+  (<code>npm install -g @aws/agentcore</code>; <code>agentcore create --protocol MCP</code> →
+  <code>agentcore deploy</code>). This script uses the raw control-plane API instead so the
+  whole flow is scriptable and idempotent with no extra global tooling.</li>
+</ul>
+</main>
+<script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+<script>if (window.mermaid) mermaid.initialize({startOnLoad: true, theme: "neutral"});</script>
+</body>
+</html>

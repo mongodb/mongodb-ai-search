@@ -1,0 +1,217 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Employee Support Copilot · SearchaaS Docs</title>
+<link rel="stylesheet" href="../../../pages/assets/style.css">
+<link rel="stylesheet" href="../../../pages/assets/pygments.css">
+</head>
+<body>
+<header class="topbar">
+  <a class="brand" href="../../../index.html">SearchaaS Docs</a>
+  <a class="back" href="../../../index.html">← All docs</a>
+</header>
+<main class="content">
+<h1 id="employee-support-copilot">Employee Support Copilot</h1>
+<p>A production-style chat application that routes employee questions to the right MongoDB Atlas collection via SearchaaS, dynamically passing collection name and vector search configuration on every request.</p>
+<hr />
+<h2 id="architecture">Architecture</h2>
+<div class="highlight"><pre><span></span><code>Browser (Next.js UI)
+    │  POST /api/chat  { query, forceDomain? }
+    ▼
+BFF (Next.js API Route — /api/chat)
+    ├── classifier.ts   → domain + retrieval bias
+    ├── searchaas-client.ts → build payload + call SearchaaS
+    └── assembler.ts    → format answer + citations
+         │
+         │  POST /retrieve  { query, atlas: { collection, ... }, retrieval: { ... } }
+         ▼
+    SearchaaS (localhost:8000)
+         │
+         ▼
+    MongoDB Atlas
+         ├── IT_helpdesk          collection
+         └── employee_support     collection
+</code></pre></div>
+
+<p><strong>Key design principle:</strong> The frontend never touches MongoDB Atlas. All retrieval flows through SearchaaS, which receives full atlas overrides (collection name, vector index, search index, field keys) on every request. Switching collections is a config change only.</p>
+<hr />
+<h2 id="folder-structure">Folder structure</h2>
+<div class="highlight"><pre><span></span><code>agents/employee-support-copilot/
+├── src/
+│   ├── lib/
+│   │   ├── collections.ts        ← Collection registry + routing signals (edit here to add collections)
+│   │   ├── searchaas-client.ts   ← SearchaaS HTTP client + payload builder
+│   │   ├── classifier.ts         ← Keyword/pattern query classifier
+│   │   └── assembler.ts          ← Answer formatter + citation builder
+│   ├── app/
+│   │   ├── api/chat/route.ts     ← BFF POST /api/chat
+│   │   ├── chat/page.tsx         ← Chat page (client component)
+│   │   ├── layout.tsx
+│   │   ├── page.tsx              ← Redirects / → /chat
+│   │   └── globals.css
+│   ├── components/
+│   │   ├── ChatMessage.tsx       ← Renders user + assistant messages
+│   │   ├── CitationCard.tsx      ← Source citation chip
+│   │   └── ChatInput.tsx         ← Textarea + domain selector + suggestion chips
+│   └── types/
+│       └── chat.ts               ← Shared request/response types
+├── .env.local.example
+├── next.config.ts
+├── package.json
+├── tailwind.config.ts
+└── tsconfig.json
+</code></pre></div>
+
+<hr />
+<h2 id="quick-start">Quick start</h2>
+<h3 id="prerequisites">Prerequisites</h3>
+<ul>
+<li>Node.js 18+</li>
+<li>SearchaaS running at <code>http://localhost:8000</code> (see parent repo)</li>
+<li>MongoDB Atlas collections: <code>IT_helpdesk</code> and <code>employee_support</code> with Atlas Search + Vector Search indexes</li>
+</ul>
+<h3 id="run-searchaas-first">Run SearchaaS first</h3>
+<div class="highlight"><pre><span></span><code><span class="c1"># From the repo root</span>
+uvicorn<span class="w"> </span>searchaas.api.app:app<span class="w"> </span>--host<span class="w"> </span><span class="m">0</span>.0.0.0<span class="w"> </span>--port<span class="w"> </span><span class="m">8000</span><span class="w"> </span>--reload
+</code></pre></div>
+
+<h3 id="run-the-copilot">Run the copilot</h3>
+<div class="highlight"><pre><span></span><code><span class="nb">cd</span><span class="w"> </span>agents/employee-support-copilot
+cp<span class="w"> </span>.env.local.example<span class="w"> </span>.env.local
+<span class="c1"># Edit .env.local if needed (default points to localhost:8000)</span>
+
+npm<span class="w"> </span>install
+npm<span class="w"> </span>run<span class="w"> </span>dev
+</code></pre></div>
+
+<p>Open <a href="http://localhost:3000/chat">http://localhost:3000/chat</a>.</p>
+<hr />
+<h2 id="searchaas-request-shape">SearchaaS request shape</h2>
+<p>Every query is translated to:</p>
+<div class="highlight"><pre><span></span><code><span class="p">{</span>
+<span class="w">  </span><span class="nt">&quot;query&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;My VPN is not connecting&quot;</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;top_k&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">8</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;atlas&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="nt">&quot;collection&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;IT_helpdesk&quot;</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">&quot;vector_index&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;it_helpdesk_vector_index&quot;</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">&quot;search_index&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;it_helpdesk_search_index&quot;</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">&quot;text_key&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;text&quot;</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">&quot;embedding_key&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;embedding&quot;</span>
+<span class="w">  </span><span class="p">},</span>
+<span class="w">  </span><span class="nt">&quot;retrieval&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="nt">&quot;vector_weight&quot;</span><span class="p">:</span><span class="w"> </span><span class="mf">0.55</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">&quot;fulltext_weight&quot;</span><span class="p">:</span><span class="w"> </span><span class="mf">0.45</span><span class="p">,</span>
+<span class="w">    </span><span class="nt">&quot;num_candidates&quot;</span><span class="p">:</span><span class="w"> </span><span class="mi">150</span>
+<span class="w">  </span><span class="p">},</span>
+<span class="w">  </span><span class="nt">&quot;summarize&quot;</span><span class="p">:</span><span class="w"> </span><span class="kc">false</span><span class="p">,</span>
+<span class="w">  </span><span class="nt">&quot;understand&quot;</span><span class="p">:</span><span class="w"> </span><span class="kc">false</span>
+<span class="p">}</span>
+</code></pre></div>
+
+<hr />
+<h2 id="collection-routing-rules">Collection routing rules</h2>
+<table>
+<thead>
+<tr>
+<th>Signal</th>
+<th>Routed to</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>VPN, laptop, MFA, SSO, Outlook, printer, device, password reset, software</td>
+<td><code>IT_helpdesk</code></td>
+</tr>
+<tr>
+<td>Leave, payroll, salary, travel policy, benefits, HR, holiday, promotion</td>
+<td><code>employee_support</code></td>
+</tr>
+<tr>
+<td>Low-confidence / ambiguous</td>
+<td>Both collections (parallel fan-out, best answer wins)</td>
+</tr>
+</tbody>
+</table>
+<p>Retrieval bias:
+- <strong>Vector-heavy</strong> (0.75/0.25) — fuzzy/semantic questions: "my laptop is acting weird"
+- <strong>Fulltext-heavy</strong> (0.3/0.7) — exact-lookup questions: "travel reimbursement cap"
+- <strong>Auto</strong> — everything else (collection default weights)</p>
+<hr />
+<h2 id="adding-a-third-collection">Adding a third collection</h2>
+<ol>
+<li>Open <code>src/lib/collections.ts</code></li>
+<li>Add a new key to <code>COLLECTION_CONFIGS</code> with the collection's MongoDB name, index names, field keys, and badge styling.</li>
+<li>Add keyword patterns to <code>DOMAIN_SIGNALS</code> for the new key.</li>
+<li>That's it — the classifier, client, assembler, and UI all pick it up automatically.</li>
+</ol>
+<div class="highlight"><pre><span></span><code><span class="c1">// Example: legal_compliance collection</span>
+<span class="nx">legal_compliance</span><span class="o">:</span><span class="w"> </span><span class="p">{</span>
+<span class="w">  </span><span class="nx">label</span><span class="o">:</span><span class="w"> </span><span class="s2">&quot;Legal &amp; Compliance&quot;</span><span class="p">,</span>
+<span class="w">  </span><span class="nx">collection</span><span class="o">:</span><span class="w"> </span><span class="s2">&quot;legal_compliance&quot;</span><span class="p">,</span>
+<span class="w">  </span><span class="nx">vectorIndex</span><span class="o">:</span><span class="w"> </span><span class="s2">&quot;legal_vector_index&quot;</span><span class="p">,</span>
+<span class="w">  </span><span class="nx">searchIndex</span><span class="o">:</span><span class="w"> </span><span class="s2">&quot;legal_search_index&quot;</span><span class="p">,</span>
+<span class="w">  </span><span class="nx">textKey</span><span class="o">:</span><span class="w"> </span><span class="s2">&quot;text&quot;</span><span class="p">,</span>
+<span class="w">  </span><span class="nx">embeddingKey</span><span class="o">:</span><span class="w"> </span><span class="s2">&quot;embedding&quot;</span><span class="p">,</span>
+<span class="w">  </span><span class="c1">// ...</span>
+<span class="p">}</span>
+</code></pre></div>
+
+<hr />
+<h2 id="sample-user-journeys">Sample user journeys</h2>
+<h3 id="journey-1-clear-it-issue">Journey 1 — Clear IT issue</h3>
+<blockquote>
+<p>"VPN is not connecting on my Mac"</p>
+</blockquote>
+<ul>
+<li>Classifier: <code>IT_helpdesk</code> (confidence ~90%), bias: <code>auto</code></li>
+<li>SearchaaS payload: <code>collection: IT_helpdesk, vector_index: it_helpdesk_vector_index</code></li>
+<li>Response: top VPN troubleshooting chunks + source citations</li>
+</ul>
+<h3 id="journey-2-clear-hr-question">Journey 2 — Clear HR question</h3>
+<blockquote>
+<p>"What is the leave policy for new joiners?"</p>
+</blockquote>
+<ul>
+<li>Classifier: <code>employee_support</code> (confidence ~85%), bias: <code>fulltext-heavy</code></li>
+<li>SearchaaS payload: <code>collection: employee_support, fulltext_weight: 0.7</code></li>
+<li>Response: leave policy document chunks</li>
+</ul>
+<h3 id="journey-3-ambiguous-dual-domain">Journey 3 — Ambiguous / dual-domain</h3>
+<blockquote>
+<p>"How do I get remote access while travelling internationally?"</p>
+</blockquote>
+<ul>
+<li>Classifier: ambiguous (~52% IT, ~48% HR), bias: <code>vector-heavy</code></li>
+<li>Fan-out: both collections queried in parallel</li>
+<li>Response: sectioned answer — IT remote access steps + HR travel policy</li>
+</ul>
+<hr />
+<h2 id="environment-variables">Environment variables</h2>
+<table>
+<thead>
+<tr>
+<th>Variable</th>
+<th>Default</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>SEARCHAAS_BASE_URL</code></td>
+<td><code>http://localhost:8000</code></td>
+<td>SearchaaS base URL</td>
+</tr>
+<tr>
+<td><code>SEARCHAAS_API_KEY</code></td>
+<td><em>(empty)</em></td>
+<td>Bearer token if SearchaaS requires auth</td>
+</tr>
+</tbody>
+</table>
+</main>
+<script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+<script>if (window.mermaid) mermaid.initialize({startOnLoad: true, theme: "neutral"});</script>
+</body>
+</html>

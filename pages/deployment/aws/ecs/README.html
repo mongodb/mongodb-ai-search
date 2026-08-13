@@ -1,0 +1,442 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Deploy on Amazon ECS Express Mode · SearchaaS Docs</title>
+<link rel="stylesheet" href="../../../../pages/assets/style.css">
+<link rel="stylesheet" href="../../../../pages/assets/pygments.css">
+</head>
+<body>
+<header class="topbar">
+  <a class="brand" href="../../../../index.html">SearchaaS Docs</a>
+  <a class="back" href="../../../../index.html">← All docs</a>
+</header>
+<main class="content">
+<h1 id="deploy-on-amazon-ecs-express-mode">Deploy on Amazon ECS Express Mode</h1>
+<p>Uses <strong><code>aws ecs create-express-gateway-service</code></strong> (<a href="https://docs.aws.amazon.com/AmazonECS/latest/developerguide/express-service-getting-started.html">docs</a>).
+One service per process:</p>
+<ul>
+<li><strong>FastAPI</strong> → <code>searchaas-fastapi</code> → <code>https://searchaas-fastapi.ecs.&lt;region&gt;.on.aws</code></li>
+<li><strong>FastMCP</strong> (streamable-http) → <code>searchaas-fastmcp</code> → <code>https://searchaas-fastmcp.ecs.&lt;region&gt;.on.aws</code></li>
+</ul>
+<blockquote>
+<p>Express Mode auto-provisions an internet-facing ALB + HTTPS URL per service.
+You can't opt out of the ALB in Express Mode — if that's a blocker, drop to
+plain Fargate.</p>
+</blockquote>
+<h2 id="files">Files</h2>
+<table>
+<thead>
+<tr>
+<th>File</th>
+<th>Purpose</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>primary-container-fastapi.json</code></td>
+<td><code>--primary-container</code> payload, FastAPI on <code>:8000</code>, command <code>uvicorn ...</code></td>
+</tr>
+<tr>
+<td><code>primary-container-fastmcp.json</code></td>
+<td><code>--primary-container</code> payload, FastMCP on <code>:8001</code>, command <code>python -m searchaas.mcp_server.server</code></td>
+</tr>
+<tr>
+<td><code>deploy.sh</code></td>
+<td>End-to-end: IAM roles → ECR push → create/update both services</td>
+</tr>
+<tr>
+<td><code>teardown.sh</code></td>
+<td>Deletes both services; <code>--purge</code> also drops the ECR repos + task role</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Two separate images / two ECR repos</strong> — <code>searchaas-fastapi</code> (built from
+<code>Dockerfile.fastapi</code>) and <code>searchaas-fastmcp</code> (built from <code>Dockerfile.fastmcp</code>).
+Each payload's <code>command</code> field pins the entrypoint for its image.</p>
+<h2 id="run-it">Run it</h2>
+<div class="highlight"><pre><span></span><code><span class="nb">export</span><span class="w"> </span><span class="nv">AWS_REGION</span><span class="o">=</span>us-east-1
+<span class="nb">export</span><span class="w"> </span><span class="nv">ATLAS_URI</span><span class="o">=</span><span class="s1">&#39;mongodb+srv://USER:PASS@cluster.mongodb.net/?retryWrites=true&#39;</span>
+<span class="nb">export</span><span class="w"> </span><span class="nv">ATLAS_DB</span><span class="o">=</span><span class="s1">&#39;your_database_name&#39;</span><span class="w">   </span><span class="c1"># required — the Atlas database holding the chunks collection</span>
+
+<span class="c1"># Optional — each defaults to the value baked into searchaas/config/searchaas.yaml</span>
+<span class="nb">export</span><span class="w"> </span><span class="nv">ATLAS_COLLECTION</span><span class="o">=</span><span class="s1">&#39;retail&#39;</span>
+<span class="nb">export</span><span class="w"> </span><span class="nv">EMBEDDINGS_PROVIDER</span><span class="o">=</span><span class="s1">&#39;auto&#39;</span><span class="w">      </span><span class="c1"># server-side AutoEmbeddings (no API key)</span>
+<span class="nb">export</span><span class="w"> </span><span class="nv">EMBEDDINGS_MODEL</span><span class="o">=</span><span class="s1">&#39;voyage-4&#39;</span><span class="w">     </span><span class="c1"># must equal the autoEmbed model on the index</span>
+<span class="nb">export</span><span class="w"> </span><span class="nv">CORS_ORIGINS</span><span class="o">=</span><span class="s1">&#39;*&#39;</span>
+
+<span class="c1"># Any OTHER env var: add it to the &quot;environment&quot; array in BOTH</span>
+<span class="c1"># primary-container-*.json files before running, e.g.</span>
+<span class="c1">#   { &quot;name&quot;: &quot;VOYAGE_API_KEY&quot;, &quot;value&quot;: &quot;pa-...&quot; }</span>
+
+./deployment/aws/ecs/deploy.sh
+</code></pre></div>
+
+<p>What the script does (idempotent — safe to re-run):</p>
+<ol>
+<li>Creates <code>ecsTaskExecutionRole</code>, <code>ecsInfrastructureRoleForExpressServices</code>, and <code>searchaas-task-role</code> if missing, attaches the two AWS-managed policies, and puts an inline <code>BedrockInvoke</code> policy on the task role (the planner LLM defaults to Bedrock).</li>
+<li>Creates the <code>searchaas-fastapi</code> and <code>searchaas-fastmcp</code> ECR repos if missing, builds <strong>both</strong> images for <code>linux/amd64</code>, pushes <code>:latest</code>.</li>
+<li>Renders the two <code>primary-container-*.json</code> files, substituting <code>&lt;ACCOUNT_ID&gt;</code>, <code>&lt;REGION&gt;</code>, <code>&lt;ATLAS_URI&gt;</code>, <code>&lt;ATLAS_DB&gt;</code>, <code>&lt;ATLAS_COLLECTION&gt;</code>, <code>&lt;CORS_ORIGINS&gt;</code>, <code>&lt;EMBEDDINGS_PROVIDER&gt;</code>, <code>&lt;EMBEDDINGS_MODEL&gt;</code>.</li>
+<li>Calls <code>aws ecs create-express-gateway-service</code> (or <code>update-...</code> if the service already exists) for each one with <code>--monitor-resources</code> so you watch provisioning in real time.</li>
+<li>Prints the two <code>https://...ecs.&lt;region&gt;.on.aws</code> URLs.</li>
+</ol>
+<h2 id="configuration-options">Configuration options</h2>
+<p>Everything in <code>searchaas/config/searchaas.yaml</code> uses <code>${VAR:-default}</code> syntax, so
+you configure the services purely with <strong>environment variables</strong> — no image
+rebuild. On ECS, <code>deploy.sh</code> substitutes <code>&lt;ATLAS_URI&gt;</code>, <code>&lt;ATLAS_DB&gt;</code>,
+<code>&lt;ATLAS_COLLECTION&gt;</code>, <code>&lt;CORS_ORIGINS&gt;</code>, <code>&lt;EMBEDDINGS_PROVIDER&gt;</code>, and
+<code>&lt;EMBEDDINGS_MODEL&gt;</code>. To change any other option below, add it to the
+<code>environment</code> array in <strong>both</strong> container payloads (they share one config file):</p>
+<ul>
+<li><code>deployment/aws/ecs/primary-container-fastapi.json</code></li>
+<li><code>deployment/aws/ecs/primary-container-fastmcp.json</code></li>
+</ul>
+<div class="highlight"><pre><span></span><code>// inside &quot;environment&quot;: [ ... ]
+{ &quot;name&quot;: &quot;EMBEDDINGS_PROVIDER&quot;, &quot;value&quot;: &quot;auto&quot; },
+{ &quot;name&quot;: &quot;ATLAS_VECTOR_INDEX&quot;,  &quot;value&quot;: &quot;autoembed_index&quot; },
+{ &quot;name&quot;: &quot;ATLAS_DIMENSIONS&quot;,    &quot;value&quot;: &quot;-1&quot; }
+</code></pre></div>
+
+<p>Anything you leave unset falls back to the default baked into
+<code>searchaas/config/searchaas.yaml</code>. Do <strong>not</strong> commit filled-in secret values —
+keep placeholders in git (see Caveats).</p>
+<blockquote>
+<p><strong>Do not override the container wiring</strong> already set in the JSON files:
+<code>PYTHONUNBUFFERED</code>, <code>PYTHONPATH</code>, <code>SEARCHAAS_CONFIG</code>, <code>AWS_REGION</code> /
+<code>AWS_DEFAULT_REGION</code> (boto3 needs one of these to reach Bedrock — there is no
+<code>region_name</code> in the YAML planner block), and the container ports (<code>8000</code>
+FastAPI / <code>8001</code> FastMCP). CORS is set via <code>SEARCHAAS_CORS_ORIGINS</code>
+(see the <a href="#cors">CORS</a> section).</p>
+</blockquote>
+<h3 id="atlas-connection-index">Atlas connection &amp; index</h3>
+<p>Defaults below are the ones in <code>searchaas/config/searchaas.yaml</code> — that file is
+authored for <strong>Mode B (server-side AutoEmbeddings)</strong>.</p>
+<table>
+<thead>
+<tr>
+<th>Env var</th>
+<th>Default</th>
+<th>Purpose</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>ATLAS_URI</code></td>
+<td><em>(required, secret)</em></td>
+<td><code>mongodb+srv://...</code> connection string</td>
+</tr>
+<tr>
+<td><code>ATLAS_DB</code></td>
+<td><code>kaggle_dataset</code></td>
+<td>Database name</td>
+</tr>
+<tr>
+<td><code>ATLAS_COLLECTION</code></td>
+<td><code>retail</code></td>
+<td>Collection to search</td>
+</tr>
+<tr>
+<td><code>ATLAS_VECTOR_INDEX</code></td>
+<td><code>vector_index</code></td>
+<td>Atlas Vector Search index name</td>
+</tr>
+<tr>
+<td><code>ATLAS_SEARCH_INDEX</code></td>
+<td><code>default</code></td>
+<td>Atlas Search (Lucene) index for fulltext/hybrid</td>
+</tr>
+<tr>
+<td><code>ATLAS_TEXT_KEY</code></td>
+<td><code>raw_text</code></td>
+<td>Field holding chunk text (= the <code>autoEmbed</code> path)</td>
+</tr>
+<tr>
+<td><code>ATLAS_EMBEDDING_KEY</code></td>
+<td><em>(empty ⇒ null)</em></td>
+<td>Field holding the vector — set only in client-side mode</td>
+</tr>
+<tr>
+<td><code>ATLAS_RELEVANCE_FN</code></td>
+<td><em>(empty ⇒ null)</em></td>
+<td>Similarity function — set only in client-side mode</td>
+</tr>
+<tr>
+<td><code>ATLAS_DIMENSIONS</code></td>
+<td><code>-1</code></td>
+<td>Vector dimensions — must match the index and the embedder (<code>-1</code> in auto mode)</td>
+</tr>
+</tbody>
+</table>
+<p>The YAML also carries <code>atlas.vector_index_definition</code> /
+<code>search_index_definition</code>, pasted from the Atlas UI. These are <strong>not</strong>
+env-overridable and drive the filter allow-list — if you point the deployment at
+a different index, update them in the YAML or <code>$vectorSearch</code> pre-filters will
+be silently dropped.</p>
+<h3 id="embedding-provider-query-embeddings">Embedding provider (query embeddings)</h3>
+<p>Set <code>EMBEDDINGS_PROVIDER</code> (rendered from the env var of the same name).</p>
+<table>
+<thead>
+<tr>
+<th>Provider</th>
+<th>Required / key env vars</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>auto</code> <em>(default)</em></td>
+<td><code>EMBEDDINGS_MODEL</code> only — Atlas embeds internally; no API key</td>
+</tr>
+<tr>
+<td><code>voyageai</code></td>
+<td><code>VOYAGE_API_KEY</code>, <code>EMBEDDINGS_MODEL</code> (<code>voyage-4</code>), <code>EMBEDDINGS_OUTPUT_DIMENSION</code></td>
+</tr>
+<tr>
+<td><code>bedrock_titan</code></td>
+<td>⚠️ needs a YAML edit — see below</td>
+</tr>
+</tbody>
+</table>
+<blockquote>
+<p>⚠️ <strong><code>bedrock_titan</code> is not switchable by env var today.</strong> The YAML
+<code>embeddings.config</code> block only defines <code>model</code> and <code>voyage_api_key</code>, and
+<code>langchain_aws.BedrockEmbeddings</code> rejects both (<code>extra_forbidden</code>) — the
+container dies at startup with a pydantic <code>ValidationError</code>. To use Titan,
+first change <code>embeddings.config</code> in <code>searchaas.yaml</code> to <code>model_id</code> +
+<code>region_name</code>, then set <code>EMBEDDINGS_PROVIDER=bedrock_titan</code>. The task role
+already grants <code>bedrock:InvokeModel</code>.</p>
+</blockquote>
+<p>For the <code>voyageai</code> provider, add <code>VOYAGE_API_KEY</code> to the <code>environment</code> arrays.
+In <code>auto</code> mode no embedding key is needed at all.</p>
+<h4 id="two-embedding-modes-must-match-your-atlas-index-type">Two embedding modes (must match your Atlas index type)</h4>
+<p>The container <strong>hard-fails at startup</strong> if the provider doesn't match the live
+index type (<code>ProviderIndexMismatch</code>). Pick one:</p>
+<ul>
+<li><strong>Mode B — server-side AutoEmbeddings</strong> <em>(default)</em>: Atlas embeds using the
+  model declared in an <code>autoEmbed</code>-type index. <code>EMBEDDINGS_PROVIDER=auto</code>,
+  <code>ATLAS_EMBEDDING_KEY=</code> (empty), <code>ATLAS_DIMENSIONS=-1</code>, <code>ATLAS_RELEVANCE_FN=</code>
+  (empty), and <code>ATLAS_VECTOR_INDEX</code> pointing at an autoEmbed index whose declared
+  <code>model</code> equals <code>EMBEDDINGS_MODEL</code>. This is what <code>searchaas.yaml</code> ships with.</li>
+<li><strong>Mode A — client-side embeddings</strong>: the app embeds queries (Voyage / Bedrock
+  Titan). Requires a <code>vector</code>-type index. Set <code>ATLAS_EMBEDDING_KEY</code>, a real
+  <code>ATLAS_DIMENSIONS</code>, and <code>ATLAS_RELEVANCE_FN</code> (e.g. <code>cosine</code>) — plus the
+  provider's own key.</li>
+</ul>
+<p>Dev-only escape hatch: <code>SEARCHAAS_SKIP_PROVIDER_INDEX_CHECK=1</code> bypasses this
+validation. Do not use in production.</p>
+<h3 id="planner-llm-query-understanding-retrieval-planning">Planner LLM (query understanding + retrieval planning)</h3>
+<p>Set <code>PLANNER_LLM_PROVIDER</code>. This deployment uses AWS Bedrock; other providers
+exist in code but are omitted here.</p>
+<table>
+<thead>
+<tr>
+<th>Env var</th>
+<th>Default</th>
+<th>Purpose</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>PLANNER_LLM_PROVIDER</code></td>
+<td><code>bedrock</code></td>
+<td>No key needed — the task role grants <code>bedrock:InvokeModel</code></td>
+</tr>
+<tr>
+<td><code>PLANNER_MODEL</code></td>
+<td><code>global.anthropic.claude-haiku-4-5-20251001-v1:0</code></td>
+<td>Bedrock model / inference-profile id</td>
+</tr>
+<tr>
+<td><code>PLANNER_TEMPERATURE</code></td>
+<td><code>0.0</code></td>
+<td></td>
+</tr>
+<tr>
+<td><code>PLANNER_DEFAULT_TOP_K</code></td>
+<td><code>10</code></td>
+<td>Default candidate count</td>
+</tr>
+<tr>
+<td><code>LLM_TIMEOUT_S</code></td>
+<td><code>5.0</code></td>
+<td>Hard deadline per LLM call in the QU layer + planner; on timeout the request falls back to safe defaults and still returns Atlas results. <code>0</code> disables.</td>
+</tr>
+<tr>
+<td><code>ENABLE_SUMMARIZATION</code></td>
+<td><code>false</code></td>
+<td>LLM summary of retrieved results — adds latency and cost. Can also be set per-request via <code>summarize</code>.</td>
+</tr>
+</tbody>
+</table>
+<blockquote>
+<p>The planner block has <strong>no <code>region_name</code></strong>, so boto3 resolves the Bedrock
+region from <code>AWS_REGION</code> / <code>AWS_DEFAULT_REGION</code>. Both are set in the container
+payloads; removing them breaks the planner with <code>NoRegionError</code>.</p>
+</blockquote>
+<h3 id="retrieval-strategy">Retrieval strategy</h3>
+<table>
+<thead>
+<tr>
+<th>Env var</th>
+<th>Default</th>
+<th>Options / notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>RETRIEVAL_DEFAULT_STRATEGY</code></td>
+<td><code>hybrid</code></td>
+<td><code>vector</code>, <code>fulltext</code>, <code>hybrid</code>, <code>graph</code>, <code>parent_doc</code>, <code>metadata</code></td>
+</tr>
+<tr>
+<td><code>RETRIEVAL_HYBRID_VECTOR_WEIGHT</code></td>
+<td><code>0.6</code></td>
+<td>hybrid vector weight</td>
+</tr>
+<tr>
+<td><code>RETRIEVAL_HYBRID_FULLTEXT_WEIGHT</code></td>
+<td><code>0.4</code></td>
+<td>hybrid fulltext weight</td>
+</tr>
+<tr>
+<td><code>RETRIEVAL_VECTOR_NUM_CANDIDATES</code></td>
+<td><code>100</code></td>
+<td>vector oversampling</td>
+</tr>
+<tr>
+<td><code>MAX_TIME_MS</code></td>
+<td><code>5000</code></td>
+<td>Server-side kill switch — Atlas aborts any aggregation exceeding this. <code>0</code> disables.</td>
+</tr>
+</tbody>
+</table>
+<blockquote>
+<p><code>hybrid</code> uses native <code>$rankFusion</code>, which requires <strong>MongoDB 8.0+</strong>.</p>
+<p>Only <code>auto</code>, <code>vector</code>, <code>hybrid</code>, and <code>parent_doc</code> build the vector store at
+startup. A <code>graph</code>/<code>fulltext</code>/<code>metadata</code> default strategy defers it, so no
+vector index is auto-created on the collection until a vector-needing request
+arrives (<code>searchaas/app/bootstrap.py</code>).</p>
+</blockquote>
+<h3 id="logging">Logging</h3>
+<table>
+<thead>
+<tr>
+<th>Env var</th>
+<th>Default</th>
+<th>Purpose</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>LOG_LEVEL</code></td>
+<td><code>info</code></td>
+<td>Application log level</td>
+</tr>
+</tbody>
+</table>
+<h3 id="example-switch-to-client-side-voyage-embeddings-mode-a">Example: switch to client-side Voyage embeddings (Mode A)</h3>
+<p><code>auto</code> is the shipped default, so no extra vars are needed for Mode B. To move to
+client-side Voyage embeddings, run with <code>EMBEDDINGS_PROVIDER=voyageai</code> and add
+these to the <code>environment</code> array in <strong>both</strong> <code>primary-container-*.json</code> files:</p>
+<div class="highlight"><pre><span></span><code>{ &quot;name&quot;: &quot;VOYAGE_API_KEY&quot;,      &quot;value&quot;: &quot;pa-...&quot; },
+{ &quot;name&quot;: &quot;ATLAS_VECTOR_INDEX&quot;,  &quot;value&quot;: &quot;voyage_vector_index&quot; },  // a `vector`-type index
+{ &quot;name&quot;: &quot;ATLAS_EMBEDDING_KEY&quot;, &quot;value&quot;: &quot;embedding&quot; },            // == the index `path`
+{ &quot;name&quot;: &quot;ATLAS_RELEVANCE_FN&quot;,  &quot;value&quot;: &quot;cosine&quot; },
+{ &quot;name&quot;: &quot;ATLAS_DIMENSIONS&quot;,    &quot;value&quot;: &quot;1024&quot; },                 // == index numDimensions
+{ &quot;name&quot;: &quot;EMBEDDINGS_OUTPUT_DIMENSION&quot;, &quot;value&quot;: &quot;1024&quot; }          // MUST equal ATLAS_DIMENSIONS
+</code></pre></div>
+
+<h2 id="service-config-defaults-set-in-deploysh">Service config (defaults set in <code>deploy.sh</code>)</h2>
+<table>
+<thead>
+<tr>
+<th>Setting</th>
+<th>Value</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>CPU / memory</td>
+<td><code>2048</code> / <code>4096</code> (= 2 vCPU / 4 GiB)</td>
+<td><strong>Units are Fargate CPU units (1024 = 1 vCPU) and MiB</strong>, NOT vCPUs/GB. The AWS docs example <code>--cpu 2 --memory 4</code> is misleading and produces <code>Invalid CPU/Memory combination</code>. Valid pairs include <code>1024/2048</code>, <code>2048/4096</code>, <code>2048/8192</code>, <code>4096/8192</code>, <code>4096/16384</code>.</td>
+</tr>
+<tr>
+<td>Min / max tasks</td>
+<td>1 / 3</td>
+<td>Express Mode autoscales on CPU</td>
+</tr>
+<tr>
+<td>Health check</td>
+<td><code>/health</code> (FastAPI), <code>/healthz</code> (FastMCP)</td>
+<td><code>/healthz</code> was added to <code>searchaas/mcp_server/server.py</code> because <code>/mcp</code> requires an SSE handshake</td>
+</tr>
+<tr>
+<td>Container port</td>
+<td><code>8000</code> / <code>8001</code></td>
+<td>Express Mode terminates TLS at the ALB → forwards plain HTTP to the container</td>
+</tr>
+</tbody>
+</table>
+<h2 id="cors">CORS</h2>
+<p>Both services read <code>SEARCHAAS_CORS_ORIGINS</code> (comma-separated list, or <code>*</code> for all)
+in addition to the built-in localhost regex. The deploy script defaults to <code>*</code>
+during initial setup. To lock it down, re-run with your real origins:</p>
+<div class="highlight"><pre><span></span><code><span class="nv">CORS_ORIGINS</span><span class="o">=</span><span class="s2">&quot;https://app.example.com,https://ui.example.com&quot;</span><span class="w"> </span><span class="se">\</span>
+<span class="nv">ATLAS_URI</span><span class="o">=</span><span class="s2">&quot;...&quot;</span><span class="w"> </span><span class="se">\</span>
+./deployment/aws/ecs/deploy.sh
+</code></pre></div>
+
+<p>If a preflight is rejected you'll now see a one-line warning in the FastAPI
+container logs:</p>
+<div class="highlight"><pre><span></span><code>CORS PREFLIGHT REJECTED: origin=&#39;http://...&#39; method=POST path=/retrieve status=400.
+Add this origin to SEARCHAAS_CORS_ORIGINS env var (comma-separated) ...
+</code></pre></div>
+
+<h2 id="useful-commands">Useful commands</h2>
+<div class="highlight"><pre><span></span><code><span class="c1"># Watch a deploy</span>
+aws<span class="w"> </span>ecs<span class="w"> </span>monitor-express-gateway-service<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--service-arn<span class="w"> </span>arn:aws:ecs:<span class="nv">$AWS_REGION</span>:&lt;ACCOUNT_ID&gt;:service/default/searchaas-fastapi
+
+<span class="c1"># Inspect</span>
+aws<span class="w"> </span>ecs<span class="w"> </span>describe-express-gateway-service<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--service-arn<span class="w"> </span>arn:aws:ecs:<span class="nv">$AWS_REGION</span>:&lt;ACCOUNT_ID&gt;:service/default/searchaas-fastmcp
+
+<span class="c1"># Get the public URL. NOTE: there is no top-level `service.url` field —</span>
+<span class="c1"># the hostname lives under activeConfigurations[0].ingressPaths[0].endpoint.</span>
+aws<span class="w"> </span>ecs<span class="w"> </span>describe-express-gateway-service<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--service-arn<span class="w"> </span>arn:aws:ecs:<span class="nv">$AWS_REGION</span>:&lt;ACCOUNT_ID&gt;:service/default/searchaas-fastapi<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--query<span class="w"> </span><span class="s1">&#39;service.activeConfigurations[0].ingressPaths[0].endpoint&#39;</span><span class="w"> </span>--output<span class="w"> </span>text
+
+<span class="c1"># Check what config a running service actually loaded</span>
+curl<span class="w"> </span>-s<span class="w"> </span>https://&lt;endpoint&gt;/settings<span class="w"> </span><span class="p">|</span><span class="w"> </span>jq<span class="w"> </span>.
+
+<span class="c1"># Tear down</span>
+aws<span class="w"> </span>ecs<span class="w"> </span>delete-express-gateway-service<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--service-arn<span class="w"> </span>arn:aws:ecs:<span class="nv">$AWS_REGION</span>:&lt;ACCOUNT_ID&gt;:service/default/searchaas-fastapi<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--monitor-resources
+</code></pre></div>
+
+<h2 id="apple-silicon-cross-architecture-builds">Apple Silicon / cross-architecture builds</h2>
+<p>The script uses <code>docker buildx build --platform linux/amd64 --push</code>. This is
+mandatory on M1/M2/M3 Macs — without it, a native <code>docker build</code> produces an
+<strong>arm64</strong> image, and ECS Fargate (x86_64 by default) crashes the container with:</p>
+<div class="highlight"><pre><span></span><code>exec /usr/local/bin/python: exec format error
+</code></pre></div>
+
+<p>If you want to run on Graviton (arm64) Fargate instead, change the platform
+to <code>linux/arm64</code> and add <code>"runtimePlatform": {"cpuArchitecture": "ARM64"}</code> to
+your task config — but Express Mode currently provisions x86_64 tasks, so
+stick with <code>linux/amd64</code>.</p>
+<h2 id="caveats">Caveats</h2>
+<ul>
+<li><strong><code>searchaas.yaml</code> is baked into the image</strong> (<code>COPY searchaas/ ./searchaas/</code>), so a running service keeps serving the YAML defaults from whenever it was last built. Editing the YAML in git changes nothing until you re-run <code>deploy.sh</code>. <code>curl https://&lt;endpoint&gt;/settings</code> shows what a live service actually loaded — compare it against the repo before assuming they match.</li>
+<li>The Express Mode CLI commands (<code>create-express-gateway-service</code>, etc.) require a recent AWS CLI v2 release. If you get <code>Invalid choice</code>, run <code>aws --version</code> and update.</li>
+<li>Plain <code>environment</code> values are visible in <code>DescribeService</code> output and the ECS console. You explicitly chose env vars over Secrets Manager — fine, just don't commit a filled-in <code>primary-container-*.json</code> to git.</li>
+<li><code>ATLAS_URI</code> is injected by <code>deploy.sh</code> at render time; the committed JSON only has the <code>&lt;ATLAS_URI&gt;</code> placeholder.</li>
+</ul>
+</main>
+<script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+<script>if (window.mermaid) mermaid.initialize({startOnLoad: true, theme: "neutral"});</script>
+</body>
+</html>

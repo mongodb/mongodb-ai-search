@@ -1,0 +1,284 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Deploy the Employee Support Copilot on AWS Amplify Hosting · SearchaaS Docs</title>
+<link rel="stylesheet" href="../../../../pages/assets/style.css">
+<link rel="stylesheet" href="../../../../pages/assets/pygments.css">
+</head>
+<body>
+<header class="topbar">
+  <a class="brand" href="../../../../index.html">SearchaaS Docs</a>
+  <a class="back" href="../../../../index.html">← All docs</a>
+</header>
+<main class="content">
+<h1 id="deploy-the-employee-support-copilot-on-aws-amplify-hosting">Deploy the Employee Support Copilot on AWS Amplify Hosting</h1>
+<p>Deploys <a href="https://github.com/mongodb/mongodb-enterprise-search/blob/main/agents/employee-support-copilot"><code>agents/employee-support-copilot</code></a>
+— a Next.js 14 (App Router) chat UI whose BFF calls SearchaaS — to Amplify
+Hosting with server-side rendering.</p>
+<table>
+<thead>
+<tr>
+<th></th>
+<th></th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Platform</td>
+<td><code>WEB_COMPUTE</code> (Amplify managed SSR compute)</td>
+</tr>
+<tr>
+<td>Deployment method</td>
+<td><strong>Continuous deployment from Git</strong> (required — see below)</td>
+</tr>
+<tr>
+<td>App root in repo</td>
+<td><code>agents/employee-support-copilot</code> (monorepo)</td>
+</tr>
+<tr>
+<td>Runtime env var</td>
+<td><code>SEARCHAAS_BASE_URL</code> → the SearchaaS FastAPI endpoint on ECS</td>
+</tr>
+</tbody>
+</table>
+<h2 id="current-deployment">Current deployment</h2>
+<table>
+<thead>
+<tr>
+<th></th>
+<th></th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>App ID</td>
+<td><code>d37bm88drk3hu9</code> (us-east-1)</td>
+</tr>
+<tr>
+<td>URL</td>
+<td>https://main.d37bm88drk3hu9.amplifyapp.com</td>
+</tr>
+<tr>
+<td>SearchaaS backend</td>
+<td><code>https://se-10bba725de864de489a8d0390d2c325a.ecs.us-east-1.on.aws</code></td>
+</tr>
+</tbody>
+</table>
+<p>Verified working: <code>/chat</code> returns 200, and <code>POST /api/chat</code> classifies and
+routes correctly (<code>"VPN is not connecting"</code> → IT Helpdesk / hybrid;
+<code>"leave policy for new joiners"</code> → Employee Support / fulltext) with no errors.</p>
+<p>⚠️ <strong>Answers currently come back empty</strong> (<code>citations: 0</code>). That is a data gap,
+not a deployment fault — see <a href="#retrieval-returns-no-results">Retrieval returns no results</a>.</p>
+<h2 id="files-here">Files here</h2>
+<table>
+<thead>
+<tr>
+<th>File</th>
+<th>Purpose</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>deploy.sh</code></td>
+<td>End-to-end: create/update the Amplify app + branch, connect the repo, set env vars, run a build, verify the SSR route</td>
+</tr>
+<tr>
+<td><code>amplify.yml</code></td>
+<td>Monorepo build spec (<code>applications:</code> / <code>appRoot</code>). Applied via <code>--build-spec</code>, so it does <strong>not</strong> need to be copied to the repo root</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="why-this-must-be-git-connected">Why this must be Git-connected</h2>
+<p>The app is not a static site. <a href="https://github.com/mongodb/mongodb-enterprise-search/blob/main/agents/employee-support-copilot/src/app/api/chat/route.ts"><code>src/app/api/chat/route.ts</code></a>
+is a server route (<code>export const runtime = "nodejs"</code>) that classifies the query
+and calls SearchaaS server-side, so it needs a Node runtime at request time.
+<code>next build</code> confirms it:</p>
+<div class="highlight"><pre><span></span><code>Route (app)                    Size     First Load JS
+├ ƒ /api/chat                  0 B      0 B          ← ƒ = server-rendered on demand
+└ ○ /chat                      4.34 kB  91.6 kB
+</code></pre></div>
+
+<p>AWS is explicit about the consequence:</p>
+<blockquote>
+<p>Amplify Hosting does not support manual deploys for server-side rendered (SSR) apps.
+— <a href="https://docs.aws.amazon.com/amplify/latest/userguide/manual-deploys.html">Deploying an application to Amplify without a Git repository</a></p>
+</blockquote>
+<p><strong>This failure mode is silent, so it is worth naming.</strong> If you deploy a .zip
+through <code>create-deployment</code> / <code>start-deployment</code>, the job reports <code>SUCCEED</code> and
+the app still shows <code>platform: WEB_COMPUTE</code> — but Amplify serves the bundle
+statically out of S3:</p>
+<div class="highlight"><pre><span></span><code>$ curl -sS -o /dev/null -D - https://main.&lt;appid&gt;.amplifyapp.com/
+HTTP/2 404
+server: AmazonS3          ← served by S3, never reached compute
+
+$ curl -sS -o /dev/null -D - -X POST .../api/chat
+HTTP/2 301
+location: /api/chat/      ← S3 directory redirect, not the Next.js route
+</code></pre></div>
+
+<p>The <a href="https://docs.aws.amazon.com/amplify/latest/userguide/ssr-deployment-specification.html">Amplify Hosting deployment specification</a>
+(<code>deploy-manifest.json</code> + <code>compute/</code> + <code>static/</code>) does <strong>not</strong> rescue this: that
+spec is read by Amplify's <em>build pipeline</em>, not by the manual-deploy API. There
+is no supported zip path to SSR compute.</p>
+<hr />
+<h2 id="prerequisites">Prerequisites</h2>
+<ol>
+<li><strong>AWS CLI v2</strong>, authenticated:
+   <code>bash
+   aws sso login --profile anuj-ps
+   export AWS_PROFILE=anuj-ps AWS_REGION=us-east-1</code></li>
+<li><strong>A GitHub token</strong> with <code>repo</code> and <code>admin:repo_hook</code> scope. Amplify needs
+   <code>admin:repo_hook</code> to install the webhook that triggers builds on push.
+   <code>bash
+   export GITHUB_ACCESS_TOKEN='ghp_...'</code><blockquote>
+<p>On a repo owned by an organisation with SSO enforced, the token must also
+be SSO-authorised for that org, and you need admin rights on the repo to
+create the webhook. If you cannot meet that, use the console flow below —
+it installs the Amplify GitHub App instead of using a token.</p>
+</blockquote>
+</li>
+<li><strong>A running SearchaaS FastAPI service.</strong> Get its URL from the ECS deployment:
+   <code>bash
+   aws ecs describe-express-gateway-service \
+     --service-arn arn:aws:ecs:us-east-1:&lt;ACCOUNT_ID&gt;:service/default/searchaas-fastapi \
+     --query 'service.activeConfigurations[0].ingressPaths[0].endpoint' --output text</code>
+   See <a href="../ecs/README.html"><code>../ecs/README.md</code></a>.</li>
+</ol>
+<hr />
+<h2 id="option-a-scripted-recommended">Option A — scripted (recommended)</h2>
+<div class="highlight"><pre><span></span><code><span class="nb">export</span><span class="w"> </span><span class="nv">AWS_PROFILE</span><span class="o">=</span>anuj-ps
+<span class="nb">export</span><span class="w"> </span><span class="nv">GITHUB_ACCESS_TOKEN</span><span class="o">=</span><span class="s1">&#39;ghp_...&#39;</span>
+<span class="nb">export</span><span class="w"> </span><span class="nv">SEARCHAAS_BASE_URL</span><span class="o">=</span><span class="s1">&#39;https://se-xxxxxxxx.ecs.us-east-1.on.aws&#39;</span>
+
+./deployment/aws/amplify/deploy.sh
+</code></pre></div>
+
+<p><code>SEARCHAAS_BASE_URL</code> falls back to the value in the app's <code>.env.local</code> if unset.</p>
+<p>What it does (idempotent — safe to re-run):</p>
+<ol>
+<li>Creates the Amplify app with <code>--platform WEB_COMPUTE</code>, connected to the repo
+   via <code>--access-token</code>, with <code>amplify.yml</code> applied as the build spec.</li>
+<li>Sets app-level environment variables — <code>SEARCHAAS_BASE_URL</code>,
+   <code>SEARCHAAS_API_KEY</code>, and <code>AMPLIFY_MONOREPO_APP_ROOT</code>.</li>
+<li>Creates the <code>main</code> branch with <code>--framework 'Next.js - SSR'</code> and auto-build on.</li>
+<li>Runs <code>start-job --job-type RELEASE</code> and polls until it settles, dumping the
+   per-step log URLs if it fails.</li>
+<li>Prints the URL and curls <code>/api/chat</code> to confirm compute is actually serving.</li>
+</ol>
+<h2 id="option-b-aws-console">Option B — AWS console</h2>
+<p>Use this when token-based repo access is not available.</p>
+<ol>
+<li>Amplify console → <strong>Create new app</strong> → <strong>GitHub</strong> → authorise the <strong>AWS
+   Amplify GitHub App</strong> → pick <code>mongodb/mongodb-ai-search</code>, branch <code>main</code>.</li>
+<li>On <strong>App settings</strong>, tick <strong>My app is a monorepo</strong> and enter
+   <code>agents/employee-support-copilot</code> as the root.</li>
+<li>Confirm Amplify detects <strong>Next.js - SSR</strong>. If it shows a static framework,
+   the platform is wrong and <code>/api/chat</code> will 404 once deployed.</li>
+<li>Expand <strong>Advanced settings</strong> → <strong>Environment variables</strong> and add:</li>
+</ol>
+<table>
+<thead>
+<tr>
+<th>Key</th>
+<th>Value</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>SEARCHAAS_BASE_URL</code></td>
+<td><code>https://se-xxxxxxxx.ecs.us-east-1.on.aws</code></td>
+</tr>
+<tr>
+<td><code>SEARCHAAS_API_KEY</code></td>
+<td><em>(blank unless SearchaaS is behind bearer auth)</em></td>
+</tr>
+<tr>
+<td><code>AMPLIFY_MONOREPO_APP_ROOT</code></td>
+<td><code>agents/employee-support-copilot</code></td>
+</tr>
+</tbody>
+</table>
+<ol start="5">
+<li>Replace the build spec with the contents of <a href="https://github.com/mongodb/mongodb-enterprise-search/blob/main/deployment/aws/amplify/amplify.yml"><code>amplify.yml</code></a>.</li>
+<li><strong>Save and deploy.</strong></li>
+</ol>
+<hr />
+<h2 id="verify">Verify</h2>
+<p>Compute is serving correctly when the API route returns JSON:</p>
+<div class="highlight"><pre><span></span><code><span class="nv">URL</span><span class="o">=</span>https://main.&lt;appid&gt;.amplifyapp.com
+
+curl<span class="w"> </span>-sS<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$URL</span><span class="s2">/chat&quot;</span><span class="w"> </span>-o<span class="w"> </span>/dev/null<span class="w"> </span>-w<span class="w"> </span><span class="s1">&#39;%{http_code}\n&#39;</span><span class="w">          </span><span class="c1"># 200</span>
+
+curl<span class="w"> </span>-sS<span class="w"> </span>-X<span class="w"> </span>POST<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$URL</span><span class="s2">/api/chat&quot;</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>-H<span class="w"> </span><span class="s1">&#39;content-type: application/json&#39;</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>-d<span class="w"> </span><span class="s1">&#39;{&quot;query&quot;:&quot;VPN is not connecting on my Mac&quot;}&#39;</span><span class="w"> </span><span class="p">|</span><span class="w"> </span>jq<span class="w"> </span><span class="s1">&#39;.routing, .citations | length&#39;</span>
+</code></pre></div>
+
+<p>A <code>301</code> to <code>/api/chat/</code> with <code>server: AmazonS3</code> means the app is being served
+statically — re-check the platform (<code>aws amplify get-app ... --query 'app.platform'</code>
+must be <code>WEB_COMPUTE</code>) and that the branch framework is <code>Next.js - SSR</code>.</p>
+<hr />
+<h2 id="configuration-notes">Configuration notes</h2>
+<h3 id="nextconfigjs-must-not-set-output"><code>next.config.js</code> must not set <code>output</code></h3>
+<p>Amplify's Next.js adapter builds the default <code>.next</code> output and provisions
+compute from it. Setting <code>output: "standalone"</code> or <code>output: "export"</code> changes
+that layout and breaks the adapter. The file carries a comment to this effect.</p>
+<h3 id="cors-is-not-involved">CORS is not involved</h3>
+<p>The browser only ever calls the Amplify origin. <code>/api/chat</code> runs server-side and
+calls SearchaaS from Amplify's compute, so SearchaaS never sees a browser
+<code>Origin</code> header for these requests and <code>SEARCHAAS_CORS_ORIGINS</code> does not need
+the Amplify domain. (It would only matter if a client component started calling
+SearchaaS directly.)</p>
+<h3 id="the-collection-registry-is-build-time">The collection registry is build-time</h3>
+<p><code>src/lib/collections.ts</code> hardcodes the Atlas collections (<code>IT_helpdesk</code>,
+<code>employee_support</code>) and their index names, and the BFF passes them to SearchaaS
+as per-request <code>atlas</code> overrides. Changing a collection or index name means
+editing that file and redeploying — it is not an environment variable.</p>
+<p>Note the BFF overrides <code>collection</code>, <code>vector_index</code>, <code>search_index</code>, <code>text_key</code>,
+and <code>embedding_key</code> — but <strong>not <code>database</code></strong>. Queries therefore land in whatever
+database the SearchaaS service itself is configured with (<code>ATLAS_DB</code>). Both must
+line up.</p>
+<h3 id="retrieval-returns-no-results">Retrieval returns no results</h3>
+<p>If the UI answers "I couldn't find a specific answer…" with zero citations while
+<code>/api/chat</code> returns HTTP 200 and <code>error: null</code>, the deployment is healthy and the
+problem is in Atlas. As of the last check against <code>ai-search</code>:</p>
+<div class="highlight"><pre><span></span><code>IT_helpdesk       docs=0   search_indexes=[(&#39;it_helpdesk_vector_index&#39;, &#39;vectorSearch&#39;, &#39;READY&#39;)]
+employee_support  docs=0   search_indexes=[(&#39;employee_support_vector_index&#39;, &#39;vectorSearch&#39;, &#39;READY&#39;)]
+</code></pre></div>
+
+<p>Two gaps:</p>
+<ol>
+<li><strong>Both collections are empty.</strong> Seed them — see
+   <a href="https://github.com/mongodb/mongodb-enterprise-search/blob/main/agents/pipeline/seed_helpdesk_data.py"><code>agents/pipeline/seed_helpdesk_data.py</code></a>.</li>
+<li><strong>The Lucene search indexes are missing.</strong> <code>collections.ts</code> names
+   <code>it_helpdesk_search_index</code> and <code>employee_support_search_index</code>, but only the
+   vector indexes exist. The default strategy is <code>hybrid</code> (<code>$rankFusion</code> over
+   vector + fulltext), so the fulltext half has nothing to query. Create those
+   Atlas Search indexes, or point <code>searchIndex</code> at one that exists.</li>
+</ol>
+<p>Confirm the backend independently of the UI:</p>
+<div class="highlight"><pre><span></span><code>curl<span class="w"> </span>-sS<span class="w"> </span>-X<span class="w"> </span>POST<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$SEARCHAAS_BASE_URL</span><span class="s2">/retrieve&quot;</span><span class="w"> </span>-H<span class="w"> </span><span class="s1">&#39;content-type: application/json&#39;</span><span class="w"> </span>-d<span class="w"> </span><span class="s1">&#39;{</span>
+<span class="s1">  &quot;query&quot;:&quot;VPN is not connecting&quot;,&quot;top_k&quot;:8,</span>
+<span class="s1">  &quot;atlas&quot;:{&quot;collection&quot;:&quot;IT_helpdesk&quot;,&quot;vector_index&quot;:&quot;it_helpdesk_vector_index&quot;,</span>
+<span class="s1">           &quot;search_index&quot;:&quot;it_helpdesk_search_index&quot;,&quot;text_key&quot;:&quot;text&quot;,&quot;embedding_key&quot;:&quot;embedding&quot;},</span>
+<span class="s1">  &quot;summarize&quot;:false,&quot;understand&quot;:false}&#39;</span><span class="w"> </span><span class="p">|</span><span class="w"> </span>jq<span class="w"> </span><span class="s1">&#39;.results | length&#39;</span>
+</code></pre></div>
+
+<h3 id="redeploys">Redeploys</h3>
+<p>With auto-build enabled, any push to <code>main</code> rebuilds. To force one:</p>
+<div class="highlight"><pre><span></span><code>aws<span class="w"> </span>amplify<span class="w"> </span>start-job<span class="w"> </span>--app-id<span class="w"> </span>&lt;appid&gt;<span class="w"> </span>--branch-name<span class="w"> </span>main<span class="w"> </span>--job-type<span class="w"> </span>RELEASE
+</code></pre></div>
+
+<h3 id="teardown">Teardown</h3>
+<div class="highlight"><pre><span></span><code>aws<span class="w"> </span>amplify<span class="w"> </span>delete-app<span class="w"> </span>--app-id<span class="w"> </span>&lt;appid&gt;<span class="w"> </span>--region<span class="w"> </span>us-east-1
+</code></pre></div>
+
+<p>This removes the app, its branches, the compute resources, and the webhook.</p>
+</main>
+<script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+<script>if (window.mermaid) mermaid.initialize({startOnLoad: true, theme: "neutral"});</script>
+</body>
+</html>

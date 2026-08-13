@@ -1,0 +1,441 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Deploying SearchaaS to Azure Container Apps + AI Foundry · SearchaaS Docs</title>
+<link rel="stylesheet" href="../../../pages/assets/style.css">
+<link rel="stylesheet" href="../../../pages/assets/pygments.css">
+</head>
+<body>
+<header class="topbar">
+  <a class="brand" href="../../../index.html">SearchaaS Docs</a>
+  <a class="back" href="../../../index.html">← All docs</a>
+</header>
+<main class="content">
+<h1 id="deploying-searchaas-to-azure-container-apps-ai-foundry">Deploying SearchaaS to Azure Container Apps + AI Foundry</h1>
+<p>This guide deploys the three SearchaaS surfaces to <strong>Azure Container Apps</strong> and
+wires the MCP endpoint into an <strong>AI Foundry</strong> agent.</p>
+<table>
+<thead>
+<tr>
+<th>Surface</th>
+<th>Image</th>
+<th>Port</th>
+<th>Ingress</th>
+<th>Purpose</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>MCP server</td>
+<td><code>searchaas-mcp</code></td>
+<td>8001</td>
+<td>external <code>/mcp</code></td>
+<td>Consumed by AI Foundry agents (Bearer-gated)</td>
+</tr>
+<tr>
+<td>REST API</td>
+<td><code>searchaas-api</code></td>
+<td>8000</td>
+<td>external</td>
+<td>Playground backend</td>
+</tr>
+<tr>
+<td>React UI</td>
+<td><code>searchaas-ui</code></td>
+<td>80</td>
+<td>external</td>
+<td>Retrieval-testing playground</td>
+</tr>
+</tbody>
+</table>
+<p>Infrastructure (resource group, ACR, Log Analytics, Container Apps Environment,
+managed identity, three Container Apps) is provisioned by Bicep at
+<strong>subscription scope</strong> — the resource group is created for you.</p>
+<p>The deployment is structured to be reliable and repeatable:</p>
+<ul>
+<li><strong>Step 1</strong> creates the resource group + ACR only (no secrets needed).</li>
+<li><strong>Step 2</strong> builds and pushes images into ACR.</li>
+<li><strong>Step 3</strong> deploys everything in one <code>az deployment sub create</code>. Internally
+  <code>main.bicep</code> runs two ARM child deployments in sequence — first infra
+  (environment, ACR, identity), then Container Apps. A deployment-script
+  readiness gate (<code>searchaas-env-ready</code>) polls the Container Apps Environment
+  until its <code>provisioningState</code> is genuinely <code>Succeeded</code>; the apps module
+  depends on that gate's output, so apps never start while the environment is
+  still <code>Updating</code>. This eliminates the intermittent
+  <code>ManagedEnvironmentNotProvisioned</code> error.</li>
+</ul>
+<hr />
+<h2 id="prerequisites">Prerequisites</h2>
+<ul>
+<li>Azure CLI (<code>az</code>) logged in: <code>az login</code></li>
+<li>A subscription with permission to create resource groups and role assignments</li>
+<li>Secrets ready: <code>ATLAS_URI</code>, <code>VOYAGE_API_KEY</code> (embeddings), <code>OPENAI_API_KEY</code>
+  (planner LLM — default provider), and a freshly generated <code>MCP_API_KEY</code> (any
+  strong random string). <code>GOOGLE_API_KEY</code> is optional (only if you switch the
+  planner back to gemini):</li>
+</ul>
+<p><code>bash
+  export ATLAS_URI='mongodb+srv://USER:PASS@cluster.mongodb.net/?retryWrites=true&amp;w=majority'
+  export VOYAGE_API_KEY='...'
+  export OPENAI_API_KEY='sk-...'
+  export GOOGLE_API_KEY=''          # optional
+  export MCP_API_KEY="$(openssl rand -hex 32)"
+  echo "MCP_API_KEY=$MCP_API_KEY"   # save this — Foundry needs it</code></p>
+<hr />
+<h2 id="step-1-create-the-resource-group-acr">Step 1 — Create the resource group + ACR</h2>
+<p>Make any changes required to <code>main.parameters.json</code> (location, namePrefix, atlasDb, configOverrides) before running this step.</p>
+<div class="highlight"><pre><span></span><code>az<span class="w"> </span>deployment<span class="w"> </span>sub<span class="w"> </span>create<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--name<span class="w"> </span>searchaas-acr<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--location<span class="w"> </span>centralindia<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--template-file<span class="w"> </span>deployment/azure/infra/acr.bicep<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--parameters<span class="w"> </span>deployment/azure/infra/main.parameters.json
+
+<span class="nv">ACR_NAME</span><span class="o">=</span><span class="k">$(</span>az<span class="w"> </span>deployment<span class="w"> </span>sub<span class="w"> </span>show<span class="w"> </span>-n<span class="w"> </span>searchaas-acr<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--query<span class="w"> </span>properties.outputs.acrName.value<span class="w"> </span>-o<span class="w"> </span>tsv<span class="k">)</span>
+<span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;ACR: </span><span class="nv">$ACR_NAME</span><span class="s2">&quot;</span>
+</code></pre></div>
+
+<h2 id="step-2-build-push-all-three-images-server-side-in-acr">Step 2 — Build &amp; push all three images (server-side in ACR)</h2>
+<p>The script automatically imports the required base images (<code>python:3.11-slim</code>,
+<code>node:20-alpine</code>, <code>nginx:alpine</code>) into ACR on first run and skips them on
+subsequent runs. To avoid Docker Hub anonymous pull rate limits, provide a
+free Docker Hub account's credentials:</p>
+<div class="highlight"><pre><span></span><code><span class="nb">export</span><span class="w"> </span><span class="nv">DOCKER_HUB_USERNAME</span><span class="o">=</span><span class="s2">&quot;your-dockerhub-username&quot;</span>
+<span class="nb">export</span><span class="w"> </span><span class="nv">DOCKER_HUB_TOKEN</span><span class="o">=</span><span class="s2">&quot;your-dockerhub-access-token&quot;</span><span class="w">   </span><span class="c1"># hub.docker.com → Account Settings → Personal Access Tokens</span>
+</code></pre></div>
+
+<p>Then build and push:</p>
+<div class="highlight"><pre><span></span><code>./deployment/azure/scripts/build-and-push.sh<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$ACR_NAME</span><span class="s2">&quot;</span><span class="w"> </span>latest
+</code></pre></div>
+
+<p>This runs <code>az acr build</code> for <code>searchaas-mcp</code>, <code>searchaas-api</code>, and
+<code>searchaas-ui</code>. Builds happen in ACR, so no local Docker or matching CPU
+architecture is needed.</p>
+<h2 id="step-3-deploy-infrastructure-container-apps">Step 3 — Deploy infrastructure + Container Apps</h2>
+<p>This single command runs two ARM deployments in sequence under the hood:
+<code>searchaas-resources</code> (infra) completes first, then <code>searchaas-apps</code> starts
+once the Container Apps Environment is in <code>Succeeded</code> state.</p>
+<div class="highlight"><pre><span></span><code>az<span class="w"> </span>deployment<span class="w"> </span>sub<span class="w"> </span>create<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--name<span class="w"> </span>searchaas<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--location<span class="w"> </span>centralindia<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--template-file<span class="w"> </span>deployment/azure/infra/main.bicep<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--parameters<span class="w"> </span>deployment/azure/infra/main.parameters.json<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--parameters<span class="w"> </span><span class="se">\</span>
+<span class="w">      </span><span class="nv">atlasUri</span><span class="o">=</span><span class="s2">&quot;</span><span class="nv">$ATLAS_URI</span><span class="s2">&quot;</span><span class="w"> </span><span class="se">\</span>
+<span class="w">      </span><span class="nv">voyageApiKey</span><span class="o">=</span><span class="s2">&quot;</span><span class="nv">$VOYAGE_API_KEY</span><span class="s2">&quot;</span><span class="w"> </span><span class="se">\</span>
+<span class="w">      </span><span class="nv">openaiApiKey</span><span class="o">=</span><span class="s2">&quot;</span><span class="nv">$OPENAI_API_KEY</span><span class="s2">&quot;</span><span class="w"> </span><span class="se">\</span>
+<span class="w">      </span><span class="nv">googleApiKey</span><span class="o">=</span><span class="s2">&quot;</span><span class="si">${</span><span class="nv">GOOGLE_API_KEY</span><span class="k">:-</span><span class="si">}</span><span class="s2">&quot;</span><span class="w"> </span><span class="se">\</span>
+<span class="w">      </span><span class="nv">mcpApiKey</span><span class="o">=</span><span class="s2">&quot;</span><span class="nv">$MCP_API_KEY</span><span class="s2">&quot;</span>
+</code></pre></div>
+
+<blockquote>
+<p><code>GOOGLE_API_KEY</code> and <code>AZURE_OPENAI_API_KEY</code> are optional. Omit or pass empty
+if you are not using those providers.</p>
+</blockquote>
+<p>Grab the URLs:</p>
+<div class="highlight"><pre><span></span><code>az<span class="w"> </span>deployment<span class="w"> </span>sub<span class="w"> </span>show<span class="w"> </span>-n<span class="w"> </span>searchaas<span class="w"> </span>--query<span class="w"> </span>properties.outputs<span class="w"> </span>-o<span class="w"> </span>json
+</code></pre></div>
+
+<p>You'll get:</p>
+<div class="highlight"><pre><span></span><code><span class="p">{</span>
+<span class="w">  </span><span class="nt">&quot;mcpUrl&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="nt">&quot;value&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;https://searchaas-mcp.&lt;...&gt;.azurecontainerapps.io/mcp&quot;</span><span class="w"> </span><span class="p">},</span>
+<span class="w">  </span><span class="nt">&quot;apiUrl&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="nt">&quot;value&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;https://searchaas-api.&lt;...&gt;.azurecontainerapps.io&quot;</span><span class="w"> </span><span class="p">},</span>
+<span class="w">  </span><span class="nt">&quot;uiUrl&quot;</span><span class="p">:</span><span class="w">  </span><span class="p">{</span><span class="w"> </span><span class="nt">&quot;value&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;https://searchaas-ui.&lt;...&gt;.azurecontainerapps.io&quot;</span><span class="w"> </span><span class="p">}</span>
+<span class="p">}</span>
+</code></pre></div>
+
+<hr />
+<h2 id="step-4-smoke-test-the-mcp-endpoint">Step 4 — Smoke test the MCP endpoint</h2>
+<p>Initialize a session (note the Bearer header):</p>
+<div class="highlight"><pre><span></span><code><span class="nv">MCP_URL</span><span class="o">=</span><span class="s2">&quot;https://searchaas-mcp.&lt;...&gt;.azurecontainerapps.io/mcp&quot;</span>
+
+curl<span class="w"> </span>-N<span class="w"> </span>-X<span class="w"> </span>POST<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$MCP_URL</span><span class="s2">&quot;</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>-H<span class="w"> </span><span class="s2">&quot;Authorization: Bearer </span><span class="nv">$MCP_API_KEY</span><span class="s2">&quot;</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>-H<span class="w"> </span><span class="s2">&quot;Content-Type: application/json&quot;</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>-H<span class="w"> </span><span class="s2">&quot;Accept: application/json, text/event-stream&quot;</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>-D<span class="w"> </span>-<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>-d<span class="w"> </span><span class="s1">&#39;{&quot;jsonrpc&quot;:&quot;2.0&quot;,&quot;id&quot;:1,&quot;method&quot;:&quot;initialize&quot;,&quot;params&quot;:{&quot;protocolVersion&quot;:&quot;2024-11-05&quot;,&quot;capabilities&quot;:{},&quot;clientInfo&quot;:{&quot;name&quot;:&quot;curl&quot;,&quot;version&quot;:&quot;1.0&quot;}}}&#39;</span>
+</code></pre></div>
+
+<ul>
+<li>Without the <code>Authorization</code> header you should get <strong>HTTP 401</strong>.</li>
+<li>With it, you get a <code>200</code> and an <code>mcp-session-id</code> response header.</li>
+</ul>
+<blockquote>
+<p>Always hit <code>/mcp</code> (no trailing slash). See <code>README.md</code> for full MCP cURL
+examples (<code>tools/list</code>, <code>tools/call</code>).</p>
+</blockquote>
+<hr />
+<h2 id="step-5-use-the-playground-ui">Step 5 — Use the playground UI</h2>
+<p>Open the <code>uiUrl</code> in a browser. In the UI's connection settings, point it at:</p>
+<ul>
+<li><strong>FastAPI URL</strong> → the <code>apiUrl</code></li>
+<li><strong>MCP URL</strong> → the <code>mcpUrl</code></li>
+</ul>
+<p>(The UI sends requests from the browser, so the apps' CORS is set to allow any
+origin. Tighten <code>allowedOrigins</code> in <code>deployment/azure/infra/resources.bicep</code> for production.)</p>
+<hr />
+<h2 id="step-6-create-an-ai-foundry-agent-backed-by-the-mcp-server">Step 6 — Create an AI Foundry agent backed by the MCP server</h2>
+<p>Use the URLs from Step 3's output:</p>
+<div class="highlight"><pre><span></span><code>az<span class="w"> </span>deployment<span class="w"> </span>sub<span class="w"> </span>show<span class="w"> </span>-n<span class="w"> </span>searchaas<span class="w"> </span>--query<span class="w"> </span><span class="s1">&#39;properties.outputs.{mcp:mcpUrl.value,api:apiUrl.value,ui:uiUrl.value}&#39;</span><span class="w"> </span>-o<span class="w"> </span>json
+</code></pre></div>
+
+<ol>
+<li>In the <strong>AI Foundry</strong> portal, open your project and create/edit an agent.</li>
+<li>Add a tool of type <strong>MCP</strong> (Model Context Protocol).</li>
+<li>Configure it:
+   - <strong>Server URL</strong>: the <code>mcpUrl</code> above
+   - <strong>Transport</strong>: Streamable HTTP
+   - <strong>Custom header</strong>: <code>Authorization: Bearer &lt;MCP_API_KEY&gt;</code></li>
+<li>The agent will discover these tools:
+   - <code>vector_search</code> — Atlas Vector Search (semantic)
+   - <code>fulltext_search</code> — Atlas Search (lexical)
+   - <code>hybrid_search</code> — fused vector + full-text
+   - <code>graph_search</code> — multi-hop <code>$graphLookup</code> / GraphRAG
+   - <code>parent_doc_search</code> — child-chunk match returning the parent doc
+   - <code>auto_search</code> — planner picks the strategy + returns a summary</li>
+<li>Each tool accepts <code>query</code> (string), <code>top_k</code> (int, default 20), and optional
+   <code>filters</code> (object).</li>
+</ol>
+<p>Test the agent in the Foundry playground with a prompt like:
+<em>"Use hybrid_search to find docs about vector search in MongoDB Atlas."</em></p>
+<hr />
+<h2 id="configuration-reference">Configuration reference</h2>
+<p>Environment variables consumed by the containers (set via Bicep secrets/env):</p>
+<table>
+<thead>
+<tr>
+<th>Variable</th>
+<th>Image</th>
+<th>Source</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>ATLAS_URI</code></td>
+<td>mcp, api</td>
+<td>secret</td>
+<td>Mongo connection string</td>
+</tr>
+<tr>
+<td><code>ATLAS_DB</code></td>
+<td>mcp, api</td>
+<td>param</td>
+<td>DB name (<code>atlasDb</code>, default <code>amazon</code>)</td>
+</tr>
+<tr>
+<td><code>VOYAGE_API_KEY</code></td>
+<td>mcp, api</td>
+<td>secret</td>
+<td>Query embeddings (voyageai)</td>
+</tr>
+<tr>
+<td><code>OPENAI_API_KEY</code></td>
+<td>mcp, api</td>
+<td>secret</td>
+<td>Planner LLM (openai, default)</td>
+</tr>
+<tr>
+<td><code>GOOGLE_API_KEY</code></td>
+<td>mcp, api</td>
+<td>secret</td>
+<td>Optional — only if planner=gemini</td>
+</tr>
+<tr>
+<td><code>MCP_API_KEY</code></td>
+<td>mcp</td>
+<td>secret</td>
+<td>Bearer token; <strong>unset = no auth</strong></td>
+</tr>
+<tr>
+<td><code>ALLOWED_ORIGINS</code></td>
+<td>mcp</td>
+<td>env (<code>*</code>)</td>
+<td>CORS origins; comma-separated or <code>*</code></td>
+</tr>
+</tbody>
+</table>
+<h3 id="runtime-config-overrides-no-image-rebuild">Runtime config overrides (no image rebuild)</h3>
+<p><code>searchaas/config/searchaas.yaml</code> is baked into the image, but <strong>every value is
+<code>${VAR:-default}</code>-driven</strong>, so you can retune the deployment by setting env vars
+via the <code>configOverrides</code> Bicep parameter — then redeploy/restart. <strong>No image
+rebuild required.</strong></p>
+<table>
+<thead>
+<tr>
+<th>Override var</th>
+<th>Controls</th>
+<th>Default</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>ATLAS_COLLECTION</code></td>
+<td>Mongo collection</td>
+<td><code>products-updated</code></td>
+</tr>
+<tr>
+<td><code>ATLAS_VECTOR_INDEX</code></td>
+<td>Atlas Vector Search index</td>
+<td><code>voyage_vector_index</code></td>
+</tr>
+<tr>
+<td><code>ATLAS_SEARCH_INDEX</code></td>
+<td>Atlas Search (Lucene) index</td>
+<td><code>default</code></td>
+</tr>
+<tr>
+<td><code>ATLAS_TEXT_KEY</code></td>
+<td>text field name</td>
+<td><code>text</code></td>
+</tr>
+<tr>
+<td><code>ATLAS_EMBEDDING_KEY</code></td>
+<td>vector field name</td>
+<td><code>embedding-vectors</code></td>
+</tr>
+<tr>
+<td><code>ATLAS_DIMENSIONS</code></td>
+<td>vector dimensions</td>
+<td><code>512</code></td>
+</tr>
+<tr>
+<td><code>EMBEDDINGS_PROVIDER</code></td>
+<td>embedding provider</td>
+<td><code>voyageai</code></td>
+</tr>
+<tr>
+<td><code>EMBEDDINGS_MODEL</code></td>
+<td>embedding model</td>
+<td><code>voyage-4</code></td>
+</tr>
+<tr>
+<td><code>EMBEDDINGS_OUTPUT_DIMENSION</code></td>
+<td>query-embedding dims</td>
+<td><code>512</code></td>
+</tr>
+<tr>
+<td><code>PLANNER_LLM_PROVIDER</code></td>
+<td>planner LLM provider</td>
+<td><code>openai</code></td>
+</tr>
+<tr>
+<td><code>PLANNER_MODEL</code></td>
+<td>planner model</td>
+<td><code>gpt-4o-mini</code></td>
+</tr>
+<tr>
+<td><code>PLANNER_TEMPERATURE</code></td>
+<td>planner temperature</td>
+<td><code>0.1</code></td>
+</tr>
+<tr>
+<td><code>RETRIEVAL_DEFAULT_STRATEGY</code></td>
+<td>default strategy</td>
+<td><code>hybrid</code></td>
+</tr>
+<tr>
+<td><code>RETRIEVAL_HYBRID_VECTOR_WEIGHT</code></td>
+<td>hybrid vector weight</td>
+<td><code>0.6</code></td>
+</tr>
+<tr>
+<td><code>RETRIEVAL_HYBRID_FULLTEXT_WEIGHT</code></td>
+<td>hybrid fulltext weight</td>
+<td><code>0.4</code></td>
+</tr>
+<tr>
+<td><code>RETRIEVAL_VECTOR_NUM_CANDIDATES</code></td>
+<td>vector candidate pool</td>
+<td><code>200</code></td>
+</tr>
+</tbody>
+</table>
+<p>Edit the <code>configOverrides</code> block in <code>deployment/azure/infra/main.parameters.json</code> (or pass
+<code>--parameters configOverrides='{...}'</code>) and rerun the Step 3 deploy command.
+Only non-empty entries are injected; everything else uses the yaml default.</p>
+<hr />
+<h2 id="updating-after-code-changes">Updating after code changes</h2>
+<div class="highlight"><pre><span></span><code><span class="c1"># rebuild &amp; push with a new tag</span>
+./deployment/azure/scripts/build-and-push.sh<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$ACR_NAME</span><span class="s2">&quot;</span><span class="w"> </span>v2
+
+<span class="c1"># roll the apps to the new tag (same command as Step 3, just add imageTag=v2)</span>
+az<span class="w"> </span>deployment<span class="w"> </span>sub<span class="w"> </span>create<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--name<span class="w"> </span>searchaas<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--location<span class="w"> </span>centralindia<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--template-file<span class="w"> </span>deployment/azure/infra/main.bicep<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--parameters<span class="w"> </span>deployment/azure/infra/main.parameters.json<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--parameters<span class="w"> </span><span class="nv">imageTag</span><span class="o">=</span>v2<span class="w"> </span><span class="se">\</span>
+<span class="w">      </span><span class="nv">atlasUri</span><span class="o">=</span><span class="s2">&quot;</span><span class="nv">$ATLAS_URI</span><span class="s2">&quot;</span><span class="w"> </span><span class="nv">voyageApiKey</span><span class="o">=</span><span class="s2">&quot;</span><span class="nv">$VOYAGE_API_KEY</span><span class="s2">&quot;</span><span class="w"> </span><span class="se">\</span>
+<span class="w">      </span><span class="nv">openaiApiKey</span><span class="o">=</span><span class="s2">&quot;</span><span class="nv">$OPENAI_API_KEY</span><span class="s2">&quot;</span><span class="w"> </span><span class="nv">googleApiKey</span><span class="o">=</span><span class="s2">&quot;</span><span class="si">${</span><span class="nv">GOOGLE_API_KEY</span><span class="k">:-</span><span class="si">}</span><span class="s2">&quot;</span><span class="w"> </span><span class="se">\</span>
+<span class="w">      </span><span class="nv">mcpApiKey</span><span class="o">=</span><span class="s2">&quot;</span><span class="nv">$MCP_API_KEY</span><span class="s2">&quot;</span>
+</code></pre></div>
+
+<p>Container Apps creates a new revision and shifts traffic to it. The infra
+phase is a no-op when nothing has changed (ARM is idempotent), so only the
+apps deployment actually updates.</p>
+<hr />
+<h2 id="notes-recommendations">Notes &amp; recommendations</h2>
+<ul>
+<li><strong>MCP min-replicas = 1</strong>: the <code>streamable-http</code> transport is session-stateful
+  (<code>mcp-session-id</code>), so scale-to-zero would drop active sessions. The API and
+  UI apps scale to zero when idle to save cost.</li>
+<li><strong>Secrets</strong> are stored as Container Apps secrets (per project decision). The
+  YAML loader already supports <code>${VAR}</code> expansion, so migrating to <strong>Azure Key
+  Vault</strong> later (via managed identity + secret references) requires no code
+  change — only Bicep updates.</li>
+<li><strong>Tighten CORS</strong> for production by replacing <code>*</code> in <code>deployment/azure/infra/resources.bicep</code>
+  (<code>corsPolicy.allowedOrigins</code> and the MCP <code>ALLOWED_ORIGINS</code> env) with the
+  exact UI FQDN.</li>
+<li><strong>Auth hardening</strong>: for enterprise use, consider fronting the MCP app with
+  Entra ID / OAuth2 instead of (or in addition to) the static Bearer key.</li>
+</ul>
+<hr />
+<h2 id="troubleshooting">Troubleshooting</h2>
+<h3 id="managedenvironmentnotprovisioned-during-step-3"><code>ManagedEnvironmentNotProvisioned</code> during Step 3</h3>
+<p>The Container Apps Environment reports ARM success before its backend has
+finished provisioning, and any re-PUT bounces it into <code>Updating</code>. If apps are
+written during that window they fail with <code>ManagedEnvironmentNotProvisioned</code>.
+The <code>searchaas-env-ready</code> deployment-script gate now prevents this in fresh
+runs. If you still hit it (e.g. on an older template or a partially-failed RG):</p>
+<ol>
+<li>Wait for the environment to settle to <code>Succeeded</code>:</li>
+</ol>
+<p><code>bash
+   az resource show -g rg-searchaas -n searchaas-env \
+     --resource-type Microsoft.App/managedEnvironments \
+     --query "properties.provisioningState" -o tsv</code></p>
+<ol start="2">
+<li>Deploy <strong>only</strong> the apps module against the ready environment (no env re-PUT):</li>
+</ol>
+<p>```bash
+   ENV_ID=$(az deployment group show -g rg-searchaas -n searchaas-resources \
+     --query "properties.outputs.environmentId.value" -o tsv)
+   ID_ID=$(az deployment group show -g rg-searchaas -n searchaas-resources \
+     --query "properties.outputs.identityId.value" -o tsv)
+   ACR=$(az deployment group show -g rg-searchaas -n searchaas-resources \
+     --query "properties.outputs.acrLoginServer.value" -o tsv)</p>
+<p>az deployment group create \
+     --resource-group rg-searchaas \
+     --name searchaas-apps-only \
+     --template-file deployment/azure/infra/apps.bicep \
+     --parameters location=centralindia namePrefix=searchaas imageTag=latest \
+         atlasDb=sample_mflix uiEmbedMcpKey=true \
+         environmentId="$ENV_ID" identityId="$ID_ID" acrServer="$ACR" \
+         atlasUri="$ATLAS_URI" voyageApiKey="$VOYAGE_API_KEY" \
+         openaiApiKey="$OPENAI_API_KEY" googleApiKey="${GOOGLE_API_KEY:-}" \
+         azureOpenaiApiKey="${AZURE_OPENAI_API_KEY:-}" mcpApiKey="$MCP_API_KEY"
+   ```</p>
+<h3 id="invaliddeploymentlocation-deployment-already-exists-in-another-region"><code>InvalidDeploymentLocation</code> — deployment already exists in another region</h3>
+<p>A subscription-scope deployment's metadata location is immutable. If a prior
+run created the deployment in a different region, use a <strong>new <code>--name</code></strong> (the
+<code>--location</code> only stores deployment metadata; resources still deploy to the
+region in <code>main.parameters.json</code>).</p>
+</main>
+<script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+<script>if (window.mermaid) mermaid.initialize({startOnLoad: true, theme: "neutral"});</script>
+</body>
+</html>

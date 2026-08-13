@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>agents/ — Cloud Run Deployment (Employee Support Copilot) · SearchaaS Docs</title>
+<link rel="stylesheet" href="../../../../pages/assets/style.css">
+<link rel="stylesheet" href="../../../../pages/assets/pygments.css">
+</head>
+<body>
+<header class="topbar">
+  <a class="brand" href="../../../../index.html">SearchaaS Docs</a>
+  <a class="back" href="../../../../index.html">← All docs</a>
+</header>
+<main class="content">
+<h1 id="agents-cloud-run-deployment-employee-support-copilot">agents/ — Cloud Run Deployment (Employee Support Copilot)</h1>
+<p>Deploys the <code>agents/employee-support-copilot</code> Next.js app (chat UI + BFF
+<code>/api/chat</code>) as a single Cloud Run service, wired to the SearchaaS backend.</p>
+<p>When the backend is a <strong>Vertex AI Agent Engine (Reasoning Engine)</strong> resource —
+the Gemini agent platform's managed agent runtime — the BFF authenticates with
+Google Application Default Credentials. On Cloud Run, ADC is the attached
+service account; this script creates it (<code>employee-support-copilot-sa</code>) and
+grants it <code>roles/aiplatform.user</code> so it can call <code>reasoningEngines:query</code>.
+No API keys or tokens are baked into the image.</p>
+<blockquote>
+<p>The other entries under <code>agents/</code> (<code>pipeline/</code>, <code>scripts/</code>) are data-seeding
+utilities, not deployable services.</p>
+</blockquote>
+<h2 id="prerequisites">Prerequisites</h2>
+<ul>
+<li>gcloud CLI authenticated (<code>gcloud auth login</code> + <code>gcloud auth application-default login</code>)</li>
+<li>Docker with buildx</li>
+<li>The SearchaaS backend already deployed (Agent Engine via
+  <a href="../agent_runtime/README.html"><code>../agent_runtime/</code></a>, or Cloud Run via
+  <a href="../cloud_run/README.html"><code>../cloud_run/</code></a>)</li>
+<li><code>agents/employee-support-copilot/.env.local</code> with <code>SEARCHAAS_BASE_URL</code>
+  pointing at that backend (or pass <code>--searchaas-url</code>)</li>
+</ul>
+<h2 id="deploy">Deploy</h2>
+<div class="highlight"><pre><span></span><code>./deployment/google/agents/deploy.sh<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--project<span class="w"> </span>my-gcp-project<span class="w"> </span><span class="se">\</span>
+<span class="w">    </span>--region<span class="w"> </span>us-central1
+</code></pre></div>
+
+<p>All flags are optional and default to the gcloud config / <code>.env.local</code> values:</p>
+<table>
+<thead>
+<tr>
+<th>Flag</th>
+<th>Default</th>
+<th>Purpose</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>--project</code></td>
+<td>gcloud config</td>
+<td>GCP project ID</td>
+</tr>
+<tr>
+<td><code>--region</code></td>
+<td><code>us-central1</code></td>
+<td>Cloud Run region</td>
+</tr>
+<tr>
+<td><code>--repo</code></td>
+<td><code>searchaas</code></td>
+<td>Artifact Registry repo</td>
+</tr>
+<tr>
+<td><code>--service</code></td>
+<td><code>employee-support-copilot</code></td>
+<td>Cloud Run service name</td>
+</tr>
+<tr>
+<td><code>--searchaas-url</code></td>
+<td><code>SEARCHAAS_BASE_URL</code> from the app's <code>.env.local</code></td>
+<td>Backend the BFF calls</td>
+</tr>
+</tbody>
+</table>
+<p>The script ends with a smoke test: it POSTs a sample query to
+<code>&lt;url&gt;/api/chat</code> and reports the resolved domain / strategy / citation count.</p>
+<blockquote>
+<p><strong>First deploy:</strong> the project-level <code>roles/aiplatform.user</code> grant can take
+up to ~10 minutes to propagate to the Vertex AI data plane. If the smoke
+test reports HTTP 503 / "SearchaaS error 403" right after a first-time
+deploy, wait a few minutes and reload the app — no redeploy needed.</p>
+</blockquote>
+<p>Environment notes:
+- On machines where the gcloud user token is rejected by Google APIs
+  (workforce identity federation), the script automatically falls back to
+  application-default credentials for all gcloud calls and builds the image
+  server-side with Cloud Build instead of local docker push (the AR docker
+  credential helper only supports the gcloud user token).</p>
+<h2 id="files">Files</h2>
+<table>
+<thead>
+<tr>
+<th>File</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>deploy.sh</code></td>
+<td>End-to-end deploy (APIs → registry → image → SA/IAM → service → smoke test)</td>
+</tr>
+<tr>
+<td><code>Dockerfile</code></td>
+<td>Multi-stage Next.js standalone image (build context: <code>agents/employee-support-copilot/</code>)</td>
+</tr>
+</tbody>
+</table>
+<h2 id="how-it-fits-together">How it fits together</h2>
+<div class="highlight"><pre><span></span><code>Browser ──► Cloud Run: employee-support-copilot (Next.js UI + /api/chat BFF)
+                 │  Google ADC via attached service account (roles/aiplatform.user)
+                 ▼
+            Vertex AI Agent Engine :query  (SearchaaSAgent — Gemini agent platform)
+                 │  per-request atlas/retrieval overrides
+                 ▼
+            MongoDB Atlas (ai_search.employee_support / ai_search.IT_helpdesk)
+</code></pre></div>
+
+<h2 id="redeploy-reconfigure">Redeploy / reconfigure</h2>
+<div class="highlight"><pre><span></span><code><span class="c1"># Same command is idempotent — rebuilds the image and updates the service.</span>
+./deployment/google/agents/deploy.sh
+
+<span class="c1"># Point at a different backend (e.g. the Cloud Run FastAPI service):</span>
+<span class="nv">SEARCHAAS_BASE_URL</span><span class="o">=</span>https://searchaas-api-&lt;project-number&gt;.us-central1.run.app<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>./deployment/google/agents/deploy.sh
+</code></pre></div>
+</main>
+<script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+<script>if (window.mermaid) mermaid.initialize({startOnLoad: true, theme: "neutral"});</script>
+</body>
+</html>

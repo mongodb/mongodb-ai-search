@@ -1,0 +1,112 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Known Issues · SearchaaS Docs</title>
+<link rel="stylesheet" href="../../pages/assets/style.css">
+<link rel="stylesheet" href="../../pages/assets/pygments.css">
+</head>
+<body>
+<header class="topbar">
+  <a class="brand" href="../../index.html">SearchaaS Docs</a>
+  <a class="back" href="../../index.html">← All docs</a>
+</header>
+<main class="content">
+<h1 id="known-issues">Known Issues</h1>
+<h2 id="1-llm-inferred-metadata-filters-break-vectorsearch-path-company-needs-to-be-indexed-as-filter">1. LLM-inferred metadata filters break <code>$vectorSearch</code> (<code>Path 'company' needs to be indexed as filter</code>)</h2>
+<p><strong>Status:</strong> Fixed on branch <code>fix/llm-filter-allowlist</code> (see "Fix implemented" below)
+<strong>First observed:</strong> 2026-06-11, hitting the FastAPI ECS service from the S3-hosted UI
+<strong>Endpoints affected:</strong> <code>/retrieve</code> (auto), and any endpoint where the plan carries filters — <code>/retrieve/vector</code>, <code>/retrieve/hybrid</code>, <code>/retrieve/parent-doc</code></p>
+<h3 id="reproducing-prompt">Reproducing prompt</h3>
+<p>The issue was caught with this query (test prompt <code>aws-03</code> from the multimodal
+retrieval evaluation set):</p>
+<blockquote>
+<p>Show me Amazon's operating income trend across all four quarters of 2022.</p>
+</blockquote>
+<p>The mention of "Amazon" leads the Query Understanding LLM to infer
+<code>{"company": "Amazon"}</code> as a metadata filter.</p>
+<h3 id="symptom">Symptom</h3>
+<p>Requests fail with HTTP 500. Server log shows:</p>
+<div class="highlight"><pre><span></span><code>pymongo.errors.OperationFailure: PlanExecutor error during aggregation ::
+caused by :: Path &#39;company&#39; needs to be indexed as filter
+</code></pre></div>
+
+<p>The failure is query-dependent and looks intermittent: it only happens when the
+Query Understanding LLM decides to infer a metadata filter from the user's query.</p>
+<h3 id="root-cause">Root cause</h3>
+<p>The Query Understanding LLM invents metadata filters for fields that don't
+exist in the documents or the index, and they are passed verbatim into the
+Atlas <code>$vectorSearch.filter</code> clause.</p>
+<p>The chain:</p>
+<ol>
+<li><code>searchaas/query_understanding/layer.py:59-60</code> — the prompt asks the LLM for
+   <code>metadata_filters : object of metadata field -&gt; value filters you can confidently infer
+   (geography, doc_type, department, date ranges, etc.)</code> with <strong>no constraint on
+   which fields actually exist</strong>. The reproducing prompt above makes Haiku emit
+   <code>{"company": "Amazon"}</code>.</li>
+<li><code>searchaas/planning/engine.py:95-96</code> — the planner copies <code>uq.metadata_filters</code>
+   into <code>plan.filters</code> unchanged.</li>
+<li><code>searchaas/retrieval/factory.py:294</code> (<code>_build_hybrid</code>) — <code>plan.filters</code> is passed
+   as <code>pre_filter</code> to <code>MongoDBAtlasHybridSearchRetriever</code>, which embeds it in the
+   <code>$vectorSearch.filter</code> clause. The vector (<code>factory.py:228</code>) and parent-doc
+   (<code>factory.py:310</code>) builders do the same.</li>
+<li>Atlas Vector Search requires every path referenced in <code>$vectorSearch.filter</code>
+   to be declared with <code>"type": "filter"</code> in the vector index definition.
+   <code>aisearch_vector_index</code> only indexes the <code>embedding</code> field, so Atlas rejects
+   the aggregation with error code 8.</li>
+</ol>
+<h3 id="why-just-index-the-field-is-not-enough">Why "just index the field" is not enough</h3>
+<p>The hallucinated field generally doesn't exist on the documents at all. The
+collection is <code>pdf_multimodal_chunks</code>; chunk metadata has fields like
+<code>source</code>/<code>page</code>, not <code>company</code>. Indexing <code>company</code> as a filter would stop the
+500 but the filter would match zero documents and silently return empty
+results. Any other field the LLM dreams up (<code>geography</code>, <code>doc_type</code>, <code>year</code>, …)
+would still trigger the same error.</p>
+<h3 id="fix-implemented">Fix implemented</h3>
+<p>The user's own Atlas index definitions are the source of truth. They are
+pasted verbatim into <code>searchaas/config/searchaas.yaml</code> under
+<code>atlas.vector_index_definition</code> and <code>atlas.search_index_definition</code> (Atlas UI
+→ Search &amp; Vector Search → index → JSON Editor; YAML is a superset of JSON,
+so the raw JSON works as-is). From these, the filter allowlists are derived —
+no separate field list to keep in sync:</p>
+<ul>
+<li><code>AtlasConfig.filter_fields</code> (<code>searchaas/config/loader.py</code>) — paths declared
+  with <code>{"type": "filter"}</code> in the vector index definition. These are the only
+  paths <code>$vectorSearch.filter</code> accepts.</li>
+<li><code>AtlasConfig.search_filter_fields</code> — paths mapped in the Lucene index;
+  <code>None</code> when the mapping is <code>dynamic: true</code> (every field indexed, no
+  restriction).</li>
+</ul>
+<p>Enforcement happens at three layers:</p>
+<ol>
+<li><strong>Prompt constraint</strong> (<code>searchaas/query_understanding/layer.py</code>) — the
+   Query Understanding prompt now tells the LLM exactly which metadata fields
+   exist; with none configured it must return <code>{}</code>. Its output is additionally
+   sanitized against the allowlist.</li>
+<li><strong>Retriever choke point</strong> (<code>searchaas/retrieval/factory.py</code>) —
+   <code>RetrieverFactory.create()</code> reduces <code>plan.filters</code> to the allowlist for the
+   chosen strategy (vector/hybrid/parent_doc use the vector-index allowlist,
+   fulltext uses the Lucene one) and logs a warning for anything dropped. This
+   also covers filters merged in from API callers via <code>req.filters</code>. The plan
+   is mutated, so API responses report the filters that actually ran.</li>
+<li><strong>Startup preflight</strong> (<code>searchaas/app/bootstrap.py</code>) — logs an error when
+   the configured definition declares filter fields the live Atlas index does
+   not actually have (config/index drift).</li>
+</ol>
+<p>The shared sanitizer lives in <code>searchaas/filtering.py</code>. An LLM-invented filter
+now degrades to an unfiltered search with a warning instead of a 500.</p>
+<h3 id="to-enable-real-metadata-filtering">To enable real metadata filtering</h3>
+<ol>
+<li>Add the field (e.g. <code>company</code>) to chunk metadata at ingestion time.</li>
+<li>Add <code>{"type": "filter", "path": "company"}</code> to the <code>aisearch_vector_index</code>
+   definition in Atlas (and map it in the Lucene <code>ai_search_index</code> if
+   full-text filtering should work too).</li>
+<li>Mirror the updated definition(s) in <code>atlas.vector_index_definition</code> /
+   <code>atlas.search_index_definition</code> in the YAML.</li>
+</ol>
+</main>
+<script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+<script>if (window.mermaid) mermaid.initialize({startOnLoad: true, theme: "neutral"});</script>
+</body>
+</html>
