@@ -1,9 +1,15 @@
 /**
  * searchaas-client.ts — Thin typed wrapper around the SearchaaS REST API.
  *
+ * Two transports are supported, selected automatically from SEARCHAAS_BASE_URL:
+ *   - Local/self-hosted FastAPI: POST <base>/retrieve, optional static bearer
+ *     (SEARCHAAS_API_KEY).
+ *   - Vertex AI Agent Engine (Reasoning Engine): POST <base>:query with the
+ *     {"class_method","input"} envelope, authenticated with a Google OAuth2
+ *     token minted from Application Default Credentials (google-auth-library).
+ *
  * Responsibilities:
  *   - Build the SearchaaS request payload from typed inputs.
- *   - Call POST /retrieve (or a specialised strategy endpoint).
  *   - Surface structured errors.
  *   - Log every outbound payload + response timing.
  *
@@ -158,23 +164,90 @@ export function buildPayload(opts: BuildPayloadOptions): SearchaaSRequest {
 // HTTP client
 // ---------------------------------------------------------------------------
 
-const SEARCHAAS_BASE_URL =
-  process.env.SEARCHAAS_BASE_URL ?? "http://localhost:8000";
+const SEARCHAAS_BASE_URL = (
+  process.env.SEARCHAAS_BASE_URL ?? "http://localhost:8000"
+).replace(/\/+$/, "");
 const SEARCHAAS_API_KEY = process.env.SEARCHAAS_API_KEY ?? "";
 
 /**
- * Call SearchaaS POST /retrieve with the given payload.
+ * Vertex AI Agent Engine (Reasoning Engine) endpoints look like:
+ *   https://<region>-aiplatform.googleapis.com/v1/projects/<p>/locations/<r>/reasoningEngines/<id>
+ *
+ * They differ from the local FastAPI surface in three ways:
+ *   1. Auth   — a Google OAuth2 bearer token is required (minted from
+ *               Application Default Credentials; never a static key).
+ *   2. Wire   — custom methods are invoked via POST <base>:query with body
+ *               {"class_method": "query", "input": {...}}.
+ *   3. Result — the response wraps the method return value in {"output": {...}}.
+ */
+const IS_AGENT_ENGINE =
+  /aiplatform\.googleapis\.com\/v\d+\/projects\/[^/]+\/locations\/[^/]+\/reasoningEngines\/[^/]+$/.test(
+    SEARCHAAS_BASE_URL
+  );
+
+// Cached GoogleAuth instance — getAccessToken() caches and auto-refreshes the
+// short-lived ADC access token, so no manual token management is needed.
+let _googleAuth: import("google-auth-library").GoogleAuth | null = null;
+
+async function getGoogleAccessToken(): Promise<string> {
+  if (!_googleAuth) {
+    // Dynamic import: keeps google-auth-library out of any client bundle and
+    // only loads it when an Agent Engine call is actually made.
+    const { GoogleAuth } = await import("google-auth-library");
+    _googleAuth = new GoogleAuth({
+      scopes: "https://www.googleapis.com/auth/cloud-platform",
+    });
+  }
+  const token = await _googleAuth.getAccessToken();
+  if (!token) {
+    throw {
+      status: 0,
+      message:
+        "No Google credentials available for the Agent Engine call. " +
+        "Run `gcloud auth application-default login` locally, or attach a " +
+        "service account to the hosting runtime.",
+    } as SearchaaSError;
+  }
+  return token;
+}
+
+/**
+ * Call SearchaaS with the given payload.
+ * Local FastAPI mode:  POST <base>/retrieve          (body = payload as-is)
+ * Agent Engine mode:   POST <base>:query             (body = query envelope)
  * Throws a structured {@link SearchaaSError} on non-2xx responses.
  */
 export async function callSearchaaS(
   payload: SearchaaSRequest,
   endpoint: string = "/retrieve"
 ): Promise<{ response: SearchaaSResponse; latencyMs: number }> {
-  const url = `${SEARCHAAS_BASE_URL}${endpoint}`;
+  const url = IS_AGENT_ENGINE
+    ? `${SEARCHAAS_BASE_URL}:query`
+    : `${SEARCHAAS_BASE_URL}${endpoint}`;
+
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
-    ...(SEARCHAAS_API_KEY ? { Authorization: `Bearer ${SEARCHAAS_API_KEY}` } : {}),
   };
+
+  let body: string;
+  if (IS_AGENT_ENGINE) {
+    headers.Authorization = `Bearer ${await getGoogleAccessToken()}`;
+    body = JSON.stringify({
+      class_method: "query",
+      input: {
+        input: payload.query,
+        top_k: payload.top_k,
+        ...(payload.filters ? { filters: payload.filters } : {}),
+        ...(payload.atlas ? { atlas: payload.atlas } : {}),
+        ...(payload.retrieval ? { retrieval: payload.retrieval } : {}),
+      },
+    });
+  } else {
+    if (SEARCHAAS_API_KEY) {
+      headers.Authorization = `Bearer ${SEARCHAAS_API_KEY}`;
+    }
+    body = JSON.stringify(payload);
+  }
 
   // --- Structured request log (server-side only) ---
   console.log("[searchaas-client] →", JSON.stringify({
@@ -191,7 +264,7 @@ export async function callSearchaaS(
     res = await fetch(url, {
       method: "POST",
       headers,
-      body: JSON.stringify(payload),
+      body,
       // Abort after 30 s so a slow Atlas aggregation doesn't hang the BFF.
       signal: AbortSignal.timeout(30_000),
     });
@@ -209,7 +282,11 @@ export async function callSearchaaS(
     throw err;
   }
 
-  const response = (await res.json()) as SearchaaSResponse;
+  const json = await res.json();
+  // Agent Engine wraps the method's return value: {"output": {...}}.
+  const response = (
+    IS_AGENT_ENGINE ? (json as { output: unknown }).output : json
+  ) as SearchaaSResponse;
 
   // --- Structured response log ---
   console.log("[searchaas-client] ✓", JSON.stringify({

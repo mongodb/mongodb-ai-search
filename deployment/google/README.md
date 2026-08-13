@@ -1,11 +1,12 @@
 # SearchaaS — Google Cloud Deployment
 
-Two deployment targets are available under this directory:
+Three deployment targets are available under this directory:
 
 | Target | Folder | Description |
 |---|---|---|
 | **Cloud Run** | [`cloud_run/`](cloud_run/README.md) | Standard serverless containers — default deployment |
-| **Agent Runtime** | [`agent_runtime/`](agent_runtime/README.md) | Private Cloud Run service configured for Vertex AI agent connectivity (opt-in) |
+| **Agent Engine** | [`agent_runtime/`](agent_runtime/README.md) | Vertex AI Agent Engine (Reasoning Engine) — the Gemini agent platform's managed agent runtime |
+| **Agents (apps)** | [`agents/`](agents/README.md) | Apps from `agents/` (e.g. Employee Support Copilot) as Cloud Run services wired to either backend |
 
 ---
 
@@ -25,11 +26,17 @@ Start here
     │    cloud_run/            cloud_run/
     │    deploy.sh             deploy-combined.sh
     │
-    └─ I want a private MCP endpoint
-       for Vertex AI Agent Builder / ADK
-                    │
-              agent_runtime/
-              deploy.sh  (opt-in)
+    ├─ I want a managed agent on the Gemini
+    │  agent platform (Vertex AI Agent Engine)
+    │                     │
+    │               agent_runtime/
+    │               deploy.sh
+    │
+    └─ I want to deploy an app from agents/
+       (e.g. the Employee Support Copilot UI)
+                     │
+                agents/
+                deploy.sh
 ```
 
 ---
@@ -55,7 +62,7 @@ export ATLAS_DB='your_database'
     --region us-central1
 ```
 
-### Opt-in — Vertex AI Agent Runtime
+### Vertex AI Agent Engine (Reasoning Engine)
 
 ```bash
 export ATLAS_URI='mongodb+srv://...'
@@ -99,8 +106,14 @@ deployment/google/
 │   ├── nginx-combined.conf     nginx config for combined service
 │   └── supervisord.conf        (reference — not used by default entrypoint)
 │
-└── agent_runtime/              ← Vertex AI Agent Runtime (opt-in)
+└── agent_runtime/              ← Vertex AI Agent Engine (Reasoning Engine)
     ├── README.md
-    ├── Dockerfile              FastMCP image for agent runtime
-    └── deploy.sh               Opt-in deploy with confirmation gate
+    ├── deploy.sh               End-to-end Agent Engine deploy (confirmation gate)
+    ├── deploy_agent_engine.py  SearchaaSAgent wrapper + AgentEngine create/update
+    └── requirements-deploy.txt Deploy-time deps (Vertex AI SDK + cloudpickle)
+
+└── agents/                     ← Apps from agents/ (Employee Support Copilot)
+    ├── README.md
+    ├── deploy.sh               Cloud Run deploy + Agent Engine wiring + smoke test
+    └── Dockerfile              Next.js standalone image (context: agents/employee-support-copilot)
 ```

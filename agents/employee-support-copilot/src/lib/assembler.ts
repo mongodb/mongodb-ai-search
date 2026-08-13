@@ -54,6 +54,19 @@ export interface AssembledAnswer {
 const MIN_SCORE_THRESHOLD = 0.1; // chunks below this score are considered noise
 const MAX_CITATIONS = 5;
 
+/**
+ * Score filtering that respects the score scale of each strategy.
+ * Fulltext/vector scores are relevance scores on a meaningful scale, but
+ * hybrid scores are reciprocal-rank-fusion values — rank-based and ≪ 0.1 by
+ * construction — so an absolute threshold would discard every hybrid result.
+ */
+function usableResults(results: SearchaaSChunk[], strategy: string): SearchaaSChunk[] {
+  const threshold = strategy === "hybrid" ? 0 : MIN_SCORE_THRESHOLD;
+  return results.filter(
+    (r) => r.score === null || r.score === undefined || r.score >= threshold
+  );
+}
+
 function extractSource(metadata: Record<string, unknown>): string | undefined {
   return (
     (metadata.source as string) ||
@@ -115,10 +128,8 @@ export function assembleSingleCollection(opts: {
   const { response, collection, domain, latencyMs, totalMs } = opts;
   const results = response.results ?? [];
 
-  // Filter out very-low-score chunks.
-  const usable = results.filter(
-    (r) => r.score === null || r.score === undefined || r.score >= MIN_SCORE_THRESHOLD
-  );
+  // Filter out very-low-score chunks (scale-aware — see usableResults).
+  const usable = usableResults(results, response.strategy);
 
   const citations = usable
     .slice(0, MAX_CITATIONS)
@@ -185,18 +196,14 @@ export function assembleDualCollection(opts: {
   const allCitations: Citation[] = [];
 
   if (best) {
-    const usable = (best.response.results ?? []).filter(
-      (r) => r.score === null || r.score === undefined || r.score >= MIN_SCORE_THRESHOLD
-    );
+    const usable = usableResults(best.response.results ?? [], best.response.strategy);
     allCitations.push(
       ...usable.slice(0, 3).map((r) => chunkToCitation(r, best.domain, best.collection.label))
     );
   }
 
   for (const r of rest) {
-    const usable = (r.response.results ?? []).filter(
-      (chunk) => chunk.score === null || chunk.score === undefined || chunk.score >= MIN_SCORE_THRESHOLD
-    );
+    const usable = usableResults(r.response.results ?? [], r.response.strategy);
     allCitations.push(
       ...usable.slice(0, 2).map((chunk) => chunkToCitation(chunk, r.domain, r.collection.label))
     );
@@ -205,9 +212,7 @@ export function assembleDualCollection(opts: {
   const sectionParts: string[] = [];
 
   for (const r of results) {
-    const usable = (r.response.results ?? []).filter(
-      (chunk) => chunk.score === null || chunk.score === undefined || chunk.score >= MIN_SCORE_THRESHOLD
-    );
+    const usable = usableResults(r.response.results ?? [], r.response.strategy);
     if (usable.length === 0) continue;
 
     const hasSummary = !!(r.response.summary?.trim());

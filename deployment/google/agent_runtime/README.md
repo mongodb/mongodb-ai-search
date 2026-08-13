@@ -1,31 +1,38 @@
-# SearchaaS — Google Cloud Agent Runtime Deployment (opt-in)
+# SearchaaS — Vertex AI Agent Engine (Reasoning Engine) Deployment
 
-> **This is NOT the default deployment.** The default Google target is
-> **Cloud Run** (`deployment/google/cloud_run/`). Deploy to Agent Runtime only
-> when you explicitly want a dedicated private MCP endpoint integrated with
-> Vertex AI. The script refuses to run without confirmation.
-
-This packages the SearchaaS FastMCP surface (`searchaas/mcp_server/server.py`)
-as an `amd64` container and deploys it as a **private** Cloud Run service
-configured for Vertex AI agent connectivity.
+Deploys SearchaaS to the **Google Cloud Gemini agent platform's managed agent
+runtime — Vertex AI Agent Engine** (formerly "Reasoning Engine"). This is the
+managed, serverless agent host: **no Cloud Run service, no locally-built
+container image**. The Agent Engine service builds and runs the agent
+container server-side from the pickled agent object, the `searchaas` package,
+and the pip requirements uploaded to a staging bucket.
 
 Docs:
-- <https://cloud.google.com/run/docs/authenticating/service-to-service>
-- <https://cloud.google.com/vertex-ai/generative-ai/docs/agent-builder/overview>
-- <https://cloud.google.com/vertex-ai/generative-ai/docs/adk/overview>
+- <https://cloud.google.com/vertex-ai/generative-ai/docs/agent-engine/overview>
+- <https://cloud.google.com/vertex-ai/generative-ai/docs/agent-engine/develop/custom>
+
+> The standard containerized deployment (React UI + REST API + MCP server)
+> remains available under [`../cloud_run/`](../cloud_run/README.md).
 
 ---
 
-## Agent Runtime contract this deployment satisfies
+## Agent Engine contract this deployment satisfies
 
 | Requirement | How it's met |
 |---|---|
-| Platform: `linux/amd64` | `Dockerfile` targets `linux/amd64`; build uses `buildx` |
-| MCP served at `0.0.0.0:8000/mcp` | `MCP_HOST=0.0.0.0`, `MCP_PORT=8000`, transport `streamable-http` |
-| Image in Artifact Registry | Script creates `searchaas-agent` repo and pushes the image |
-| Private / authenticated | `--no-allow-unauthenticated`, `--ingress=internal-and-cloud-load-balancing` |
-| Vertex AI can invoke it | Script binds `roles/run.invoker` to the Vertex AI service account |
-| Dedicated service account | Script creates `searchaas-agent-runtime-sa` with Vertex AI + Secret Manager roles |
+| Queryable agent object | `SearchaaSAgent` in `deploy_agent_engine.py` implements `query()` + `stream_query()` (custom reasoning-engine template) |
+| `set_up()` hook | Builds the SearchaaS `Container` remotely after unpickling (Atlas client, embedder, planner LLM, retrievers) |
+| Code packaged | `extra_packages=["searchaas"]` — the repo package is tarred, uploaded to the staging bucket, and importable in the remote runtime |
+| Dependencies | repo-root `requirements.txt` (minus `pytest`) is installed server-side |
+| Config | Plain env vars (`ATLAS_DB`, `EMBEDDINGS_PROVIDER`, …) via `env_vars` |
+| Secrets | `ATLAS_URI`, API keys via **Secret Manager `SecretRef`** — never baked into the agent |
+| Staging | `gs://<project>-agent-engine-staging` bucket, created by `deploy.sh` |
+| IAM | `deploy.sh` grants the Agent Engine service agent `secretmanager.secretAccessor` + `storage.objectViewer` on the staging bucket |
+
+The `searchaas` application code is **not modified** — the agent wrapper lives
+entirely in this directory and reuses the identical pipeline as the FastAPI
+`/retrieve` endpoint and the MCP `auto_search` tool
+(understand → plan → retrieve → summarize).
 
 ---
 
@@ -33,8 +40,9 @@ Docs:
 
 | File | Purpose |
 |---|---|
-| `Dockerfile` | amd64 image, FastMCP on `:8000/mcp` (build context = repo root) |
-| `deploy.sh` | Opt-in end-to-end: confirm → APIs → SA → secrets → image → Cloud Run |
+| `deploy.sh` | End-to-end deploy: APIs → staging bucket → secrets → IAM → Agent Engine |
+| `deploy_agent_engine.py` | `SearchaaSAgent` wrapper class + `AgentEngine.create()/update()` driver |
+| `requirements-deploy.txt` | Deploy-time deps installed into the local venv (Vertex AI SDK + cloudpickle) |
 
 ---
 
@@ -44,7 +52,7 @@ Docs:
 export ATLAS_URI='mongodb+srv://USER:PASS@cluster.mongodb.net/?retryWrites=true'
 export ATLAS_DB='your_database_name'
 
-# Interactive confirmation (type 'deploy-agent-runtime' when prompted):
+# Interactive confirmation (type 'deploy-agent-engine' when prompted):
 ./deployment/google/agent_runtime/deploy.sh
 
 # Or skip the prompt in CI:
@@ -55,22 +63,78 @@ YES=yes ./deployment/google/agent_runtime/deploy.sh --yes
     --project my-gcp-project \
     --region us-central1 \
     --yes
+
+# Update an existing engine in place (no new resource created):
+AGENT_ENGINE_ID=<engine-id> ./deployment/google/agent_runtime/deploy.sh --yes
 ```
 
-The script prints the **MCP endpoint URL** and example invocations:
+The server-side build takes **~5–15 minutes**. On success the script prints:
 
 ```
-https://searchaas-agent-runtime-<hash>-<region>.run.app/mcp
+AGENT_ENGINE_RESOURCE=projects/<project>/locations/us-central1/reasoningEngines/<id>
 ```
 
 ---
 
-## Configuration options
+## Query the deployed agent
+
+```python
+import vertexai
+from vertexai import agent_engines
+
+vertexai.init(project="my-gcp-project", location="us-central1")
+agent = agent_engines.get("projects/.../locations/us-central1/reasoningEngines/<id>")
+
+# Auto mode — the planner picks the retrieval strategy:
+resp = agent.query(input="best rated hotels", top_k=5)
+print(resp["summary"], resp["results"])
+
+# Fixed strategy — vector | fulltext | hybrid | graph | parent_doc | metadata:
+resp = agent.query(input="best rated hotels", top_k=5, strategy="hybrid")
+
+# Optional metadata pre-filters:
+resp = agent.query(input="hotels in Paris", top_k=5,
+                   filters={"imdb.rating": 8})
+
+# Optional per-request overrides (same semantics as the REST /retrieve body):
+# target another collection in the same database + tune retrieval weights.
+resp = agent.query(
+    input="How do I connect to the VPN?", top_k=5,
+    atlas={
+        "collection": "IT_helpdesk",
+        "vector_index": "it_helpdesk_vector_index",
+        "search_index": "it_helpdesk_search_index",
+        "text_key": "text",
+        "embedding_key": None,          # autoEmbed index — no client-side key
+    },
+    retrieval={"vector_weight": 0.55, "fulltext_weight": 0.45,
+               "num_candidates": 150},
+)
+
+# Streaming (progress events + final result):
+for event in agent.stream_query(input="best rated hotels", top_k=5):
+    print(event)
+```
+
+The response dict matches the REST `/retrieve` payload: `strategy`, `summary`,
+`results`, `understood_query`, `plan`, `timings`.
+
+### From the console / Gemini agent platform
+
+Open **Vertex AI → Agent Builder → Agent Engines**
+(<https://console.cloud.google.com/vertex-ai/agents/agent-engines>) — the
+`searchaas-agent` engine appears there once deployed, with a built-in
+playground for `query` / `streamQuery` calls, and can be registered as a tool
+for Gemini Enterprise agents.
+
+---
+
+## Configuration
 
 All configuration in `searchaas/config/searchaas.yaml` uses `${VAR:-default}`
-syntax, so you configure the runtime purely with **environment variables** —
-no image rebuild needed. Export variables before running `deploy.sh` and they
-will be forwarded:
+syntax, so the deployed agent is configured purely with **environment
+variables** — no redeploy of code needed beyond re-running `deploy.sh`.
+Export variables before deploying and they are forwarded:
 
 ```bash
 export EMBEDDINGS_PROVIDER=auto
@@ -83,7 +147,7 @@ export ATLAS_DIMENSIONS=-1
 
 | Env var | Default | Purpose |
 |---|---|---|
-| `ATLAS_URI` | *(required)* | `mongodb+srv://...` connection string |
+| `ATLAS_URI` | *(required)* | `mongodb+srv://...` connection string (Secret Manager) |
 | `ATLAS_DB` | `amazon` | Database name |
 | `ATLAS_COLLECTION` | `pdf_multimodal_chunks` | Collection to search |
 | `ATLAS_VECTOR_INDEX` | `aisearch_vector_index` | Atlas Vector Search index |
@@ -130,103 +194,12 @@ validation. Do not use in production.
 
 | Env var | Default | Options |
 |---|---|---|
-| `RETRIEVAL_DEFAULT_STRATEGY` | `hybrid` | `vector`, `fulltext`, `hybrid`, `graph`, `parent_doc` |
+| `RETRIEVAL_DEFAULT_STRATEGY` | `hybrid` | `vector`, `fulltext`, `hybrid`, `graph`, `parent_doc`, `metadata` |
 | `RETRIEVAL_HYBRID_VECTOR_WEIGHT` | `0.6` | hybrid vector weight |
 | `RETRIEVAL_HYBRID_FULLTEXT_WEIGHT` | `0.4` | hybrid fulltext weight |
 | `RETRIEVAL_VECTOR_NUM_CANDIDATES` | `200` | vector oversampling |
 
 > `hybrid` requires **MongoDB 8.0+** (uses native `$rankFusion`).
-
----
-
-## Invoking the deployed MCP server
-
-The service is private — all callers must present a Google-signed OIDC identity
-token.
-
-### gcloud + curl
-
-```bash
-# User account (gcloud auth login) — omit --audiences:
-TOKEN=$(gcloud auth print-identity-token)
-curl -H "Authorization: Bearer $TOKEN" \
-     https://searchaas-agent-runtime-<hash>-uc.run.app/mcp
-
-# Service account impersonation:
-TOKEN=$(gcloud auth print-identity-token \
-    --impersonate-service-account=searchaas-agent-runtime-sa@PROJECT.iam.gserviceaccount.com \
-    --audiences="https://searchaas-agent-runtime-<hash>-uc.run.app")
-curl -H "Authorization: Bearer $TOKEN" \
-     https://searchaas-agent-runtime-<hash>-uc.run.app/mcp
-```
-
-### Python MCP client
-
-```python
-import asyncio
-from google.auth.transport.requests import Request
-from google.oauth2 import id_token
-from mcp import ClientSession
-from mcp.client.streamable_http import streamablehttp_client
-
-SERVICE_URL = "https://searchaas-agent-runtime-<hash>-uc.run.app"
-MCP_URL     = f"{SERVICE_URL}/mcp"
-
-def get_token() -> str:
-    request = Request()
-    return id_token.fetch_id_token(request, SERVICE_URL)
-
-async def main():
-    headers = {"Authorization": f"Bearer {get_token()}"}
-    async with streamablehttp_client(MCP_URL, headers, timeout=120,
-                                     terminate_on_close=False) as (r, w, _):
-        async with ClientSession(r, w) as s:
-            await s.initialize()
-            print(await s.list_tools())
-            print(await s.call_tool("hybrid_search",
-                                    {"query": "best rated hotels", "top_k": 5}))
-
-asyncio.run(main())
-```
-
-### Vertex AI Agent Builder
-
-1. Open **Vertex AI Agent Builder** in the GCP console.
-2. Create or edit an agent.
-3. Add a **Tool** → type **MCP**.
-4. Set the **Server URL** to `https://<service-url>/mcp`.
-5. Set authentication to **Google OIDC (service-to-service)**.
-6. The agent can now call `vector_search`, `hybrid_search`, `fulltext_search`,
-   `graph_search`, `parent_doc_search`, `metadata_search`, `auto_search`.
-
-### Google ADK (Python)
-
-```python
-from google.adk.agents import LlmAgent
-from google.adk.tools.mcp_tool import MCPToolset, StreamableHTTPConnectionParams
-
-MCP_URL = "https://searchaas-agent-runtime-<hash>-uc.run.app/mcp"
-
-toolset = MCPToolset(
-    connection_params=StreamableHTTPConnectionParams(url=MCP_URL),
-)
-
-agent = LlmAgent(
-    model="gemini-2.0-flash",
-    name="search_agent",
-    instruction="Use the available search tools to answer user queries.",
-    tools=[toolset],
-)
-```
-
----
-
-## Tools exposed
-
-`vector_search`, `fulltext_search`, `hybrid_search`, `graph_search`,
-`parent_doc_search`, `metadata_search`, `auto_search`
-
-(all from `searchaas/mcp_server/server.py`)
 
 ---
 
@@ -236,26 +209,25 @@ agent = LlmAgent(
 PROJECT=my-gcp-project
 REGION=us-central1
 
-# Check status
-gcloud run services describe searchaas-agent-runtime \
-    --region $REGION --project $PROJECT
+# List engines
+venv/bin/python - <<'PY'
+import vertexai
+from vertexai import agent_engines
+vertexai.init(project="my-gcp-project", location="us-central1")
+for e in agent_engines.list():
+    print(e.resource_name, e.display_name)
+PY
 
-# View logs
-gcloud logging read \
-    "resource.type=cloud_run_revision AND resource.labels.service_name=searchaas-agent-runtime" \
-    --project $PROJECT --limit 50
+# Delete the engine
+venv/bin/python - <<'PY'
+import vertexai
+from vertexai import agent_engines
+vertexai.init(project="my-gcp-project", location="us-central1")
+agent_engines.delete("projects/my-gcp-project/locations/us-central1/reasoningEngines/<id>")
+PY
 
-# Delete service
-gcloud run services delete searchaas-agent-runtime \
-    --region $REGION --project $PROJECT --quiet
-
-# Delete Artifact Registry repo (also removes images)
-gcloud artifacts repositories delete searchaas-agent \
-    --location $REGION --project $PROJECT --quiet
-
-# Delete service account
-gcloud iam service-accounts delete \
-    searchaas-agent-runtime-sa@${PROJECT}.iam.gserviceaccount.com \
+# Delete the staging bucket (also removes staged artifacts)
+gcloud storage buckets delete gs://${PROJECT}-agent-engine-staging \
     --project $PROJECT --quiet
 ```
 
@@ -263,13 +235,17 @@ gcloud iam service-accounts delete \
 
 ## Notes / caveats
 
-- **Private by default.** The service has `--ingress=internal-and-cloud-load-balancing`
-  and `--no-allow-unauthenticated`. Direct browser access will return `403`.
-  This is intentional — agent runtimes are called service-to-service only.
-- **Cold starts.** `--min-instances=0` means the first request may take 5–15 s.
-  Set `--min-instances=1` in `deploy.sh` to eliminate cold starts (adds cost).
-- **Secrets.** Atlas URI and API keys are stored in Secret Manager and mounted
-  at deploy time — they are never baked into the image.
-- **Vertex AI SA.** The script tries to grant `roles/run.invoker` to the
-  Vertex AI service account. If Vertex AI has not been used in the project yet,
-  this SA may not exist; grant the binding manually after enabling the API.
+- **Server-side build.** `AgentEngine.create()` uploads the pickled agent,
+  `searchaas` package, and requirements to the staging bucket; the managed
+  service then pip-installs requirements and boots the runtime. Expect
+  ~5–15 minutes per deploy.
+- **Python version.** The remote runtime Python matches the local interpreter
+  (3.10–3.13 supported). Use the repo `./venv` (3.13) — it is the default.
+- **Cold starts.** The first `query` on a fresh engine builds the SearchaaS
+  container (Atlas connection, embedder, planner) — allow 30–60 s. Subsequent
+  calls are warm.
+- **Secrets.** Atlas URI and API keys are referenced via Secret Manager
+  `SecretRef` env vars and injected at runtime — they are never baked into
+  the pickled agent or printed by the deploy script.
+- **Updates.** Pass `AGENT_ENGINE_ID=<id>` (or `--engine-id`) to update the
+  same engine in place; without it, each deploy creates a new engine resource.

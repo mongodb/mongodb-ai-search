@@ -1,0 +1,5 @@
+# Deploy-time dependencies for the Agent Engine deployer (installed into the
+# local venv by deploy.sh — NOT the remote runtime requirements; those come
+# from the repo-root requirements.txt).
+google-cloud-aiplatform[agent_engines]>=1.93.0
+cloudpickle>=3.0.0
