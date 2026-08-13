@@ -11,11 +11,13 @@
     { "name": "PYTHONUNBUFFERED", "value": "1" },
     { "name": "PYTHONPATH", "value": "/app" },
     { "name": "SEARCHAAS_CONFIG", "value": "/app/searchaas/config/searchaas.yaml" },
+    { "name": "AWS_REGION", "value": "<REGION>" },
+    { "name": "AWS_DEFAULT_REGION", "value": "<REGION>" },
     { "name": "ATLAS_URI", "value": "<ATLAS_URI>" },
     { "name": "ATLAS_DB", "value": "<ATLAS_DB>" },
+    { "name": "ATLAS_COLLECTION", "value": "<ATLAS_COLLECTION>" },
     { "name": "SEARCHAAS_CORS_ORIGINS", "value": "<CORS_ORIGINS>" },
-    { "name": "EMBEDDINGS_PROVIDER", "value": "bedrock_titan" },
-    { "name": "EMBEDDINGS_MODEL_ID", "value": "amazon.titan-embed-text-v2:0" },
-    { "name": "BEDROCK_REGION_NAME", "value": "us-east-1" }
+    { "name": "EMBEDDINGS_PROVIDER", "value": "<EMBEDDINGS_PROVIDER>" },
+    { "name": "EMBEDDINGS_MODEL", "value": "<EMBEDDINGS_MODEL>" }
   ]
 }

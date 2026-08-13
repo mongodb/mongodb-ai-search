@@ -8,9 +8,12 @@
 # Docs: https://docs.aws.amazon.com/AmazonECS/latest/developerguide/express-service-getting-started.html
 #
 # Prereqs:
-#   - AWS CLI v2 configured (`aws configure`)
-#   - Docker installed
-#   - ATLAS_URI exported in your shell
+#   - AWS CLI v2 configured (`aws configure` / `aws sso login`)
+#   - Docker installed (buildx available)
+#   - ATLAS_URI and ATLAS_DB exported in your shell
+#
+# Everything else is optional and defaults to the values baked into
+# searchaas/config/searchaas.yaml — see the "Inputs" block below.
 # -----------------------------------------------------------------------------
 set -euo pipefail
 
@@ -21,6 +24,19 @@ set -euo pipefail
 # Comma-separated list of origins the React UI will call from.
 # Use "*" to allow ALL origins (handy during initial setup).
 : "${CORS_ORIGINS:=*}"
+# Collection + embedding mode. Defaults mirror searchaas/config/searchaas.yaml,
+# which is authored for server-side AutoEmbeddings ("auto"): Atlas embeds the
+# query internally using the model declared in the vector index's autoEmbed
+# field, so no client-side embedding API key is needed.
+#
+# NOTE: `EMBEDDINGS_PROVIDER=bedrock_titan` is NOT switchable by env var alone.
+# The YAML `embeddings.config` block only carries `model` + `voyage_api_key`,
+# and langchain-aws `BedrockEmbeddings` rejects both (extra_forbidden). Switching
+# to Bedrock Titan requires editing `embeddings.config` in searchaas.yaml to
+# `model_id` + `region_name` first. See README "Embedding provider".
+: "${ATLAS_COLLECTION:=retail}"
+: "${EMBEDDINGS_PROVIDER:=auto}"
+: "${EMBEDDINGS_MODEL:=voyage-4}"
 ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
 IMAGE_TAG=latest
 # Two separate ECR repos — one per service image.
@@ -114,13 +130,21 @@ docker buildx build \
 
 # ── 3. Build --primary-container JSON payloads with placeholders filled in ───
 echo "==> Rendering primary-container payloads..."
+# Escape characters that are special in a sed *replacement* (`&` expands to the
+# whole match, `|` is our delimiter, `\` starts an escape). Atlas passwords
+# routinely contain `&`, which would otherwise silently corrupt ATLAS_URI.
+esc() { printf '%s' "$1" | sed -e 's/[\\&|]/\\&/g'; }
+
 render() {
   local src=$1 dst=$2
-  sed -e "s|<ACCOUNT_ID>|${ACCOUNT_ID}|g" \
-      -e "s|<REGION>|${AWS_REGION}|g" \
-      -e "s|<ATLAS_URI>|${ATLAS_URI}|g" \
-      -e "s|<ATLAS_DB>|${ATLAS_DB}|g" \
-      -e "s|<CORS_ORIGINS>|${CORS_ORIGINS}|g" \
+  sed -e "s|<ACCOUNT_ID>|$(esc "$ACCOUNT_ID")|g" \
+      -e "s|<REGION>|$(esc "$AWS_REGION")|g" \
+      -e "s|<ATLAS_URI>|$(esc "$ATLAS_URI")|g" \
+      -e "s|<ATLAS_DB>|$(esc "$ATLAS_DB")|g" \
+      -e "s|<ATLAS_COLLECTION>|$(esc "$ATLAS_COLLECTION")|g" \
+      -e "s|<CORS_ORIGINS>|$(esc "$CORS_ORIGINS")|g" \
+      -e "s|<EMBEDDINGS_PROVIDER>|$(esc "$EMBEDDINGS_PROVIDER")|g" \
+      -e "s|<EMBEDDINGS_MODEL>|$(esc "$EMBEDDINGS_MODEL")|g" \
       "$src" > "$dst"
 }
 render "$SCRIPT_DIR/primary-container-fastapi.json" "$SCRIPT_DIR/.rendered-fastapi.json"
@@ -164,21 +188,29 @@ create_or_update_service() {
 
 create_or_update_service "searchaas-fastapi" "$SCRIPT_DIR/.rendered-fastapi.json" "/health"
 # NOTE: FastMCP's /mcp endpoint expects an SSE handshake; a plain GET won't
-# return 200, so the ALB health check will fail. Add a /healthz route to
-# FastMCP (see README) or change this path to one that returns 200.
+# return 200, so the ALB health check must not point at it. `/healthz` is
+# registered in searchaas/mcp_server/server.py for exactly this purpose.
 create_or_update_service "searchaas-fastmcp" "$SCRIPT_DIR/.rendered-fastmcp.json" "/healthz"
 
 # ── 5. Show the generated URLs ───────────────────────────────────────────────
+# The endpoint lives at activeConfigurations[0].ingressPaths[0].endpoint —
+# there is no top-level `service.url` field in the DescribeExpressGatewayService
+# response (querying it returns None and silently prints nothing useful).
 echo ""
 echo "==> Done. Service URLs:"
 for svc in searchaas-fastapi searchaas-fastmcp; do
   arn=$(aws ecs list-services --cluster default --region "$AWS_REGION" \
           --query "serviceArns[?contains(@, ':service/default/${svc}')]|[0]" \
           --output text)
-  url=$(aws ecs describe-express-gateway-service \
+  host=$(aws ecs describe-express-gateway-service \
           --region "$AWS_REGION" --service-arn "$arn" \
-          --query 'service.url' --output text 2>/dev/null || echo "(not ready)")
-  printf "    %-20s %s\n" "$svc" "$url"
+          --query 'service.activeConfigurations[0].ingressPaths[0].endpoint' \
+          --output text 2>/dev/null || echo "None")
+  if [[ "$host" == "None" || -z "$host" ]]; then
+    printf "    %-20s (not ready — re-run: aws ecs describe-express-gateway-service --service-arn %s)\n" "$svc" "$arn"
+  else
+    printf "    %-20s https://%s\n" "$svc" "$host"
+  fi
 done
 
 # Cleanup rendered files (they contain ATLAS_URI)
