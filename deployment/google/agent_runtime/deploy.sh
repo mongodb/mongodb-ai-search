@@ -1,41 +1,34 @@
 #!/usr/bin/env bash
 # =============================================================================
-# SearchaaS — Google Cloud Agent Runtime Deployment (FastMCP)
+# SearchaaS — Vertex AI Agent Engine (Reasoning Engine) Deployment
 #
-# ⚠  OPT-IN ONLY. This is NOT the default Google deployment. The default is
-#    Cloud Run (deployment/google/cloud_run/deploy.sh). This script deploys
-#    ONLY the FastMCP backend as a private Cloud Run service configured for
-#    Vertex AI agent connectivity. Run it only when you explicitly want a
-#    dedicated agent runtime endpoint.
+# Deploys SearchaaS to the Google Cloud Gemini agent platform's managed agent
+# runtime — Vertex AI Agent Engine (a.k.a. Reasoning Engine). This is NOT a
+# Cloud Run deployment: no image is built locally and no Cloud Run service is
+# created. The Agent Engine service builds and hosts the runtime container
+# server-side from the pickled agent + the searchaas package.
 #
 # What it does (idempotent):
-#   1. Enables required GCP APIs (Cloud Run, Artifact Registry, IAM, Secret
-#      Manager, Vertex AI).
-#   2. Creates/ensures a dedicated service account with Vertex AI + Secret
-#      Manager roles.
+#   1. Enables required GCP APIs (Vertex AI, Storage, Secret Manager, Cloud
+#      Build, Artifact Registry, IAM).
+#   2. Ensures a regional GCS staging bucket for Agent Engine artifacts.
 #   3. Pushes .env secrets to Secret Manager.
-#   4. Builds and pushes the FastMCP image (linux/amd64) to Artifact Registry.
-#   5. Deploys the MCP server to Cloud Run with:
-#        - --ingress=internal-and-cloud-load-balancing  (no public internet)
-#        - --no-allow-unauthenticated  (requires Google identity tokens)
-#        - Dedicated service account bound to Vertex AI roles
-#   6. Prints the service URL and an example MCP client invocation using
-#      Google identity token auth.
-#
-# Vertex AI agent connectivity:
-#   Vertex AI agents invoke the MCP endpoint over HTTPS with a Google-signed
-#   OIDC identity token. The Cloud Run service validates the token automatically.
-#   Use the printed URL as the MCP server URL when registering the tool in
-#   Vertex AI Agent Builder or calling from ADK-based agents.
+#   4. Grants the Agent Engine service agent access to the staging bucket and
+#      the secrets.
+#   5. Ensures deploy-time Python deps (Vertex AI SDK + cloudpickle) exist in
+#      the repo venv.
+#   6. Runs deploy_agent_engine.py, which pickles the SearchaaSAgent wrapper,
+#      uploads it with the searchaas package, and creates (or updates, when
+#      --engine-id is given) the managed Agent Engine.
+#   7. Prints the Agent Engine resource name and a sample query invocation.
 #
 # Docs:
-#   https://cloud.google.com/run/docs/authenticating/service-to-service
-#   https://cloud.google.com/vertex-ai/generative-ai/docs/agent-builder/overview
-#   https://cloud.google.com/vertex-ai/generative-ai/docs/adk/overview
+#   https://cloud.google.com/vertex-ai/generative-ai/docs/agent-engine/overview
+#   https://cloud.google.com/vertex-ai/generative-ai/docs/agent-engine/develop/custom
 #
 # Prerequisites:
-#   - gcloud CLI authenticated (gcloud auth login / application-default login)
-#   - Docker + buildx
+#   - gcloud CLI authenticated (gcloud auth login + application-default login)
+#   - Python venv at repo root (./venv) or set PYTHON=<python3.10-3.13>
 #   - ATLAS_URI + ATLAS_DB exported (or set in .env)
 # =============================================================================
 set -euo pipefail
@@ -71,10 +64,10 @@ fi
 CONFIRM="${YES:-}"
 PROJECT_ID="${GCP_PROJECT:-}"
 REGION="${GCP_REGION:-us-central1}"
-REPO_NAME="${AR_REPO_NAME:-searchaas-agent}"
-SVC_NAME="${AGENT_RUNTIME_SERVICE:-searchaas-agent-runtime}"
-IMAGE_TAG="${IMAGE_TAG:-latest}"
-SA_NAME="${AGENT_SA_NAME:-searchaas-agent-runtime-sa}"
+DISPLAY_NAME="${AGENT_ENGINE_DISPLAY_NAME:-searchaas-agent}"
+ENGINE_ID="${AGENT_ENGINE_ID:-}"
+STAGING_BUCKET="${AGENT_ENGINE_STAGING_BUCKET:-}"
+PYTHON_BIN="${PYTHON:-${REPO_ROOT}/venv/bin/python}"
 
 # Effective embedding provider — Voyage key required for voyageai / voyage_multimodal.
 EMBEDDINGS_PROVIDER="${EMBEDDINGS_PROVIDER:-voyageai}"
@@ -96,11 +89,13 @@ step()    { echo -e "\n${BOLD}==> $*${RESET}"; }
 # ── Parse CLI flags ───────────────────────────────────────────────────────────
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --yes|-y)       CONFIRM="yes";      shift ;;
-    --project)      PROJECT_ID="$2";    shift 2 ;;
-    --region)       REGION="$2";        shift 2 ;;
-    --service)      SVC_NAME="$2";      shift 2 ;;
-    -h|--help)      grep '^#' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    --yes|-y)         CONFIRM="yes";        shift ;;
+    --project)        PROJECT_ID="$2";      shift 2 ;;
+    --region)         REGION="$2";          shift 2 ;;
+    --display-name)   DISPLAY_NAME="$2";    shift 2 ;;
+    --engine-id)      ENGINE_ID="$2";       shift 2 ;;
+    --staging-bucket) STAGING_BUCKET="$2";  shift 2 ;;
+    -h|--help)        grep '^#' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     *) error "Unknown argument: $1" ;;
   esac
 done
@@ -114,96 +109,87 @@ if [[ -z "${PROJECT_ID}" ]]; then
 fi
 [[ -n "${PROJECT_ID}" ]] || error "GCP Project ID is required."
 
+STAGING_BUCKET="${STAGING_BUCKET:-gs://${PROJECT_ID}-agent-engine-staging}"
+BUCKET_NAME="${STAGING_BUCKET#gs://}"
+
+[[ -x "${PYTHON_BIN}" ]] || PYTHON_BIN="$(command -v python3 || true)"
+[[ -n "${PYTHON_BIN}" ]] || error "No python found — create ./venv or set PYTHON=/path/to/python."
+
+# ── gcloud credential fallback ────────────────────────────────────────────────
+# Some environments (workforce identity / short-lived tokens) reject the
+# gcloud user token while application-default credentials (ADC) work fine.
+# Probe a cheap API call; on UNAUTHENTICATED, drive gcloud with the ADC token.
+GCLOUD=(gcloud)
+ADC_TOKEN_FILE=""
+if ! gcloud services list --enabled --project="${PROJECT_ID}" --limit=1 >/dev/null 2>&1; then
+  ADC_TOKEN_FILE="$(mktemp -t searchaas-adc-token)"
+  if gcloud auth application-default print-access-token > "${ADC_TOKEN_FILE}" 2>/dev/null \
+     && [[ -s "${ADC_TOKEN_FILE}" ]]; then
+    GCLOUD=(gcloud --access-token-file="${ADC_TOKEN_FILE}")
+    echo "[WARN]  gcloud user token rejected by the API — falling back to application-default credentials."
+  else
+    rm -f "${ADC_TOKEN_FILE}"
+    echo "[ERROR] gcloud credentials are invalid and no ADC available." >&2
+    echo "        Run: gcloud auth login && gcloud auth application-default login" >&2
+    exit 1
+  fi
+fi
+
 # ── Explicit opt-in gate ──────────────────────────────────────────────────────
 cat <<'EOF'
 ============================================================================
-  SearchaaS — Google Cloud Agent Runtime Deployment (FastMCP)  —  OPT-IN
+  SearchaaS — Vertex AI Agent Engine (Reasoning Engine) Deployment
 ============================================================================
-This deploys the FastMCP backend to a PRIVATE Cloud Run service configured
-for Vertex AI agent connectivity. This is a SEPARATE, non-default target.
-The default Google deployment is Cloud Run (deployment/google/cloud_run/).
+This deploys SearchaaS to the Gemini agent platform's MANAGED agent runtime
+(Vertex AI Agent Engine). No Cloud Run service is created. Proceeding will:
 
-Proceeding will:
-  - Build and push an amd64 FastMCP image to Artifact Registry
-  - Create a dedicated service account with Vertex AI + Secret Manager roles
-  - Deploy a private (no public internet) Cloud Run service
-  - Print the MCP endpoint URL for use with Vertex AI Agent Builder / ADK
+  - Enable GCP APIs and create a GCS staging bucket for agent artifacts
+  - Push .env secrets to Secret Manager (never baked into the agent)
+  - Build and deploy the managed Agent Engine server-side (takes ~5-15 min)
+  - Print the Agent Engine resource name + sample query invocation
 EOF
 
 if [[ "$CONFIRM" != "yes" ]]; then
-  read -r -p "Type 'deploy-agent-runtime' to confirm: " ANSWER
-  if [[ "$ANSWER" != "deploy-agent-runtime" ]]; then
-    echo "Aborted — agent runtime deployment not confirmed. Nothing was created."
+  read -r -p "Type 'deploy-agent-engine' to confirm: " ANSWER
+  if [[ "$ANSWER" != "deploy-agent-engine" ]]; then
+    echo "Aborted — agent engine deployment not confirmed. Nothing was created."
     exit 0
   fi
 fi
 
-AR_HOST="${REGION}-docker.pkg.dev"
-AR_REPO="${AR_HOST}/${PROJECT_ID}/${REPO_NAME}"
-IMAGE_URI="${AR_REPO}/${SVC_NAME}:${IMAGE_TAG}"
-SA_EMAIL="${SA_NAME}@${PROJECT_ID}.iam.gserviceaccount.com"
-
-info "Project  : ${PROJECT_ID}"
-info "Region   : ${REGION}"
-info "Service  : ${SVC_NAME}"
-info "Image    : ${IMAGE_URI}"
-info "SA       : ${SA_EMAIL}"
+info "Project        : ${PROJECT_ID}"
+info "Region         : ${REGION}"
+info "Display name   : ${DISPLAY_NAME}"
+info "Staging bucket : ${STAGING_BUCKET}"
+info "Python         : ${PYTHON_BIN}"
+[[ -n "${ENGINE_ID}" ]] && info "Update target  : engine ${ENGINE_ID} (in-place update)"
 
 # ── 1. Enable required GCP APIs ───────────────────────────────────────────────
 step "Enabling GCP APIs..."
-gcloud services enable \
-  run.googleapis.com \
-  artifactregistry.googleapis.com \
-  secretmanager.googleapis.com \
+"${GCLOUD[@]}" services enable \
   aiplatform.googleapis.com \
+  storage.googleapis.com \
+  secretmanager.googleapis.com \
+  cloudbuild.googleapis.com \
+  artifactregistry.googleapis.com \
   iam.googleapis.com \
   --project="${PROJECT_ID}" --quiet
 success "APIs enabled"
 
-# ── 2. Dedicated service account ──────────────────────────────────────────────
-step "Ensuring service account '${SA_NAME}'..."
-if ! gcloud iam service-accounts describe "${SA_EMAIL}" \
+# ── 2. Staging bucket ─────────────────────────────────────────────────────────
+step "Ensuring staging bucket '${STAGING_BUCKET}'..."
+if ! "${GCLOUD[@]}" storage buckets describe "${STAGING_BUCKET}" \
      --project="${PROJECT_ID}" >/dev/null 2>&1; then
-  gcloud iam service-accounts create "${SA_NAME}" \
-    --display-name="SearchaaS Agent Runtime SA" \
-    --project="${PROJECT_ID}"
-  success "Service account created: ${SA_EMAIL}"
-else
-  info "Service account already exists — skipping create"
-fi
-
-# Grant Vertex AI + Secret Manager roles
-for ROLE in \
-  roles/aiplatform.user \
-  roles/secretmanager.secretAccessor \
-  roles/logging.logWriter; do
-  gcloud projects add-iam-policy-binding "${PROJECT_ID}" \
-    --member="serviceAccount:${SA_EMAIL}" \
-    --role="${ROLE}" \
-    --condition=None \
-    --quiet
-  info "Granted ${ROLE} to ${SA_EMAIL}"
-done
-success "IAM roles set"
-
-# ── 3. Artifact Registry repo ─────────────────────────────────────────────────
-step "Ensuring Artifact Registry repository '${REPO_NAME}'..."
-if ! gcloud artifacts repositories describe "${REPO_NAME}" \
-     --location="${REGION}" --project="${PROJECT_ID}" --quiet 2>/dev/null; then
-  gcloud artifacts repositories create "${REPO_NAME}" \
-    --repository-format=docker \
+  "${GCLOUD[@]}" storage buckets create "${STAGING_BUCKET}" \
     --location="${REGION}" \
-    --project="${PROJECT_ID}" \
-    --quiet
-  success "Repository created"
+    --uniform-bucket-level-access \
+    --project="${PROJECT_ID}"
+  success "Staging bucket created"
 else
-  info "Repository already exists — skipping"
+  info "Staging bucket already exists — skipping"
 fi
 
-gcloud auth configure-docker "${AR_HOST}" --quiet
-success "Docker auth configured"
-
-# ── 4. Push .env keys to Secret Manager ──────────────────────────────────────
+# ── 3. Push .env keys to Secret Manager ──────────────────────────────────────
 step "Storing secrets in Secret Manager..."
 
 ENV_KEYS=()
@@ -234,12 +220,12 @@ _load_env_file() {
 
 _upsert_secret() {
   local name="$1" value="$2"
-  if gcloud secrets describe "${name}" --project="${PROJECT_ID}" --quiet >/dev/null 2>&1; then
-    echo -n "${value}" | gcloud secrets versions add "${name}" \
+  if "${GCLOUD[@]}" secrets describe "${name}" --project="${PROJECT_ID}" --quiet >/dev/null 2>&1; then
+    echo -n "${value}" | "${GCLOUD[@]}" secrets versions add "${name}" \
       --data-file=- --project="${PROJECT_ID}" --quiet
     info "Secret updated: ${name}"
   else
-    echo -n "${value}" | gcloud secrets create "${name}" \
+    echo -n "${value}" | "${GCLOUD[@]}" secrets create "${name}" \
       --data-file=- --project="${PROJECT_ID}" --quiet
     success "Secret created: ${name}"
   fi
@@ -261,161 +247,98 @@ for i in "${!ENV_KEYS[@]}"; do
 done
 success "Secrets stored"
 
-# Grant SA access to secrets
-gcloud projects add-iam-policy-binding "${PROJECT_ID}" \
-  --member="serviceAccount:${SA_EMAIL}" \
+# ── 4. Grant the Agent Engine service agent access ───────────────────────────
+step "Granting the Agent Engine service agent access to bucket + secrets..."
+PROJECT_NUMBER=$("${GCLOUD[@]}" projects describe "${PROJECT_ID}" --format="value(projectNumber)")
+RE_SA="service-${PROJECT_NUMBER}@gcp-sa-aiplatform-re.iam.gserviceaccount.com"
+
+"${GCLOUD[@]}" projects add-iam-policy-binding "${PROJECT_ID}" \
+  --member="serviceAccount:${RE_SA}" \
   --role="roles/secretmanager.secretAccessor" \
   --condition=None \
-  --quiet
+  --quiet >/dev/null
+info "Granted roles/secretmanager.secretAccessor to ${RE_SA}"
 
-# ── 5. Build and push the FastMCP image ──────────────────────────────────────
-step "Building FastMCP image for linux/amd64 → ${IMAGE_URI}"
-docker buildx build \
-  --platform linux/amd64 \
-  --provenance=false \
-  -f "${SCRIPT_DIR}/Dockerfile" \
-  -t "${IMAGE_URI}" \
-  --push \
-  "${REPO_ROOT}"
-success "Image built and pushed"
+"${GCLOUD[@]}" storage buckets add-iam-policy-binding "${STAGING_BUCKET}" \
+  --member="serviceAccount:${RE_SA}" \
+  --role="roles/storage.objectViewer" \
+  --quiet >/dev/null 2>&1 || \
+  warn "Could not grant storage.objectViewer on ${STAGING_BUCKET} — grant manually if needed."
+info "Granted roles/storage.objectViewer on ${STAGING_BUCKET}"
+success "IAM bindings set"
 
-# ── 6. Build --set-secrets flag ───────────────────────────────────────────────
-# Collect all secret names we pushed into a single --set-secrets flag.
-ALL_SECRET_KEYS=("ATLAS_URI" "ATLAS_DB")
-[[ -n "${VOYAGE_API_KEY:-}" ]]    && ALL_SECRET_KEYS+=("VOYAGE_API_KEY")
-[[ -n "${GOOGLE_API_KEY:-}" ]]    && ALL_SECRET_KEYS+=("GOOGLE_API_KEY")
-[[ -n "${OPENAI_API_KEY:-}" ]]    && ALL_SECRET_KEYS+=("OPENAI_API_KEY")
-[[ -n "${ANTHROPIC_API_KEY:-}" ]] && ALL_SECRET_KEYS+=("ANTHROPIC_API_KEY")
-[[ -n "${COHERE_API_KEY:-}" ]]    && ALL_SECRET_KEYS+=("COHERE_API_KEY")
-for k in "${ENV_KEYS[@]}"; do ALL_SECRET_KEYS+=("$k"); done
+# ── 5. Deploy-time Python dependencies ───────────────────────────────────────
+step "Ensuring deploy-time Python deps (Vertex AI SDK + cloudpickle)..."
+if ! "${PYTHON_BIN}" -c "import cloudpickle, vertexai.agent_engines" >/dev/null 2>&1; then
+  "${PYTHON_BIN}" -m pip install -q -r "${SCRIPT_DIR}/requirements-deploy.txt"
+fi
+"${PYTHON_BIN}" -c "import cloudpickle, vertexai.agent_engines" \
+  || error "Failed to import vertexai.agent_engines/cloudpickle with ${PYTHON_BIN} — run: ${PYTHON_BIN} -m pip install -r ${SCRIPT_DIR}/requirements-deploy.txt"
+success "Deploy deps present ($(${PYTHON_BIN} -c 'import google.cloud.aiplatform as a; print("aiplatform", a.__version__)'))"
 
-# Dedup — use a plain indexed array scan (bash 3.2 compatible; no declare -A)
-UNIQUE_KEYS=()
-for k in "${ALL_SECRET_KEYS[@]}"; do
-  _found=""
-  for _u in "${UNIQUE_KEYS[@]:-}"; do [[ "$_u" == "$k" ]] && _found="1" && break; done
-  [[ -z "$_found" ]] && UNIQUE_KEYS+=("$k")
-done
+# ── 6. Deploy the Agent Engine ────────────────────────────────────────────────
+step "Deploying SearchaaS to Vertex AI Agent Engine (server-side build — this takes several minutes)..."
 
-_secret_pairs=""
-for k in "${UNIQUE_KEYS[@]}"; do
-  _secret_pairs+="${k}=${k}:latest,"
-done
-_secret_pairs="${_secret_pairs%,}"
-
-SECRET_FLAGS=()
-[[ -n "${_secret_pairs}" ]] && SECRET_FLAGS+=("--set-secrets=${_secret_pairs}")
-
-# ── Config vars forwarded via --set-env-vars ──────────────────────────────────
-# Non-secret operational config forwarded from the current environment.
-FORWARD_VARS=(
-  ATLAS_COLLECTION ATLAS_VECTOR_INDEX ATLAS_SEARCH_INDEX
-  ATLAS_TEXT_KEY ATLAS_EMBEDDING_KEY ATLAS_RELEVANCE_FN ATLAS_DIMENSIONS
-  EMBEDDINGS_PROVIDER EMBEDDINGS_MODEL EMBEDDINGS_OUTPUT_DIMENSION
-  PLANNER_LLM_PROVIDER PLANNER_MODEL PLANNER_TEMPERATURE PLANNER_DEFAULT_TOP_K
-  RETRIEVAL_DEFAULT_STRATEGY RETRIEVAL_HYBRID_VECTOR_WEIGHT
-  RETRIEVAL_HYBRID_FULLTEXT_WEIGHT RETRIEVAL_VECTOR_NUM_CANDIDATES
-  LOG_LEVEL SEARCHAAS_SKIP_PROVIDER_INDEX_CHECK
+DEPLOY_ARGS=(
+  --project "${PROJECT_ID}"
+  --region "${REGION}"
+  --staging-bucket "${STAGING_BUCKET}"
+  --display-name "${DISPLAY_NAME}"
 )
+[[ -n "${ENGINE_ID}" ]] && DEPLOY_ARGS+=(--engine-id "${ENGINE_ID}")
 
-ENV_VARS="PYTHONUNBUFFERED=1,SEARCHAAS_CONFIG=/app/searchaas/config/searchaas.yaml"
-ENV_VARS+=",MCP_HOST=0.0.0.0,MCP_PORT=8000,MCP_TRANSPORT=streamable-http"
-for var in "${FORWARD_VARS[@]}"; do
-  val="${!var:-}"
-  [[ -n "$val" ]] && ENV_VARS+=",${var}=${val}"
-done
+DEPLOY_LOG="$(mktemp -t searchaas-agent-engine-deploy)"
+trap 'rm -f "${DEPLOY_LOG}" ${ADC_TOKEN_FILE:+"${ADC_TOKEN_FILE}"}' EXIT
 
-# ── 7. Deploy to Cloud Run (private) ──────────────────────────────────────────
-step "Deploying '${SVC_NAME}' to Cloud Run (private / agent-runtime mode)..."
-gcloud run deploy "${SVC_NAME}" \
-  --image="${IMAGE_URI}" \
-  --region="${REGION}" \
-  --project="${PROJECT_ID}" \
-  --platform=managed \
-  --no-allow-unauthenticated \
-  --ingress=internal-and-cloud-load-balancing \
-  --port=8000 \
-  --cpu=2 \
-  --memory=5Gi \
-  --min-instances=0 \
-  --max-instances=10 \
-  --service-account="${SA_EMAIL}" \
-  --set-env-vars="${ENV_VARS}" \
-  "${SECRET_FLAGS[@]}" \
-  --quiet
+"${PYTHON_BIN}" "${SCRIPT_DIR}/deploy_agent_engine.py" "${DEPLOY_ARGS[@]}" 2>&1 | tee "${DEPLOY_LOG}"
 
-SVC_URL=$(gcloud run services describe "${SVC_NAME}" \
-  --region="${REGION}" --project="${PROJECT_ID}" \
-  --format="value(status.url)")
-MCP_ENDPOINT="${SVC_URL}/mcp"
+RESOURCE_NAME=$(grep '^AGENT_ENGINE_RESOURCE=' "${DEPLOY_LOG}" | tail -1 | cut -d= -f2-)
+NEW_ENGINE_ID=$(grep '^AGENT_ENGINE_ID=' "${DEPLOY_LOG}" | tail -1 | cut -d= -f2-)
 
-success "Deployed → ${SVC_URL}"
+[[ -n "${RESOURCE_NAME}" ]] || error "Deployment finished but no resource name was reported — check the log above."
+success "Agent Engine deployed: ${RESOURCE_NAME}"
 
-# ── 8. Allow Vertex AI SA to invoke the service ───────────────────────────────
-step "Granting Vertex AI service account permission to invoke '${SVC_NAME}'..."
-PROJECT_NUMBER=$(gcloud projects describe "${PROJECT_ID}" --format="value(projectNumber)")
-VERTEX_SA="service-${PROJECT_NUMBER}@gcp-sa-aiplatform.iam.gserviceaccount.com"
-
-gcloud run services add-iam-policy-binding "${SVC_NAME}" \
-  --region="${REGION}" \
-  --project="${PROJECT_ID}" \
-  --member="serviceAccount:${VERTEX_SA}" \
-  --role="roles/run.invoker" \
-  --quiet 2>/dev/null || \
-  warn "Could not grant roles/run.invoker to ${VERTEX_SA} — grant manually if needed."
-
-success "IAM invoke binding set (or skipped if Vertex AI SA does not exist yet)"
-
-# ── 9. Report ─────────────────────────────────────────────────────────────────
+# ── 7. Report ─────────────────────────────────────────────────────────────────
 echo ""
 echo -e "${BOLD}╔══════════════════════════════════════════════════════════════╗${RESET}"
-echo -e "${BOLD}║    SearchaaS — Google Agent Runtime Deployment Complete      ║${RESET}"
+echo -e "${BOLD}║   SearchaaS — Vertex AI Agent Engine Deployment Complete     ║${RESET}"
 echo -e "${BOLD}╠══════════════════════════════════════════════════════════════╣${RESET}"
-echo -e "${BOLD}║${RESET}  MCP Endpoint (Streamable HTTP)                               ${BOLD}║${RESET}"
-echo -e "${BOLD}║${RESET}    ${GREEN}${MCP_ENDPOINT}${RESET}"
-echo -e "${BOLD}║${RESET}                                                              ${BOLD}║${RESET}"
-echo -e "${BOLD}║${RESET}  Service URL  : ${SVC_URL}                 ${BOLD}║${RESET}"
-echo -e "${BOLD}║${RESET}  Project      : ${PROJECT_ID}                         ${BOLD}║${RESET}"
-echo -e "${BOLD}║${RESET}  Region       : ${REGION}                             ${BOLD}║${RESET}"
-echo -e "${BOLD}║${RESET}  Service acct : ${SA_EMAIL}  ${BOLD}║${RESET}"
+echo -e "${BOLD}║${RESET}  Resource : ${GREEN}${RESOURCE_NAME}${RESET}"
+echo -e "${BOLD}║${RESET}  Project  : ${PROJECT_ID}   Region: ${REGION}"
+echo -e "${BOLD}║${RESET}  Name     : ${DISPLAY_NAME}   Engine ID: ${NEW_ENGINE_ID}"
 echo -e "${BOLD}╚══════════════════════════════════════════════════════════════╝${RESET}"
 echo ""
 
 cat <<EOF
-The MCP server is private (no unauthenticated access). Callers must present a
-Google-signed OIDC identity token in the Authorization header:
+Query the agent (Python):
 
-  # User account (gcloud auth login) — omit --audiences:
-  TOKEN=\$(gcloud auth print-identity-token)
-  curl -H "Authorization: Bearer \$TOKEN" "${MCP_ENDPOINT}"
+  import vertexai
+  from vertexai import agent_engines
 
-  # Service account impersonation:
-  TOKEN=\$(gcloud auth print-identity-token \\
-    --impersonate-service-account=${SA_EMAIL} \\
-    --audiences="${SVC_URL}")
-  curl -H "Authorization: Bearer \$TOKEN" "${MCP_ENDPOINT}"
+  vertexai.init(project="${PROJECT_ID}", location="${REGION}")
+  agent = agent_engines.get("${RESOURCE_NAME}")
 
-Use the MCP endpoint URL above when registering this server as a tool in
-Vertex AI Agent Builder or from an ADK-based agent:
+  # Auto mode — planner picks the retrieval strategy:
+  agent.query(input="best rated hotels", top_k=5)
 
-  Vertex AI Agent Builder:
-    Tool type : OpenAPI / MCP
-    Server URL: ${MCP_ENDPOINT}
-    Auth      : Google OIDC (service-to-service)
+  # Fixed strategy:
+  agent.query(input="best rated hotels", top_k=5, strategy="hybrid")
 
-  ADK (Python):
-    from google.adk.tools.mcp_tool import MCPToolset, StreamableHTTPConnectionParams
-    toolset = MCPToolset(
-        connection_params=StreamableHTTPConnectionParams(url="${MCP_ENDPOINT}"),
-    )
+  # Streaming:
+  for event in agent.stream_query(input="best rated hotels", top_k=5):
+      print(event)
 
-Check status:
-  gcloud run services describe ${SVC_NAME} \\
-    --region ${REGION} --project ${PROJECT_ID}
+Console:
+  https://console.cloud.google.com/vertex-ai/agents/agent-engines?project=${PROJECT_ID}
+
+Redeploy IN PLACE (update the same engine instead of creating a new one):
+  AGENT_ENGINE_ID=${NEW_ENGINE_ID} ./deployment/google/agent_runtime/deploy.sh --yes
 
 Tear down:
-  gcloud run services delete ${SVC_NAME} \\
-    --region ${REGION} --project ${PROJECT_ID} --quiet
-  gcloud artifacts repositories delete ${REPO_NAME} \\
-    --location ${REGION} --project ${PROJECT_ID} --quiet
+  venv/bin/python -c "
+  import vertexai; from vertexai import agent_engines
+  vertexai.init(project='${PROJECT_ID}', location='${REGION}')
+  agent_engines.delete('${RESOURCE_NAME}')
+  "
+  gcloud storage buckets delete ${STAGING_BUCKET} --project ${PROJECT_ID} --quiet
 EOF
