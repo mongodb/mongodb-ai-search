@@ -25,8 +25,11 @@ FROM node:20-alpine AS builder
 WORKDIR /app
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
-# SEARCHAAS_BASE_URL is read server-side at request time, so no build-time
-# env is needed — the same image can be promoted across backends.
+# STANDALONE_BUILD=1 opts into Next's standalone output (see next.config.js —
+# kept env-gated so Amplify Hosting still gets the default .next layout).
+# SEARCHAAS_BASE_URL is read server-side at request time, so no other
+# build-time env is needed — the same image can be promoted across backends.
+ENV STANDALONE_BUILD=1
 RUN npm run build
 
 # ── runner: slim production image ────────────────────────────────────────────

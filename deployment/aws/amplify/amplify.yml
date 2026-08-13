@@ -1,0 +1,48 @@
+# ------------------------------------------------------------------------------
+# Amplify Hosting build spec for the Employee Support Copilot.
+#
+# This repo is a monorepo, so the spec uses the `applications:` form with an
+# `appRoot`. Amplify runs the build from that subdirectory, and the app must
+# also carry the env var AMPLIFY_MONOREPO_APP_ROOT=agents/employee-support-copilot
+# (deploy.sh sets it).
+#
+# Where this file goes:
+#   Amplify reads `amplify.yml` from the ROOT of the connected branch. Either
+#   copy this file to the repo root, or paste its contents into
+#   App settings → Build settings in the Amplify console. deploy.sh does the
+#   latter for you via `--build-spec`, so no repo change is needed.
+#
+# Do not add an `artifacts.baseDirectory` of `out` or `dist` — for a Next.js
+# SSR app it must stay `.next`, which is what Amplify's compute adapter reads.
+# -----------------------------------------------------------------------------
+version: 1
+applications:
+  - appRoot: agents/employee-support-copilot
+    frontend:
+      phases:
+        preBuild:
+          commands:
+            # `npm ci` needs the lockfile that sits next to package.json in appRoot.
+            - npm ci
+        build:
+          commands:
+            # Amplify env vars are BUILD-time only — a Next.js server route does
+            # not see them at request time. Writing them into .env.production
+            # before `next build` is the documented way to expose them to the
+            # SSR runtime. Without this, searchaas-client.ts falls back to its
+            # http://localhost:8000 default and every request fails with
+            # "SearchaaS unreachable: fetch failed".
+            #   https://docs.aws.amazon.com/amplify/latest/userguide/ssr-environment-variables.html
+            # `|| true` keeps the build alive when grep matches nothing.
+            - env | grep -e SEARCHAAS_ >> .env.production || true
+            - npm run build
+      artifacts:
+        # Next.js SSR: Amplify detects the framework from .next and provisions
+        # its managed compute. Leave as-is.
+        baseDirectory: .next
+        files:
+          - '**/*'
+      cache:
+        paths:
+          - node_modules/**/*
+          - .next/cache/**/*
