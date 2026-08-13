@@ -255,6 +255,7 @@ INDEX_TMPL = """<!DOCTYPE html>
     <a href="#agents">Agents</a>
     <a href="#clouds">Clouds</a>
     <a href="#docs">Docs</a>
+    <a href="pages/demo.html">Playground</a>
   </nav>
   <a class="cta" href="pages/README.html">Get Started</a>
 </header>
@@ -270,7 +271,8 @@ INDEX_TMPL = """<!DOCTYPE html>
          understanding and grounded summarization, exposed over REST and MCP on
          Google Cloud, AWS, and Azure.</p>
       <div class="actions">
-        <a class="btn btn-primary" href="#architecture">Explore the architecture</a>
+        <a class="btn btn-primary" href="pages/demo.html">▶ Try the connection playground</a>
+        <a class="btn btn-ghost" href="#architecture">Explore the architecture</a>
         <a class="btn btn-ghost" href="#docs">Read the docs ({count})</a>
       </div>
       <div class="stats">
@@ -292,7 +294,8 @@ INDEX_TMPL = """<!DOCTYPE html>
         <button type="button" data-ask="payroll">Update direct deposit</button>
       </div>
       <div class="cd-note">Demo: the agent classifies the domain, calls SearchaaS
-        <code>/retrieve</code> with per-collection Atlas overrides, and renders a grounded answer.</div>
+        <code>/retrieve</code> with per-collection Atlas overrides, and renders a grounded answer.
+        <a href="pages/demo.html" style="color:var(--mdb-forest);font-weight:700">Full interactive connection playground →</a></div>
     </div>
   </div>
 </section>
