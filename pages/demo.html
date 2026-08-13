@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Connection Playground — Agent × SearchaaS</title>
+<meta name="description" content="Interactive demo: watch the Employee Support Copilot agent classify, call SearchaaS over REST or Vertex AI Agent Engine, and render a grounded answer — hop by hop.">
+<link rel="stylesheet" href="assets/style.css">
+<link rel="stylesheet" href="assets/landing.css">
+<link rel="stylesheet" href="assets/demo.css">
+<script src="assets/demo.js" defer></script>
+</head>
+<body>
+
+<header class="lnav">
+  <a class="logo" href="../index.html"><span class="leaf">◈</span> SearchaaS</a>
+  <nav>
+    <a href="../index.html#architecture">Architecture</a>
+    <a href="../index.html#agents">Agents</a>
+    <a href="../index.html#clouds">Clouds</a>
+    <a href="../index.html#docs">Docs</a>
+  </nav>
+  <a class="cta" href="../index.html">← Back to site</a>
+</header>
+
+<!-- ── Header + environment picker ──────────────────────────────────────── -->
+<section class="dhead">
+  <div class="wrap">
+    <p class="kicker">Interactive demo · simulated, no live backend</p>
+    <h1>Watch an agent talk to SearchaaS</h1>
+    <p class="sub">Ask a question in the chat on the left. On the right, follow every hop of the
+       connection in real time — BFF classification, the exact wire payload, the SearchaaS
+       pipeline, and the Atlas aggregation. Pick where the stack is deployed and watch the
+       transport change. Every hop is clickable and links to its doc.</p>
+    <div class="envbar" role="tablist" aria-label="Deployment environment">
+      <button type="button" class="envpill" role="tab" data-env="local" aria-selected="true">Local</button>
+      <button type="button" class="envpill" role="tab" data-env="gcp" aria-selected="false">Google Cloud</button>
+      <button type="button" class="envpill" role="tab" data-env="aws" aria-selected="false">AWS</button>
+      <button type="button" class="envpill" role="tab" data-env="azure" aria-selected="false">Azure</button>
+    </div>
+    <p class="envnote" id="envnote"></p>
+  </div>
+</section>
+
+<!-- ── Chat + connection panes ──────────────────────────────────────────── -->
+<main class="demo-grid">
+
+  <!-- Chat: mimics the deployed Employee Support Copilot -->
+  <section class="chat" aria-label="Agent chat">
+    <div class="chat-head">
+      <span class="dot"></span> Employee Support Copilot
+      <span class="host" id="chat-host"></span>
+      <button type="button" id="chat-reset" title="Clear the conversation">Reset</button>
+    </div>
+    <div class="chat-body" id="chat-body"></div>
+    <div class="chat-suggests">
+      <button type="button" data-q="How many PTO days do I get per year?">PTO days</button>
+      <button type="button" data-q="My VPN keeps disconnecting on my MacBook">VPN keeps disconnecting</button>
+      <button type="button" data-q="How do I update my direct deposit?">Update direct deposit</button>
+      <button type="button" data-q="How do I set up MFA on a new phone?">Set up MFA</button>
+      <button type="button" data-q="Is there a policy for VPN usage?" title="Scores equally on both domains — the BFF fans out to both collections">⚡ VPN policy (ambiguous)</button>
+    </div>
+    <form class="chat-input" id="chat-form">
+      <input id="chat-text" type="text" placeholder="Ask anything — the BFF classifier routes it live…" autocomplete="off">
+      <button type="submit">Send</button>
+    </form>
+  </section>
+
+  <!-- Connection: hops, wire inspector, detail drawer -->
+  <section class="conn" aria-label="Connection view">
+    <p class="conn-label">Connection — click any hop for details</p>
+    <div class="flow" id="flow"></div>
+
+    <div class="inspector">
+      <div class="inspector-head">
+        <span class="dots"><i></i><i></i><i></i></span>
+        <button type="button" class="inspector-tab active" data-tab="request">Request</button>
+        <button type="button" class="inspector-tab" data-tab="response">Response</button>
+        <span class="inspector-title">BFF → SearchaaS wire</span>
+      </div>
+      <pre id="inspector-pre" class="plain">// send a question to see the exact wire payload</pre>
+    </div>
+
+    <div class="drawer" id="drawer"></div>
+  </section>
+
+</main>
+
+<footer class="lfooter">
+  <div class="wrap">
+    <div><b>◈ SearchaaS</b><br>MongoDB Atlas retrieval platform — REST + MCP, on any cloud.</div>
+    <div>Simulated playground — mirrors <code>classifier.ts</code>, <code>searchaas-client.ts</code> and the <code>/retrieve</code> REST surface.</div>
+  </div>
+</footer>
+
+</body>
+</html>
