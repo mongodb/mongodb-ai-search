@@ -232,7 +232,7 @@ def render_index(entries: list[dict]) -> str:
         <p class="blurb">{html.escape(e["blurb"])}</p>
       </a>''' for e in cards)
         sections_html.append(f'  <section>\n    <h2>{section}</h2>\n    <div class="grid">\n{card_html}\n    </div>\n  </section>')
-    return INDEX_TMPL.format(count=len(entries))
+    return INDEX_TMPL.format(sections="\n\n".join(sections_html), count=len(entries))
 
 
 INDEX_TMPL = """<!DOCTYPE html>
