@@ -1,6 +1,6 @@
 # Deploy the React UI to S3 (static website)
 
-Deploys `searchaas/ui_react` to an **existing** S3 bucket as a static website.
+Deploys `AiSearch/ui_react` to an **existing** S3 bucket as a static website.
 
 > **The script never creates a bucket.** You supply the name of a bucket you
 > already own. If it can't reach the bucket, it stops and tells you how to
@@ -9,7 +9,7 @@ Deploys `searchaas/ui_react` to an **existing** S3 bucket as a static website.
 ## How the UI gets its backend URLs
 
 The SPA reads its backend endpoints at **runtime** from
-`window.__SEARCHAAS_CONFIG__`, which is set by a `config.js` loaded in
+`window.__AISEARCH_CONFIG__`, which is set by a `config.js` loaded in
 `index.html`. This script generates that `config.js` from the URLs you pass, so
 the same build can point at any backend — no rebuild needed to change URLs.
 
@@ -26,8 +26,8 @@ MCP_API_KEY → App.tsx mcpApiKey
 ./deployment/aws/s3-ui/deploy.sh \
   --bucket my-existing-ui-bucket \
   --region us-east-1 \
-  --api-url "https://searchaas-fastapi.ecs.us-east-1.on.aws" \
-  --mcp-url "https://searchaas-fastmcp.ecs.us-east-1.on.aws/mcp"
+  --api-url "https://AiSearch-fastapi.ecs.us-east-1.on.aws" \
+  --mcp-url "https://AiSearch-fastmcp.ecs.us-east-1.on.aws/mcp"
 
 # Interactive — prompts for the bucket and (optionally) the backend URLs
 ./deployment/aws/s3-ui/deploy.sh

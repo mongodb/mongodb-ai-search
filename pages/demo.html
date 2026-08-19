@@ -3,8 +3,8 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Connection Playground — Agent × SearchaaS</title>
-<meta name="description" content="Interactive demo: watch the Employee Support Copilot agent classify, call SearchaaS over REST or Vertex AI Agent Engine, and render a grounded answer — hop by hop.">
+<title>Connection Playground — Agent × AiSearch</title>
+<meta name="description" content="Interactive demo: watch the Employee Support Copilot agent classify, call AiSearch over REST or Vertex AI Agent Engine, and render a grounded answer — hop by hop.">
 <link rel="stylesheet" href="assets/style.css">
 <link rel="stylesheet" href="assets/landing.css">
 <link rel="stylesheet" href="assets/demo.css">
@@ -13,7 +13,7 @@
 <body>
 
 <header class="lnav">
-  <a class="logo" href="../index.html"><span class="leaf">◈</span> SearchaaS</a>
+  <a class="logo" href="../index.html"><span class="leaf">◈</span> AiSearch</a>
   <nav>
     <a href="../index.html#architecture">Architecture</a>
     <a href="../index.html#agents">Agents</a>
@@ -27,9 +27,9 @@
 <section class="dhead">
   <div class="wrap">
     <p class="kicker">Interactive demo · simulated, no live backend</p>
-    <h1>Watch an agent talk to SearchaaS</h1>
+    <h1>Watch an agent talk to AiSearch</h1>
     <p class="sub">Ask a question in the chat on the left. On the right, follow every hop of the
-       connection in real time — BFF classification, the exact wire payload, the SearchaaS
+       connection in real time — BFF classification, the exact wire payload, the AiSearch
        pipeline, and the Atlas aggregation. Pick where the stack is deployed and watch the
        transport change. Every hop is clickable and links to its doc.</p>
     <div class="envbar" role="tablist" aria-label="Deployment environment">
@@ -76,7 +76,7 @@
         <span class="dots"><i></i><i></i><i></i></span>
         <button type="button" class="inspector-tab active" data-tab="request">Request</button>
         <button type="button" class="inspector-tab" data-tab="response">Response</button>
-        <span class="inspector-title">BFF → SearchaaS wire</span>
+        <span class="inspector-title">BFF → AiSearch wire</span>
       </div>
       <pre id="inspector-pre" class="plain">// send a question to see the exact wire payload</pre>
     </div>
@@ -88,8 +88,8 @@
 
 <footer class="lfooter">
   <div class="wrap">
-    <div><b>◈ SearchaaS</b><br>MongoDB Atlas retrieval platform — REST + MCP, on any cloud.</div>
-    <div>Simulated playground — mirrors <code>classifier.ts</code>, <code>searchaas-client.ts</code> and the <code>/retrieve</code> REST surface.</div>
+    <div><b>◈ AiSearch</b><br>MongoDB Atlas retrieval platform — REST + MCP, on any cloud.</div>
+    <div>Simulated playground — mirrors <code>classifier.ts</code>, <code>AiSearch-client.ts</code> and the <code>/retrieve</code> REST surface.</div>
   </div>
 </footer>
 

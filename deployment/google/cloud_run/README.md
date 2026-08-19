@@ -1,6 +1,6 @@
-# SearchaaS — Google Cloud Run Deployment
+# AiSearch — Google Cloud Run Deployment
 
-Deploy SearchaaS to Google Cloud Run (managed, serverless containers).
+Deploy AiSearch to Google Cloud Run (managed, serverless containers).
 
 ## Two deployment modes
 
@@ -24,9 +24,9 @@ Deploy SearchaaS to Google Cloud Run (managed, serverless containers).
 
 Deploys three independent Cloud Run services:
 
-- `searchaas-api` — FastAPI REST on port 8000
-- `searchaas-mcp` — FastMCP server on port 8001 (`/mcp` endpoint)
-- `searchaas-frontend` — React SPA via nginx on port 8080
+- `AiSearch-api` — FastAPI REST on port 8000
+- `AiSearch-mcp` — FastMCP server on port 8001 (`/mcp` endpoint)
+- `AiSearch-frontend` — React SPA via nginx on port 8080
 
 ```bash
 # From the repo root:
@@ -36,7 +36,7 @@ Deploys three independent Cloud Run services:
 ./deployment/google/cloud_run/deploy.sh \
     --project my-gcp-project \
     --region us-central1 \
-    --repo searchaas
+    --repo AiSearch
 ```
 
 The script:
@@ -77,7 +77,7 @@ Endpoint map (all on the same Cloud Run URL):
 
 All configuration is driven from the repo root `.env` file. Every `KEY=VALUE`
 pair is stored in Secret Manager and injected into the container at deploy time.
-The `searchaas/config/searchaas.yaml` file uses `${KEY:-default}` syntax so
+The `AiSearch/config/AiSearch.yaml` file uses `${KEY:-default}` syntax so
 no image rebuild is needed to change Atlas indexes, embedding provider, or LLM.
 
 Key environment variables:
@@ -92,7 +92,7 @@ Key environment variables:
 | `EMBEDDINGS_PROVIDER` | `voyageai`, `auto`, `gemini`, `openai`, etc. |
 | `PLANNER_LLM_PROVIDER` | `gemini`, `openai`, `anthropic`, `bedrock`, etc. |
 
-See `searchaas/config/searchaas.yaml` for the full list with defaults.
+See `AiSearch/config/AiSearch.yaml` for the full list with defaults.
 
 ---
 
@@ -114,15 +114,15 @@ PROJECT=my-gcp-project
 REGION=us-central1
 
 # Three-service mode
-gcloud run services delete searchaas-api      --region=$REGION --project=$PROJECT --quiet
-gcloud run services delete searchaas-mcp      --region=$REGION --project=$PROJECT --quiet
-gcloud run services delete searchaas-frontend --region=$REGION --project=$PROJECT --quiet
+gcloud run services delete AiSearch-api      --region=$REGION --project=$PROJECT --quiet
+gcloud run services delete AiSearch-mcp      --region=$REGION --project=$PROJECT --quiet
+gcloud run services delete AiSearch-frontend --region=$REGION --project=$PROJECT --quiet
 
 # Combined mode
-gcloud run services delete searchaas --region=$REGION --project=$PROJECT --quiet
+gcloud run services delete AiSearch --region=$REGION --project=$PROJECT --quiet
 
 # Remove Artifact Registry repo (also deletes all images)
-gcloud artifacts repositories delete searchaas --location=$REGION --project=$PROJECT --quiet
+gcloud artifacts repositories delete AiSearch --location=$REGION --project=$PROJECT --quiet
 ```
 
 ---

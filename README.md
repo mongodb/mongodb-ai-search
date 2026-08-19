@@ -1,4 +1,42 @@
-# SearchaaS — Phase 1
+# AiSearch — Phase 1
+
+Modern applications contain valuable information, but making that information easy to use often requires customers to design, maintain, and tune complex search pipelines. MongoDB AI Search is designed to make that experience far simpler: customers can ask questions in natural language, while the system interprets the intent behind each request and performs the appropriate operations against MongoDB.
+
+Instead of requiring every customer to build the underlying retrieval logic themselves, AI Search provides an intelligent path from a user’s question to MongoDB data. It can analyze what the user is trying to accomplish, determine how the request should be handled, and translate that intent into the retrieval interaction needed to search MongoDB. This allows customers to focus on the experience they want to deliver rather than on the plumbing required to support it.
+
+The MongoDB AI Search demo illustrates this flow through an agent and AiSearch: a question is classified, a request is formed, AiSearch processes the retrieval, and MongoDB Atlas performs the underlying aggregation. The connection can be inspected hop by hop, helping customers understand how a natural-language request becomes an operation over their MongoDB data. The experience is exposed through REST and MCP, and the demo shows deployment options for local environments and major cloud platforms.
+
+## How customers can use it
+
+Customers can place AI Search behind an application, assistant, or agent and let users interact with MongoDB conversationally. A user asks a question using the language they already understand; AI Search analyzes the intent, selects the appropriate search and retrieval behavior, and returns a relevant answer or result without requiring the customer to hand-build a separate pipeline for every question type.
+
+This approach is especially useful when the same data must support many kinds of questions. A single application might need to handle direct lookups, semantic searches, policy questions, and ambiguous requests. AI Search can provide a consistent natural-language interface while MongoDB remains the system of record and the place where the relevant data is retrieved.
+
+## Example use cases
+
+- **Employee, IT, HR, and customer service automation:** Employees and customers can ask questions such as “How many PTO days do I have?”, “How do I set up MFA?”, “My VPN keeps disconnecting”, or “What has this customer already tried?” AiSearch can interpret each request and retrieve the relevant policies, case history, product information, troubleshooting guidance, account context, or next steps from MongoDB. It can distinguish between support issues and information requests, recognize ambiguous questions such as “What is the VPN policy?”, and help service teams respond more quickly and consistently.
+
+- **Knowledge search:** Customers can expose product documentation, service procedures, or internal knowledge through a conversational interface. Users search by meaning and intent rather than by guessing the exact keywords stored in the database.
+
+- **Agent-powered applications:** Developers can connect AI Search to an agent through REST or MCP, allowing the agent to use MongoDB retrieval as part of a broader workflow while avoiding bespoke retrieval pipelines for each new capability.
+
+- **Customer service and contact-center automation:** Support agents can ask questions such as, “What has this customer already tried?” or “Which resolution applies to this issue?” AiSearch can bring together relevant case history, product information, troubleshooting guidance, and account context to help reduce handling time and improve consistency.
+
+- **E-commerce product discovery:** Shoppers can search using natural language, for example, “Find lightweight waterproof jackets for a winter trip under $200.” AiSearch can interpret multiple constraints and retrieve products based on meaning, attributes, availability, and customer preferences.
+
+- **Financial services research and operations:** Analysts and service teams can query customer profiles, transaction context, product documentation, and internal policies using questions such as, “Why was this payment flagged?” or “Which account option fits this customer’s requirements?” Results can support investigation and assisted decision-making while MongoDB remains the operational data store.
+
+- **Healthcare and life sciences information access:** Care teams, operations staff, and researchers can search clinical, administrative, or product information using questions such as, “Which patients require follow-up this week?” or “Show the latest guidance for this procedure.” AiSearch can help users navigate complex information without requiring them to know the underlying data model.
+
+- **Fraud, risk, and compliance investigation:** Investigators can explore relationships across customers, accounts, transactions, devices, and events with questions such as, “Show activity that resembles this suspicious pattern.” AiSearch can accelerate the discovery of relevant records and supporting evidence for human review.
+
+- **Manufacturing and field-service assistance:** Technicians can ask, “What are the likely causes of this alarm on this model?” or “Which parts and service steps apply to this asset?” AiSearch can retrieve manuals, asset history, maintenance records, and service procedures in a single conversational workflow.
+
+- **Supply-chain and logistics visibility:** Operations teams can ask, “Which shipments are at risk of missing delivery this week?” or “What inventory is available near this customer?” AiSearch can help connect orders, inventory, suppliers, shipments, and operational events to support faster decisions.
+
+MongoDB AI Search therefore makes MongoDB more accessible to people and applications that think in questions rather than database operations. By handling the interpretation and retrieval path around the customer’s intent, it helps teams deliver useful, conversational experiences faster—while continuing to use MongoDB as the trusted foundation for their data.
+
+---
 
 MongoDB Atlas-backed retrieval platform built around the **Factory pattern**.
 Phase 1 ships: query understanding (rewriting, entity & typed-fact extraction,
@@ -31,7 +69,7 @@ mongodb-ai-search/
 │   ├── aws/                      # S3 UI + ECS Express (default) + Bedrock AgentCore
 │   ├── azure/                    # Container Apps + AI Foundry (Bicep)
 │   └── google/                   # Cloud Run (combined or separate services)
-└── searchaas/                # application package
+└── AiSearch/                # application package
     ├── config/               # YAML config + loader (single source of truth; ${VAR:-default} expansion)
     ├── infrastructure/       # AtlasFactory (Mongo client / db / collections, ping, stats)
     ├── domain/               # Pydantic models (Chunk, SourceRef)
@@ -49,7 +87,7 @@ mongodb-ai-search/
     ├── facts.py              # query-fact routing → Atlas pre-filters vs in-memory post-filters
     ├── filtering.py          # filter allowlist sanitization (drops non-indexable paths)
     ├── utils.py              # shared serialization / summarization helpers
-    └── diagnose.py           # `python -m searchaas.diagnose` self-check CLI
+    └── diagnose.py           # `python -m AiSearch.diagnose` self-check CLI
 ```
 
 ## Setup
@@ -60,7 +98,7 @@ pip install -r requirements.txt
 cp .env.example .env         # fill in ATLAS_URI, provider keys, ...
 ```
 
-Edit `searchaas/config/searchaas.yaml` to pick providers/models/indexes. The
+Edit `AiSearch/config/AiSearch.yaml` to pick providers/models/indexes. The
 default build runs **server-side AutoEmbeddings** (Atlas embeds the query and
 document text internally, `embeddings.provider: auto`, `voyage-4` model) with
 **Gemini** as the planner LLM. Every value is `${VAR:-default}`-driven, so you
@@ -74,7 +112,7 @@ Two embedding modes are supported and cross-validated at startup:
 - **Mode A — client-side embeddings:** e.g. `provider: voyageai`, with
   `embedding_key`/`dimensions`/`relevance_score_fn` matching a `vector` index.
 
-The bootstrap layer (`searchaas/app/bootstrap.py`) refuses to start on a
+The bootstrap layer (`AiSearch/app/bootstrap.py`) refuses to start on a
 provider↔index-type mismatch.
 
 **Supported providers**
@@ -87,21 +125,21 @@ provider↔index-type mismatch.
 
 ```bash
 # REST API
-uvicorn searchaas.api.app:app --host 0.0.0.0 --port 8000
+uvicorn AiSearch.api.app:app --host 0.0.0.0 --port 8000
 
 # FastMCP server
-python -m searchaas.mcp_server.server
+python -m AiSearch.mcp_server.server
 
-# React UI (from searchaas/ui_react)
+# React UI (from AiSearch/ui_react)
 npm install && npm run dev
 
 # Self-check (Atlas ping, collection stats, embedder probe)
-python -m searchaas.diagnose
+python -m AiSearch.diagnose
 ```
 
 ## REST API
 
-FastAPI surface (`searchaas/api/app.py`). Every `/retrieve*` response includes
+FastAPI surface (`AiSearch/api/app.py`). Every `/retrieve*` response includes
 the chosen `strategy`, the `plan`, `results`, the `understood_query`, an LLM
 `summary`, per-stage `timings`, and the **real captured Atlas aggregation
 `pipeline`** that produced the results.
@@ -127,7 +165,7 @@ and optional per-request `atlas` / `retrieval` overrides.
 
 ## Retrieval strategies
 
-`RetrieverFactory` (`searchaas/retrieval/factory.py`) dispatches on the plan's
+`RetrieverFactory` (`AiSearch/retrieval/factory.py`) dispatches on the plan's
 strategy:
 
 | Strategy | What it does |
@@ -322,7 +360,7 @@ server is up; MCP requires `POST` with a valid JSON-RPC body. A plain
 
 ## React testing UI
 
-`searchaas/ui_react` is a Vite + TypeScript + React playground for both
+`AiSearch/ui_react` is a Vite + TypeScript + React playground for both
 backends. It shows conversation turns, per-turn results, the LLM summary, an
 understood-query intent panel (rewrite, entities, filters, chosen strategy),
 latency timings, and the real captured MongoDB aggregation pipeline. Backend
@@ -331,7 +369,7 @@ backend), falling back to `http://localhost:8000` and
 `http://localhost:8001/mcp`.
 
 ```bash
-cd searchaas/ui_react
+cd AiSearch/ui_react
 npm install
 npm run dev        # dev server
 npm run build      # production build → dist/
@@ -341,7 +379,7 @@ npm run build      # production build → dist/
 
 ```mermaid
 flowchart TD
-    YAML["searchaas.yaml"] --> AppConfig["AppConfig (loader)"]
+    YAML["AiSearch.yaml"] --> AppConfig["AppConfig (loader)"]
     AppConfig --> AtlasFactory["AtlasFactory"]
     AppConfig --> EmbeddingFactory["EmbeddingFactory"]
     AppConfig --> LLMFactory["LLMFactory"]
@@ -374,7 +412,7 @@ flowchart TD
 
 **Components**
 
-- **searchaas.yaml** — The single source of truth for providers, models,
+- **AiSearch.yaml** — The single source of truth for providers, models,
   indexes, and runtime options. Every value is `${VAR:-default}`-driven so the
   deployment can be retuned via environment variables without a rebuild.
 - **AppConfig (loader)** — Parses the YAML, expands environment variables, and
@@ -445,8 +483,8 @@ export ATLAS_DB='your_database_name'
 # 2. Deploy the UI to your existing S3 bucket, pointing at those URLs.
 ./deployment/aws/s3-ui/deploy.sh \
   --bucket my-existing-ui-bucket \
-  --api-url "https://searchaas-fastapi.ecs.${AWS_REGION}.on.aws" \
-  --mcp-url "https://searchaas-fastmcp.ecs.${AWS_REGION}.on.aws/mcp"
+  --api-url "https://AiSearch-fastapi.ecs.${AWS_REGION}.on.aws" \
+  --mcp-url "https://AiSearch-fastmcp.ecs.${AWS_REGION}.on.aws/mcp"
 
 # Optional: FastMCP on Bedrock AgentCore (requires typed confirmation)
 ./deployment/aws/agentcore/deploy.sh
@@ -462,16 +500,16 @@ provisioned by subscription-scope Bicep with a readiness gate. Full walkthrough:
 
 ```bash
 # 1. Create resource group + ACR
-az deployment sub create --name searchaas-acr --location centralindia \
+az deployment sub create --name AiSearch-acr --location centralindia \
   --template-file deployment/azure/infra/acr.bicep \
   --parameters deployment/azure/infra/main.parameters.json
-ACR_NAME=$(az deployment sub show -n searchaas-acr --query properties.outputs.acrName.value -o tsv)
+ACR_NAME=$(az deployment sub show -n AiSearch-acr --query properties.outputs.acrName.value -o tsv)
 
 # 2. Build & push all three images (server-side in ACR)
 ./deployment/azure/scripts/build-and-push.sh "$ACR_NAME" latest
 
 # 3. Deploy infra + Container Apps
-az deployment sub create --name searchaas --location centralindia \
+az deployment sub create --name AiSearch --location centralindia \
   --template-file deployment/azure/infra/main.bicep \
   --parameters deployment/azure/infra/main.parameters.json \
   --parameters atlasUri="$ATLAS_URI" voyageApiKey="$VOYAGE_API_KEY" \
@@ -515,22 +553,22 @@ chmod +x deployment/google/cloud_run/deploy.sh
 
 | Cloud Run service | URL path | Description |
 |---|---|---|
-| `searchaas-api` | `/retrieve*`, `/health`, `/docs` | FastAPI REST server |
-| `searchaas-mcp` | `/mcp` | FastMCP server |
-| `searchaas-frontend` | `/` | React SPA (pre-configured with backend URLs) |
+| `AiSearch-api` | `/retrieve*`, `/health`, `/docs` | FastAPI REST server |
+| `AiSearch-mcp` | `/mcp` | FastMCP server |
+| `AiSearch-frontend` | `/` | React SPA (pre-configured with backend URLs) |
 
 **Update frontend backend URLs after deploy:**
 
 ```bash
-gcloud run services update searchaas-frontend \
+gcloud run services update AiSearch-frontend \
   --region=<REGION> \
-  --update-env-vars="SEARCHAAS_API_URL=https://searchaas-api-xyz.run.app,SEARCHAAS_MCP_URL=https://searchaas-mcp-xyz.run.app/mcp"
+  --update-env-vars="AISEARCH_API_URL=https://AiSearch-api-xyz.run.app,AISEARCH_MCP_URL=https://AiSearch-mcp-xyz.run.app/mcp"
 ```
 
 **Update CORS allowed origins:**
 
 ```bash
-gcloud run services update searchaas-api \
+gcloud run services update AiSearch-api \
   --region=<REGION> \
-  --update-env-vars="CORS_ORIGINS=https://searchaas-frontend-xyz.run.app"
+  --update-env-vars="CORS_ORIGINS=https://AiSearch-frontend-xyz.run.app"
 ```

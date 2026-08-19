@@ -3,13 +3,13 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Deploy FastMCP on Amazon Bedrock AgentCore Runtime (opt-in) · SearchaaS Docs</title>
+<title>Deploy FastMCP on Amazon Bedrock AgentCore Runtime (opt-in) · AiSearch Docs</title>
 <link rel="stylesheet" href="../../../../pages/assets/style.css">
 <link rel="stylesheet" href="../../../../pages/assets/pygments.css">
 </head>
 <body>
 <header class="topbar">
-  <a class="brand" href="../../../../index.html">SearchaaS Docs</a>
+  <a class="brand" href="../../../../index.html">AiSearch Docs</a>
   <a class="back" href="../../../../index.html">← All docs</a>
 </header>
 <main class="content">
@@ -20,7 +20,7 @@
 you explicitly want to — the script refuses to run without confirmation.</p>
 </blockquote>
 <p>Amazon Bedrock AgentCore Runtime can host MCP servers directly. This packages
-the existing SearchaaS FastMCP surface (<code>searchaas/mcp_server/server.py</code>) as an
+the existing AiSearch FastMCP surface (<code>AiSearch/mcp_server/server.py</code>) as an
 ARM64 container and registers it as an AgentCore runtime with the <strong>MCP</strong>
 protocol.</p>
 <p>Docs: <a href="https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-mcp.html">https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-mcp.html</a></p>
@@ -43,11 +43,11 @@ protocol.</p>
 </tr>
 <tr>
 <td>Image in ECR</td>
-<td>Script creates <code>searchaas-agentcore</code> repo and pushes the image</td>
+<td>Script creates <code>AiSearch-agentcore</code> repo and pushes the image</td>
 </tr>
 <tr>
 <td>Execution role</td>
-<td>Script creates <code>searchaas-agentcore-runtime-role</code> (ECR + logs + Bedrock)</td>
+<td>Script creates <code>AiSearch-agentcore-runtime-role</code> (ECR + logs + Bedrock)</td>
 </tr>
 <tr>
 <td>Protocol = MCP</td>
@@ -92,12 +92,12 @@ protocol.</p>
 
 <blockquote>
 <p><strong>Create-only.</strong> <code>deploy.sh</code> calls <code>create-agent-runtime</code>. If a runtime with
-the same name (<code>AGENTCORE_RUNTIME_NAME</code>, default <code>searchaas_fastmcp</code>) already
+the same name (<code>AGENTCORE_RUNTIME_NAME</code>, default <code>AiSearch_fastmcp</code>) already
 exists, AWS rejects the create. Delete the old runtime first (see
 <a href="#manage--tear-down">Manage / tear down</a>) or deploy under a new name.</p>
 </blockquote>
 <h2 id="configuration-options">Configuration options</h2>
-<p>Everything in <code>searchaas/config/searchaas.yaml</code> uses <code>${VAR:-default}</code> syntax, so
+<p>Everything in <code>AiSearch/config/AiSearch.yaml</code> uses <code>${VAR:-default}</code> syntax, so
 you configure the runtime purely with <strong>environment variables</strong> — no image
 rebuild. <code>deploy.sh</code> forwards any of the variables below that you export into the
 runtime's <code>environmentVariables</code>; anything you leave unset falls back to the YAML
@@ -213,7 +213,7 @@ index type (<code>ProviderIndexMismatch</code>). Pick one:</p>
   (empty), and point <code>ATLAS_VECTOR_INDEX</code> at the autoEmbed index whose declared
   <code>model</code> equals <code>EMBEDDINGS_MODEL</code>.</li>
 </ul>
-<p>Dev-only escape hatch: <code>SEARCHAAS_SKIP_PROVIDER_INDEX_CHECK=1</code> bypasses this
+<p>Dev-only escape hatch: <code>AISEARCH_SKIP_PROVIDER_INDEX_CHECK=1</code> bypasses this
 validation. Do not use in production.</p>
 <h3 id="planner-llm-query-understanding-retrieval-planning">Planner LLM (query understanding + retrieval planning)</h3>
 <p>Set <code>PLANNER_LLM_PROVIDER</code>. This deployment uses AWS Bedrock; other providers
@@ -323,7 +323,7 @@ client using the MCP SDK:</p>
 <p>Set up a Cognito user pool (or another OAuth IdP) to mint <code>BEARER_TOKEN</code>; see
 the "Set up Cognito user pool" appendix in the AWS AgentCore MCP docs.</p>
 <h2 id="tools-exposed">Tools exposed</h2>
-<p>Same tools as the ECS FastMCP service (they share <code>searchaas/mcp_server/server.py</code>):
+<p>Same tools as the ECS FastMCP service (they share <code>AiSearch/mcp_server/server.py</code>):
 <code>vector_search</code>, <code>fulltext_search</code>, <code>hybrid_search</code>, <code>graph_search</code>,
 <code>parent_doc_search</code>, <code>metadata_search</code>, <code>auto_search</code>.</p>
 <h2 id="manage-tear-down">Manage / tear down</h2>

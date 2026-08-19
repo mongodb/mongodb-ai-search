@@ -3,18 +3,18 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Employee Support Copilot · SearchaaS Docs</title>
+<title>Employee Support Copilot · AiSearch Docs</title>
 <link rel="stylesheet" href="../../../pages/assets/style.css">
 <link rel="stylesheet" href="../../../pages/assets/pygments.css">
 </head>
 <body>
 <header class="topbar">
-  <a class="brand" href="../../../index.html">SearchaaS Docs</a>
+  <a class="brand" href="../../../index.html">AiSearch Docs</a>
   <a class="back" href="../../../index.html">← All docs</a>
 </header>
 <main class="content">
 <h1 id="employee-support-copilot">Employee Support Copilot</h1>
-<p>A production-style chat application that routes employee questions to the right MongoDB Atlas collection via SearchaaS, dynamically passing collection name and vector search configuration on every request.</p>
+<p>A production-style chat application that routes employee questions to the right MongoDB Atlas collection via AiSearch, dynamically passing collection name and vector search configuration on every request.</p>
 <hr />
 <h2 id="architecture">Architecture</h2>
 <div class="highlight"><pre><span></span><code>Browser (Next.js UI)
@@ -22,12 +22,12 @@
     ▼
 BFF (Next.js API Route — /api/chat)
     ├── classifier.ts   → domain + retrieval bias
-    ├── searchaas-client.ts → build payload + call SearchaaS
+    ├── AiSearch-client.ts → build payload + call AiSearch
     └── assembler.ts    → format answer + citations
          │
          │  POST /retrieve  { query, atlas: { collection, ... }, retrieval: { ... } }
          ▼
-    SearchaaS (localhost:8000)
+    AiSearch (localhost:8000)
          │
          ▼
     MongoDB Atlas
@@ -35,14 +35,14 @@ BFF (Next.js API Route — /api/chat)
          └── employee_support     collection
 </code></pre></div>
 
-<p><strong>Key design principle:</strong> The frontend never touches MongoDB Atlas. All retrieval flows through SearchaaS, which receives full atlas overrides (collection name, vector index, search index, field keys) on every request. Switching collections is a config change only.</p>
+<p><strong>Key design principle:</strong> The frontend never touches MongoDB Atlas. All retrieval flows through AiSearch, which receives full atlas overrides (collection name, vector index, search index, field keys) on every request. Switching collections is a config change only.</p>
 <hr />
 <h2 id="folder-structure">Folder structure</h2>
 <div class="highlight"><pre><span></span><code>agents/employee-support-copilot/
 ├── src/
 │   ├── lib/
 │   │   ├── collections.ts        ← Collection registry + routing signals (edit here to add collections)
-│   │   ├── searchaas-client.ts   ← SearchaaS HTTP client + payload builder
+│   │   ├── AiSearch-client.ts   ← AiSearch HTTP client + payload builder
 │   │   ├── classifier.ts         ← Keyword/pattern query classifier
 │   │   └── assembler.ts          ← Answer formatter + citation builder
 │   ├── app/
@@ -69,12 +69,12 @@ BFF (Next.js API Route — /api/chat)
 <h3 id="prerequisites">Prerequisites</h3>
 <ul>
 <li>Node.js 18+</li>
-<li>SearchaaS running at <code>http://localhost:8000</code> (see parent repo)</li>
+<li>AiSearch running at <code>http://localhost:8000</code> (see parent repo)</li>
 <li>MongoDB Atlas collections: <code>IT_helpdesk</code> and <code>employee_support</code> with Atlas Search + Vector Search indexes</li>
 </ul>
-<h3 id="run-searchaas-first">Run SearchaaS first</h3>
+<h3 id="run-aisearch-first">Run AiSearch first</h3>
 <div class="highlight"><pre><span></span><code><span class="c1"># From the repo root</span>
-uvicorn<span class="w"> </span>searchaas.api.app:app<span class="w"> </span>--host<span class="w"> </span><span class="m">0</span>.0.0.0<span class="w"> </span>--port<span class="w"> </span><span class="m">8000</span><span class="w"> </span>--reload
+uvicorn<span class="w"> </span>AiSearch.api.app:app<span class="w"> </span>--host<span class="w"> </span><span class="m">0</span>.0.0.0<span class="w"> </span>--port<span class="w"> </span><span class="m">8000</span><span class="w"> </span>--reload
 </code></pre></div>
 
 <h3 id="run-the-copilot">Run the copilot</h3>
@@ -88,7 +88,7 @@ npm<span class="w"> </span>run<span class="w"> </span>dev
 
 <p>Open <a href="http://localhost:3000/chat">http://localhost:3000/chat</a>.</p>
 <hr />
-<h2 id="searchaas-request-shape">SearchaaS request shape</h2>
+<h2 id="aisearch-request-shape">AiSearch request shape</h2>
 <p>Every query is translated to:</p>
 <div class="highlight"><pre><span></span><code><span class="p">{</span>
 <span class="w">  </span><span class="nt">&quot;query&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;My VPN is not connecting&quot;</span><span class="p">,</span>
@@ -166,7 +166,7 @@ npm<span class="w"> </span>run<span class="w"> </span>dev
 </blockquote>
 <ul>
 <li>Classifier: <code>IT_helpdesk</code> (confidence ~90%), bias: <code>auto</code></li>
-<li>SearchaaS payload: <code>collection: IT_helpdesk, vector_index: it_helpdesk_vector_index</code></li>
+<li>AiSearch payload: <code>collection: IT_helpdesk, vector_index: it_helpdesk_vector_index</code></li>
 <li>Response: top VPN troubleshooting chunks + source citations</li>
 </ul>
 <h3 id="journey-2-clear-hr-question">Journey 2 — Clear HR question</h3>
@@ -175,7 +175,7 @@ npm<span class="w"> </span>run<span class="w"> </span>dev
 </blockquote>
 <ul>
 <li>Classifier: <code>employee_support</code> (confidence ~85%), bias: <code>fulltext-heavy</code></li>
-<li>SearchaaS payload: <code>collection: employee_support, fulltext_weight: 0.7</code></li>
+<li>AiSearch payload: <code>collection: employee_support, fulltext_weight: 0.7</code></li>
 <li>Response: leave policy document chunks</li>
 </ul>
 <h3 id="journey-3-ambiguous-dual-domain">Journey 3 — Ambiguous / dual-domain</h3>
@@ -199,14 +199,14 @@ npm<span class="w"> </span>run<span class="w"> </span>dev
 </thead>
 <tbody>
 <tr>
-<td><code>SEARCHAAS_BASE_URL</code></td>
+<td><code>AISEARCH_BASE_URL</code></td>
 <td><code>http://localhost:8000</code></td>
-<td>SearchaaS base URL</td>
+<td>AiSearch base URL</td>
 </tr>
 <tr>
-<td><code>SEARCHAAS_API_KEY</code></td>
+<td><code>AISEARCH_API_KEY</code></td>
 <td><em>(empty)</em></td>
-<td>Bearer token if SearchaaS requires auth</td>
+<td>Bearer token if AiSearch requires auth</td>
 </tr>
 </tbody>
 </table>

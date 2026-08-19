@@ -1,10 +1,10 @@
-/* SearchaaS landing — chatbot demo, cloud tabs, docs filter */
+/* AiSearch landing — chatbot demo, cloud tabs, docs filter */
 (function () {
   "use strict";
 
   /* ── 1. Chatbot demo ───────────────────────────────────────────────────── */
   // Canned turns modelled on agents/employee-support-copilot: the BFF classifies
-  // the domain, calls SearchaaS /retrieve with per-collection Atlas overrides,
+  // the domain, calls AiSearch /retrieve with per-collection Atlas overrides,
   // then renders a grounded answer with citations.
   var SCENARIOS = {
     pto: {

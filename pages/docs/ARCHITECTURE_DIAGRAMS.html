@@ -3,21 +3,21 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>SearchaaS Architecture Diagrams · SearchaaS Docs</title>
+<title>AiSearch Architecture Diagrams · AiSearch Docs</title>
 <link rel="stylesheet" href="../../pages/assets/style.css">
 <link rel="stylesheet" href="../../pages/assets/pygments.css">
 </head>
 <body>
 <header class="topbar">
-  <a class="brand" href="../../index.html">SearchaaS Docs</a>
+  <a class="brand" href="../../index.html">AiSearch Docs</a>
   <a class="back" href="../../index.html">← All docs</a>
 </header>
 <main class="content">
-<h1 id="searchaas-architecture-diagrams">SearchaaS Architecture Diagrams</h1>
+<h1 id="aisearch-architecture-diagrams">AiSearch Architecture Diagrams</h1>
 <h2 id="1-application-layout-ui-structure">1. Application Layout (UI Structure)</h2>
 <div class="highlight"><pre><span></span><code>┌─────────────────────────────────────────────────────────────────────┐
 │                          Header                                      │
-│          SearchaaS — Retrieval Tester  |  Backend: FastAPI (REST)  │
+│          AiSearch — Retrieval Tester  |  Backend: FastAPI (REST)  │
 ├─────────────────────┬─────────────────────────────────────────────────┤
 │                     │                                                 │
 │   ConfigPane        │                  Main Area                      │
@@ -123,7 +123,7 @@
 └──────────────────────────────────────────────────────────────────┘
                       ↓ HTTP/SSE
 ┌──────────────────────────────────────────────────────────────────┐
-│                   Python Backend (searchaas/)                    │
+│                   Python Backend (AiSearch/)                    │
 │                                                                  │
 │  FastAPI (api/app.py)              FastMCP (mcp_server/server)  │
 │  Routes:                           Tools:                        │
@@ -238,7 +238,7 @@
 
 <h2 id="5-configuration-system">5. Configuration System</h2>
 <div class="highlight"><pre><span></span><code>┌─────────────────────────────────────┐
-│     searchaas.yaml (YAML file)      │
+│     AiSearch.yaml (YAML file)      │
 │                                     │
 │  atlas:                             │
 │    uri: mongodb+srv://...           │

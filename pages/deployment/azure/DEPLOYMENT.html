@@ -3,18 +3,18 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Deploying SearchaaS to Azure Container Apps + AI Foundry · SearchaaS Docs</title>
+<title>Deploying AiSearch to Azure Container Apps + AI Foundry · AiSearch Docs</title>
 <link rel="stylesheet" href="../../../pages/assets/style.css">
 <link rel="stylesheet" href="../../../pages/assets/pygments.css">
 </head>
 <body>
 <header class="topbar">
-  <a class="brand" href="../../../index.html">SearchaaS Docs</a>
+  <a class="brand" href="../../../index.html">AiSearch Docs</a>
   <a class="back" href="../../../index.html">← All docs</a>
 </header>
 <main class="content">
-<h1 id="deploying-searchaas-to-azure-container-apps-ai-foundry">Deploying SearchaaS to Azure Container Apps + AI Foundry</h1>
-<p>This guide deploys the three SearchaaS surfaces to <strong>Azure Container Apps</strong> and
+<h1 id="deploying-aisearch-to-azure-container-apps-ai-foundry">Deploying AiSearch to Azure Container Apps + AI Foundry</h1>
+<p>This guide deploys the three AiSearch surfaces to <strong>Azure Container Apps</strong> and
 wires the MCP endpoint into an <strong>AI Foundry</strong> agent.</p>
 <table>
 <thead>
@@ -29,21 +29,21 @@ wires the MCP endpoint into an <strong>AI Foundry</strong> agent.</p>
 <tbody>
 <tr>
 <td>MCP server</td>
-<td><code>searchaas-mcp</code></td>
+<td><code>AiSearch-mcp</code></td>
 <td>8001</td>
 <td>external <code>/mcp</code></td>
 <td>Consumed by AI Foundry agents (Bearer-gated)</td>
 </tr>
 <tr>
 <td>REST API</td>
-<td><code>searchaas-api</code></td>
+<td><code>AiSearch-api</code></td>
 <td>8000</td>
 <td>external</td>
 <td>Playground backend</td>
 </tr>
 <tr>
 <td>React UI</td>
-<td><code>searchaas-ui</code></td>
+<td><code>AiSearch-ui</code></td>
 <td>80</td>
 <td>external</td>
 <td>Retrieval-testing playground</td>
@@ -60,7 +60,7 @@ managed identity, three Container Apps) is provisioned by Bicep at
 <li><strong>Step 3</strong> deploys everything in one <code>az deployment sub create</code>. Internally
   <code>main.bicep</code> runs two ARM child deployments in sequence — first infra
   (environment, ACR, identity), then Container Apps. A deployment-script
-  readiness gate (<code>searchaas-env-ready</code>) polls the Container Apps Environment
+  readiness gate (<code>AiSearch-env-ready</code>) polls the Container Apps Environment
   until its <code>provisioningState</code> is genuinely <code>Succeeded</code>; the apps module
   depends on that gate's output, so apps never start while the environment is
   still <code>Updating</code>. This eliminates the intermittent
@@ -87,12 +87,12 @@ managed identity, three Container Apps) is provisioned by Bicep at
 <h2 id="step-1-create-the-resource-group-acr">Step 1 — Create the resource group + ACR</h2>
 <p>Make any changes required to <code>main.parameters.json</code> (location, namePrefix, atlasDb, configOverrides) before running this step.</p>
 <div class="highlight"><pre><span></span><code>az<span class="w"> </span>deployment<span class="w"> </span>sub<span class="w"> </span>create<span class="w"> </span><span class="se">\</span>
-<span class="w">  </span>--name<span class="w"> </span>searchaas-acr<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--name<span class="w"> </span>AiSearch-acr<span class="w"> </span><span class="se">\</span>
 <span class="w">  </span>--location<span class="w"> </span>centralindia<span class="w"> </span><span class="se">\</span>
 <span class="w">  </span>--template-file<span class="w"> </span>deployment/azure/infra/acr.bicep<span class="w"> </span><span class="se">\</span>
 <span class="w">  </span>--parameters<span class="w"> </span>deployment/azure/infra/main.parameters.json
 
-<span class="nv">ACR_NAME</span><span class="o">=</span><span class="k">$(</span>az<span class="w"> </span>deployment<span class="w"> </span>sub<span class="w"> </span>show<span class="w"> </span>-n<span class="w"> </span>searchaas-acr<span class="w"> </span><span class="se">\</span>
+<span class="nv">ACR_NAME</span><span class="o">=</span><span class="k">$(</span>az<span class="w"> </span>deployment<span class="w"> </span>sub<span class="w"> </span>show<span class="w"> </span>-n<span class="w"> </span>AiSearch-acr<span class="w"> </span><span class="se">\</span>
 <span class="w">  </span>--query<span class="w"> </span>properties.outputs.acrName.value<span class="w"> </span>-o<span class="w"> </span>tsv<span class="k">)</span>
 <span class="nb">echo</span><span class="w"> </span><span class="s2">&quot;ACR: </span><span class="nv">$ACR_NAME</span><span class="s2">&quot;</span>
 </code></pre></div>
@@ -110,15 +110,15 @@ free Docker Hub account's credentials:</p>
 <div class="highlight"><pre><span></span><code>./deployment/azure/scripts/build-and-push.sh<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$ACR_NAME</span><span class="s2">&quot;</span><span class="w"> </span>latest
 </code></pre></div>
 
-<p>This runs <code>az acr build</code> for <code>searchaas-mcp</code>, <code>searchaas-api</code>, and
-<code>searchaas-ui</code>. Builds happen in ACR, so no local Docker or matching CPU
+<p>This runs <code>az acr build</code> for <code>AiSearch-mcp</code>, <code>AiSearch-api</code>, and
+<code>AiSearch-ui</code>. Builds happen in ACR, so no local Docker or matching CPU
 architecture is needed.</p>
 <h2 id="step-3-deploy-infrastructure-container-apps">Step 3 — Deploy infrastructure + Container Apps</h2>
 <p>This single command runs two ARM deployments in sequence under the hood:
-<code>searchaas-resources</code> (infra) completes first, then <code>searchaas-apps</code> starts
+<code>AiSearch-resources</code> (infra) completes first, then <code>AiSearch-apps</code> starts
 once the Container Apps Environment is in <code>Succeeded</code> state.</p>
 <div class="highlight"><pre><span></span><code>az<span class="w"> </span>deployment<span class="w"> </span>sub<span class="w"> </span>create<span class="w"> </span><span class="se">\</span>
-<span class="w">  </span>--name<span class="w"> </span>searchaas<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--name<span class="w"> </span>AiSearch<span class="w"> </span><span class="se">\</span>
 <span class="w">  </span>--location<span class="w"> </span>centralindia<span class="w"> </span><span class="se">\</span>
 <span class="w">  </span>--template-file<span class="w"> </span>deployment/azure/infra/main.bicep<span class="w"> </span><span class="se">\</span>
 <span class="w">  </span>--parameters<span class="w"> </span>deployment/azure/infra/main.parameters.json<span class="w"> </span><span class="se">\</span>
@@ -135,21 +135,21 @@ once the Container Apps Environment is in <code>Succeeded</code> state.</p>
 if you are not using those providers.</p>
 </blockquote>
 <p>Grab the URLs:</p>
-<div class="highlight"><pre><span></span><code>az<span class="w"> </span>deployment<span class="w"> </span>sub<span class="w"> </span>show<span class="w"> </span>-n<span class="w"> </span>searchaas<span class="w"> </span>--query<span class="w"> </span>properties.outputs<span class="w"> </span>-o<span class="w"> </span>json
+<div class="highlight"><pre><span></span><code>az<span class="w"> </span>deployment<span class="w"> </span>sub<span class="w"> </span>show<span class="w"> </span>-n<span class="w"> </span>AiSearch<span class="w"> </span>--query<span class="w"> </span>properties.outputs<span class="w"> </span>-o<span class="w"> </span>json
 </code></pre></div>
 
 <p>You'll get:</p>
 <div class="highlight"><pre><span></span><code><span class="p">{</span>
-<span class="w">  </span><span class="nt">&quot;mcpUrl&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="nt">&quot;value&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;https://searchaas-mcp.&lt;...&gt;.azurecontainerapps.io/mcp&quot;</span><span class="w"> </span><span class="p">},</span>
-<span class="w">  </span><span class="nt">&quot;apiUrl&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="nt">&quot;value&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;https://searchaas-api.&lt;...&gt;.azurecontainerapps.io&quot;</span><span class="w"> </span><span class="p">},</span>
-<span class="w">  </span><span class="nt">&quot;uiUrl&quot;</span><span class="p">:</span><span class="w">  </span><span class="p">{</span><span class="w"> </span><span class="nt">&quot;value&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;https://searchaas-ui.&lt;...&gt;.azurecontainerapps.io&quot;</span><span class="w"> </span><span class="p">}</span>
+<span class="w">  </span><span class="nt">&quot;mcpUrl&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="nt">&quot;value&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;https://AiSearch-mcp.&lt;...&gt;.azurecontainerapps.io/mcp&quot;</span><span class="w"> </span><span class="p">},</span>
+<span class="w">  </span><span class="nt">&quot;apiUrl&quot;</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="nt">&quot;value&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;https://AiSearch-api.&lt;...&gt;.azurecontainerapps.io&quot;</span><span class="w"> </span><span class="p">},</span>
+<span class="w">  </span><span class="nt">&quot;uiUrl&quot;</span><span class="p">:</span><span class="w">  </span><span class="p">{</span><span class="w"> </span><span class="nt">&quot;value&quot;</span><span class="p">:</span><span class="w"> </span><span class="s2">&quot;https://AiSearch-ui.&lt;...&gt;.azurecontainerapps.io&quot;</span><span class="w"> </span><span class="p">}</span>
 <span class="p">}</span>
 </code></pre></div>
 
 <hr />
 <h2 id="step-4-smoke-test-the-mcp-endpoint">Step 4 — Smoke test the MCP endpoint</h2>
 <p>Initialize a session (note the Bearer header):</p>
-<div class="highlight"><pre><span></span><code><span class="nv">MCP_URL</span><span class="o">=</span><span class="s2">&quot;https://searchaas-mcp.&lt;...&gt;.azurecontainerapps.io/mcp&quot;</span>
+<div class="highlight"><pre><span></span><code><span class="nv">MCP_URL</span><span class="o">=</span><span class="s2">&quot;https://AiSearch-mcp.&lt;...&gt;.azurecontainerapps.io/mcp&quot;</span>
 
 curl<span class="w"> </span>-N<span class="w"> </span>-X<span class="w"> </span>POST<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$MCP_URL</span><span class="s2">&quot;</span><span class="w"> </span><span class="se">\</span>
 <span class="w">  </span>-H<span class="w"> </span><span class="s2">&quot;Authorization: Bearer </span><span class="nv">$MCP_API_KEY</span><span class="s2">&quot;</span><span class="w"> </span><span class="se">\</span>
@@ -179,7 +179,7 @@ origin. Tighten <code>allowedOrigins</code> in <code>deployment/azure/infra/reso
 <hr />
 <h2 id="step-6-create-an-ai-foundry-agent-backed-by-the-mcp-server">Step 6 — Create an AI Foundry agent backed by the MCP server</h2>
 <p>Use the URLs from Step 3's output:</p>
-<div class="highlight"><pre><span></span><code>az<span class="w"> </span>deployment<span class="w"> </span>sub<span class="w"> </span>show<span class="w"> </span>-n<span class="w"> </span>searchaas<span class="w"> </span>--query<span class="w"> </span><span class="s1">&#39;properties.outputs.{mcp:mcpUrl.value,api:apiUrl.value,ui:uiUrl.value}&#39;</span><span class="w"> </span>-o<span class="w"> </span>json
+<div class="highlight"><pre><span></span><code>az<span class="w"> </span>deployment<span class="w"> </span>sub<span class="w"> </span>show<span class="w"> </span>-n<span class="w"> </span>AiSearch<span class="w"> </span>--query<span class="w"> </span><span class="s1">&#39;properties.outputs.{mcp:mcpUrl.value,api:apiUrl.value,ui:uiUrl.value}&#39;</span><span class="w"> </span>-o<span class="w"> </span>json
 </code></pre></div>
 
 <ol>
@@ -259,7 +259,7 @@ origin. Tighten <code>allowedOrigins</code> in <code>deployment/azure/infra/reso
 </tbody>
 </table>
 <h3 id="runtime-config-overrides-no-image-rebuild">Runtime config overrides (no image rebuild)</h3>
-<p><code>searchaas/config/searchaas.yaml</code> is baked into the image, but <strong>every value is
+<p><code>AiSearch/config/AiSearch.yaml</code> is baked into the image, but <strong>every value is
 <code>${VAR:-default}</code>-driven</strong>, so you can retune the deployment by setting env vars
 via the <code>configOverrides</code> Bicep parameter — then redeploy/restart. <strong>No image
 rebuild required.</strong></p>
@@ -364,7 +364,7 @@ Only non-empty entries are injected; everything else uses the yaml default.</p>
 
 <span class="c1"># roll the apps to the new tag (same command as Step 3, just add imageTag=v2)</span>
 az<span class="w"> </span>deployment<span class="w"> </span>sub<span class="w"> </span>create<span class="w"> </span><span class="se">\</span>
-<span class="w">  </span>--name<span class="w"> </span>searchaas<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--name<span class="w"> </span>AiSearch<span class="w"> </span><span class="se">\</span>
 <span class="w">  </span>--location<span class="w"> </span>centralindia<span class="w"> </span><span class="se">\</span>
 <span class="w">  </span>--template-file<span class="w"> </span>deployment/azure/infra/main.bicep<span class="w"> </span><span class="se">\</span>
 <span class="w">  </span>--parameters<span class="w"> </span>deployment/azure/infra/main.parameters.json<span class="w"> </span><span class="se">\</span>
@@ -399,30 +399,30 @@ apps deployment actually updates.</p>
 <p>The Container Apps Environment reports ARM success before its backend has
 finished provisioning, and any re-PUT bounces it into <code>Updating</code>. If apps are
 written during that window they fail with <code>ManagedEnvironmentNotProvisioned</code>.
-The <code>searchaas-env-ready</code> deployment-script gate now prevents this in fresh
+The <code>AiSearch-env-ready</code> deployment-script gate now prevents this in fresh
 runs. If you still hit it (e.g. on an older template or a partially-failed RG):</p>
 <ol>
 <li>Wait for the environment to settle to <code>Succeeded</code>:</li>
 </ol>
 <p><code>bash
-   az resource show -g rg-searchaas -n searchaas-env \
+   az resource show -g rg-AiSearch -n AiSearch-env \
      --resource-type Microsoft.App/managedEnvironments \
      --query "properties.provisioningState" -o tsv</code></p>
 <ol start="2">
 <li>Deploy <strong>only</strong> the apps module against the ready environment (no env re-PUT):</li>
 </ol>
 <p>```bash
-   ENV_ID=$(az deployment group show -g rg-searchaas -n searchaas-resources \
+   ENV_ID=$(az deployment group show -g rg-AiSearch -n AiSearch-resources \
      --query "properties.outputs.environmentId.value" -o tsv)
-   ID_ID=$(az deployment group show -g rg-searchaas -n searchaas-resources \
+   ID_ID=$(az deployment group show -g rg-AiSearch -n AiSearch-resources \
      --query "properties.outputs.identityId.value" -o tsv)
-   ACR=$(az deployment group show -g rg-searchaas -n searchaas-resources \
+   ACR=$(az deployment group show -g rg-AiSearch -n AiSearch-resources \
      --query "properties.outputs.acrLoginServer.value" -o tsv)</p>
 <p>az deployment group create \
-     --resource-group rg-searchaas \
-     --name searchaas-apps-only \
+     --resource-group rg-AiSearch \
+     --name AiSearch-apps-only \
      --template-file deployment/azure/infra/apps.bicep \
-     --parameters location=centralindia namePrefix=searchaas imageTag=latest \
+     --parameters location=centralindia namePrefix=AiSearch imageTag=latest \
          atlasDb=sample_mflix uiEmbedMcpKey=true \
          environmentId="$ENV_ID" identityId="$ID_ID" acrServer="$ACR" \
          atlasUri="$ATLAS_URI" voyageApiKey="$VOYAGE_API_KEY" \

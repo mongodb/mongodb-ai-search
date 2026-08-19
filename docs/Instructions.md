@@ -1,6 +1,6 @@
 # Technical Implementation Architecture — Python (Factory Pattern)
 
-This document describes the implementation architecture of the SearchaaS retrieval platform in **Python**, organized around the **Factory design pattern**. Every pluggable concern (embeddings, retrievers, rerankers, response generators, planners) is created through a factory so that providers and strategies can be swapped via configuration without changing call sites.
+This document describes the implementation architecture of the AiSearch retrieval platform in **Python**, organized around the **Factory design pattern**. Every pluggable concern (embeddings, retrievers, rerankers, response generators, planners) is created through a factory so that providers and strategies can be swapped via configuration without changing call sites.
 
 **Delivery phasing**
 
@@ -41,12 +41,12 @@ pip install langchain langchain-core langchain-mongodb \
 
 ## 0. Phase 1 Project Layout
 
-The Phase 1 implementation lives under `searchaas/`. Each module corresponds to a numbered section below.
+The Phase 1 implementation lives under `AiSearch/`. Each module corresponds to a numbered section below.
 
 ```
-searchaas/
+AiSearch/
 ├── config/                 # §7   YAML + loader (single source of truth)
-│   ├── searchaas.yaml      #      runtime config (atlas, embeddings, planner, retrieval, server)
+│   ├── AiSearch.yaml      #      runtime config (atlas, embeddings, planner, retrieval, server)
 │   ├── loader.py           #      load_config() -> AppConfig + .env auto-loading + validation
 │   └── __init__.py
 ├── observability/          # §10a Central logging (dictConfig, JSON/plain)
@@ -72,15 +72,15 @@ searchaas/
 │   └── app.py              # §8   FastAPI endpoints + request-ID middleware + /diagnose
 ├── mcp_server/
 │   └── server.py           # §9   FastMCP tools
-└── diagnose.py             # §10a CLI: python -m searchaas.diagnose
+└── diagnose.py             # §10a CLI: python -m AiSearch.diagnose
 ```
 
 Run order:
 
 ```bash
-uvicorn searchaas.api.app:app --port 8000      # REST
-python  -m searchaas.mcp_server.server         # MCP
-python  -m searchaas.diagnose --query "..."    # vector-search self-check (no server needed)
+uvicorn AiSearch.api.app:app --port 8000      # REST
+python  -m AiSearch.mcp_server.server         # MCP
+python  -m AiSearch.diagnose --query "..."    # vector-search self-check (no server needed)
 ```
 
 ## 1. MongoDB Atlas as the Retrieval Foundation
@@ -93,14 +93,14 @@ MongoDB Atlas is the central operational and retrieval datastore, combining oper
 Atlas collections also back: Search Profiles, Retrieval Policies, Deployment Configurations, Query Telemetry, Execution History, Evaluation Metrics, Prompt Templates, Synonym Management, Search Analytics.
 
 ```python
-# searchaas/infrastructure/atlas.py  (excerpt)
+# AiSearch/infrastructure/atlas.py  (excerpt)
 from functools import lru_cache
 from pymongo import MongoClient
 from pymongo.errors import ConfigurationError, OperationFailure, ServerSelectionTimeoutError
-from searchaas.config import load_config
-from searchaas.observability import get_logger
+from AiSearch.config import load_config
+from AiSearch.observability import get_logger
 
-log = get_logger("searchaas.infrastructure.atlas")
+log = get_logger("AiSearch.infrastructure.atlas")
 
 class AtlasFactory:
     """Single source of truth for Atlas clients, databases, and collections."""
@@ -110,7 +110,7 @@ class AtlasFactory:
     def client() -> MongoClient:
         cfg = load_config().atlas
         log.info("Atlas: connecting to %s", _redact(cfg.uri))
-        return MongoClient(cfg.uri, appname="searchaas", serverSelectionTimeoutMS=8000)
+        return MongoClient(cfg.uri, appname="AiSearch", serverSelectionTimeoutMS=8000)
 
     @classmethod
     def db(cls):          return cls.client()[load_config().atlas.database]
@@ -212,11 +212,11 @@ class QueryUnderstandingLayer:
 Query embeddings are generated **dynamically at runtime** (document embeddings are pre-generated externally). This lets enterprises swap models without rearchitecting, support multiple providers, experiment on quality, and tune latency/cost. With **Atlas Auto-Embeddings**, query vectors can be generated automatically by Atlas using Voyage AI; otherwise the platform generates them via the configured provider before retrieval — balancing simplicity, model governance, cost, and quality.
 
 ```python
-# searchaas/embeddings/factory.py  (excerpt)
+# AiSearch/embeddings/factory.py  (excerpt)
 from langchain_core.embeddings import Embeddings
-from searchaas.observability import get_logger
+from AiSearch.observability import get_logger
 
-log = get_logger("searchaas.embeddings")
+log = get_logger("AiSearch.embeddings")
 
 class EmbeddingFactory:
     _registry = {
@@ -258,18 +258,18 @@ Notes on the providers:
 
   This is what lets a YAML change make `voyage-4` emit 512-dim vectors to match a 512-dim Atlas Vector Search index. `EmbeddingFactory.create()` never mutates the caller's config dict, so a single config can be re-used to build the embedder for both the query path and the vector store.
 
-- **Probe** — `EmbeddingFactory.probe(embedder)` is used by both the `/diagnose` endpoint and the `searchaas.diagnose` CLI to verify keys + measure live embedding latency.
+- **Probe** — `EmbeddingFactory.probe(embedder)` is used by both the `/diagnose` endpoint and the `AiSearch.diagnose` CLI to verify keys + measure live embedding latency.
 
 ### 4a. LLM Factory
 
 LLMs power the Query Understanding Layer and the AI-Driven Retrieval Planner (Phase 1) and Grounded Response Generation (Phase 2). A dedicated `LLMFactory` keeps provider selection symmetric with embeddings — the planner's chat model is swappable through YAML.
 
 ```python
-# searchaas/llm/factory.py  (excerpt)
+# AiSearch/llm/factory.py  (excerpt)
 from langchain_core.language_models import BaseChatModel
-from searchaas.observability import get_logger
+from AiSearch.observability import get_logger
 
-log = get_logger("searchaas.llm")
+log = get_logger("AiSearch.llm")
 
 class LLMFactory:
     _registry = {
@@ -335,11 +335,11 @@ All retrievers are produced by a **RetrieverFactory** keyed by the plan's `strat
 > The **Self-Query Retriever** is delivered in Phase 2 (see Section 12) because it depends on the Metadata Intelligence layer to supply its `metadata_field_info`.
 
 ```python
-# searchaas/retrieval/factory.py  (excerpt)
+# AiSearch/retrieval/factory.py  (excerpt)
 from langchain_core.retrievers import BaseRetriever
-from searchaas.observability import get_logger
+from AiSearch.observability import get_logger
 
-log = get_logger("searchaas.retrieval")
+log = get_logger("AiSearch.retrieval")
 
 class RetrieverFactory:
     """All field names and dimensions are injected from `AppConfig.atlas`."""
@@ -432,10 +432,10 @@ Three things make this implementation robust to per-deployment schema changes:
 All providers, models, indexes, and runtime options are supplied through a single YAML file loaded at startup and used to drive every factory. Nothing is hard-coded — switching an embedding model, reranker, or LLM is a config change, not a code change.
 
 ```yaml
-# searchaas/config/searchaas.yaml
+# AiSearch/config/AiSearch.yaml
 atlas:
   uri: ${ATLAS_URI}                       # resolved from env / Azure Key Vault
-  database: ${ATLAS_DB:-searchaas}
+  database: ${ATLAS_DB:-AiSearch}
   collection: knowledge_chunks
 
   # ---- Vector Search index ----------------------------------------------------
@@ -508,10 +508,10 @@ server:
   log_level: info
 ```
 
-Environment loading is automatic: `searchaas/config/loader.py` calls `python-dotenv` to load the nearest `.env` walking up from the config module, so `uvicorn` / the diagnose CLI all see `${ATLAS_URI}`, `${GOOGLE_API_KEY}`, etc. without a wrapper script. Real shell vars always win over `.env` (`override=False`).
+Environment loading is automatic: `AiSearch/config/loader.py` calls `python-dotenv` to load the nearest `.env` walking up from the config module, so `uvicorn` / the diagnose CLI all see `${ATLAS_URI}`, `${GOOGLE_API_KEY}`, etc. without a wrapper script. Real shell vars always win over `.env` (`override=False`).
 
 ```python
-# searchaas/config/loader.py  (excerpt)
+# AiSearch/config/loader.py  (excerpt)
 import os, re, yaml
 from functools import lru_cache
 from pathlib import Path
@@ -537,7 +537,7 @@ def _expand(value):
 
 class AtlasConfig(BaseModel):
     uri: str
-    database: str = "searchaas"
+    database: str = "AiSearch"
     collection: str = "knowledge_chunks"
     vector_index: str = "vector_index"
     search_index: str = "default"
@@ -583,9 +583,9 @@ class AppConfig(BaseModel):
 
 @lru_cache(maxsize=1)
 def load_config(path: str | None = None) -> AppConfig:
-    cfg_path = Path(path) if path else (Path(__file__).resolve().parent / "searchaas.yaml")
-    if os.environ.get("SEARCHAAS_CONFIG"):
-        cfg_path = Path(os.environ["SEARCHAAS_CONFIG"])
+    cfg_path = Path(path) if path else (Path(__file__).resolve().parent / "AiSearch.yaml")
+    if os.environ.get("AISEARCH_CONFIG"):
+        cfg_path = Path(os.environ["AISEARCH_CONFIG"])
     with cfg_path.open() as f:
         return AppConfig(**_expand(yaml.safe_load(f)))
 ```
@@ -599,7 +599,7 @@ A single `build_container(AppConfig)` bootstrap function instantiates `Embedding
 ```
 .env (auto-loaded)  ──┐
                       ▼
-searchaas/config/searchaas.yaml
+AiSearch/config/AiSearch.yaml
         │  (${VAR} / ${VAR:-default} expansion)
         ▼
 config.load_config() ─► AppConfig (Pydantic-validated)
@@ -657,18 +657,18 @@ Switching embeddings from **Gemini** to **Bedrock Titan**, the planner LLM from 
 Every retrieval method is exposed as its own endpoint, alongside a planner-driven `/retrieve` route and an end-to-end `/query` route. A shared container wires the factories from the loaded YAML config.
 
 ```python
-# searchaas/api/app.py  (excerpt)
+# AiSearch/api/app.py  (excerpt)
 import time, uuid
 from fastapi import FastAPI, HTTPException, Request
 from pydantic import BaseModel, Field
-from searchaas.app.bootstrap import get_container
-from searchaas.config import load_config
-from searchaas.infrastructure import AtlasFactory
-from searchaas.observability import configure_logging, get_logger
+from AiSearch.app.bootstrap import get_container
+from AiSearch.config import load_config
+from AiSearch.infrastructure import AtlasFactory
+from AiSearch.observability import configure_logging, get_logger
 
 configure_logging()
-log = get_logger("searchaas.api")
-app = FastAPI(title="SearchaaS Retrieval API")
+log = get_logger("AiSearch.api")
+app = FastAPI(title="AiSearch Retrieval API")
 
 # ---- request-ID + timing middleware ---------------------------------------
 @app.middleware("http")
@@ -733,7 +733,7 @@ def health():
 @app.get("/diagnose")
 def diagnose():
     """Full self-check: Atlas ping + collection stats + embedder probe."""
-    from searchaas.embeddings import EmbeddingFactory
+    from AiSearch.embeddings import EmbeddingFactory
     c = get_container()
     return {
         "config": {...},
@@ -749,7 +749,7 @@ def diagnose_vector(req):
         req.query, k=req.k, filters=req.filters)
 ```
 
-Run with `uvicorn searchaas.api.app:app --host 0.0.0.0 --port 8000`. Response serializers strip the configured `embedding_key` from metadata (driven by YAML, not hardcoded), so changing `atlas.embedding_key` flows through to API output too.
+Run with `uvicorn AiSearch.api.app:app --host 0.0.0.0 --port 8000`. Response serializers strip the configured `embedding_key` from metadata (driven by YAML, not hardcoded), so changing `atlas.embedding_key` flows through to API output too.
 
 ## 9. MCP Layer — FastMCP Tools
 
@@ -761,7 +761,7 @@ from fastmcp import FastMCP
 from config.loader import load_config
 from bootstrap import build_container
 
-mcp = FastMCP("searchaas")
+mcp = FastMCP("AiSearch")
 container = build_container(load_config())
 
 def _retrieve(strategy: str, query: str, top_k: int = 20, filters: dict | None = None):
@@ -804,21 +804,21 @@ Phase 1 ships a small but opinionated observability layer so that the most commo
 
 ### Central logging
 
-`searchaas/observability/logging.py` exposes `configure_logging()` (idempotent, dictConfig-based) and `get_logger(name)`. Every entrypoint — FastAPI, FastMCP, the CLI — calls `configure_logging()` at import time. Library loggers (`pymongo`, `langchain_mongodb`, `httpx`) are tuned through env vars instead of code changes:
+`AiSearch/observability/logging.py` exposes `configure_logging()` (idempotent, dictConfig-based) and `get_logger(name)`. Every entrypoint — FastAPI, FastMCP, the CLI — calls `configure_logging()` at import time. Library loggers (`pymongo`, `langchain_mongodb`, `httpx`) are tuned through env vars instead of code changes:
 
 | Env var | Default | Purpose |
 | --- | --- | --- |
-| `SEARCHAAS_LOG_LEVEL`  | `INFO`    | Root + `searchaas.*` level |
-| `SEARCHAAS_LOG_FORMAT` | `plain`   | `json` for structured log shipping |
+| `AISEARCH_LOG_LEVEL`  | `INFO`    | Root + `AiSearch.*` level |
+| `AISEARCH_LOG_FORMAT` | `plain`   | `json` for structured log shipping |
 | `PYMONGO_LOG_LEVEL`    | `WARNING` | Wire-level Mongo traces (`DEBUG` is very verbose) |
 | `LANGCHAIN_LOG_LEVEL`  | `INFO`    | `langchain_mongodb` internals |
 
 Construction logs strip API keys / secrets, request middleware emits a per-request ID, and retriever builds log the configured `index / path / dim / k / filters` on every call.
 
-### `searchaas.diagnose` CLI
+### `AiSearch.diagnose` CLI
 
 ```bash
-python -m searchaas.diagnose --query "your test query" --k 5 [--filters '{"doc_type":"policy"}'] [--json]
+python -m AiSearch.diagnose --query "your test query" --k 5 [--filters '{"doc_type":"policy"}'] [--json]
 ```
 
 Walks six stages, prints a `PASS/FAIL/WARN` line for each, exits non-zero on failure (CI-friendly):

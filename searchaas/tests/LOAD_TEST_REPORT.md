@@ -1,7 +1,7 @@
-    # SearchaaS Load Test Report
+    # AiSearch Load Test Report
 
     **Generated:** 2026-07-24 18:59 UTC  
-    **Host:** https://searchaas-api-787220387490.us-central1.run.app/  
+    **Host:** https://AiSearch-api-787220387490.us-central1.run.app/  
     **Collection:** `employee_support` · vector index: `employee_support_vector_index` · search index: `employee_support_search_index`  
     **Concurrency:** 200 virtual users · think time 1.0–4.0 s  
     **Duration:** 100 s  
@@ -158,27 +158,27 @@
     ## 8. Findings & Recommendations
 
     - ❌ High failure rate (2.88%) — server is struggling; reduce concurrency or fix errors.
-- ❌ **High tail latency** on `/retrieve [auto, HR]`: p99 (7900 ms) is 19× the p50 (410 ms). Likely cause: LLM call (QueryUnderstanding + RetrievalPlanner) has no timeout — slow Gemini responses hang the thread. Fix: set `planner.llm_timeout_s` in searchaas.yaml (default 5 s) and redeploy.
+- ❌ **High tail latency** on `/retrieve [auto, HR]`: p99 (7900 ms) is 19× the p50 (410 ms). Likely cause: LLM call (QueryUnderstanding + RetrievalPlanner) has no timeout — slow Gemini responses hang the thread. Fix: set `planner.llm_timeout_s` in AiSearch.yaml (default 5 s) and redeploy.
 - ⚠️ **Max latency spike** on `/retrieve [auto, HR]`: 8844 ms absolute max recorded. Consider a client-side timeout of 4 s.
-- ❌ **High tail latency** on `/retrieve [auto, IT]`: p99 (7900 ms) is 17× the p50 (460 ms). Likely cause: LLM call (QueryUnderstanding + RetrievalPlanner) has no timeout — slow Gemini responses hang the thread. Fix: set `planner.llm_timeout_s` in searchaas.yaml (default 5 s) and redeploy.
+- ❌ **High tail latency** on `/retrieve [auto, IT]`: p99 (7900 ms) is 17× the p50 (460 ms). Likely cause: LLM call (QueryUnderstanding + RetrievalPlanner) has no timeout — slow Gemini responses hang the thread. Fix: set `planner.llm_timeout_s` in AiSearch.yaml (default 5 s) and redeploy.
 - ⚠️ **Max latency spike** on `/retrieve [auto, IT]`: 8932 ms absolute max recorded. Consider a client-side timeout of 4 s.
-- ❌ **High tail latency** on `/retrieve [auto, summarize=false]`: p99 (7700 ms) is 17× the p50 (450 ms). Likely cause: LLM call (QueryUnderstanding + RetrievalPlanner) has no timeout — slow Gemini responses hang the thread. Fix: set `planner.llm_timeout_s` in searchaas.yaml (default 5 s) and redeploy.
+- ❌ **High tail latency** on `/retrieve [auto, summarize=false]`: p99 (7700 ms) is 17× the p50 (450 ms). Likely cause: LLM call (QueryUnderstanding + RetrievalPlanner) has no timeout — slow Gemini responses hang the thread. Fix: set `planner.llm_timeout_s` in AiSearch.yaml (default 5 s) and redeploy.
 - ⚠️ **Max latency spike** on `/retrieve [auto, summarize=false]`: 7666 ms absolute max recorded. Consider a client-side timeout of 4 s.
-- ❌ **High tail latency** on `/retrieve/fulltext [HR]`: p99 (4000 ms) is 12× the p50 (330 ms). Likely cause: Atlas HNSW cold-cache miss or connection pool exhaustion. Fix: ensure `retrieval.max_time_ms` is set in searchaas.yaml and raise `ATLAS_MAX_POOL` if pool is saturated.
+- ❌ **High tail latency** on `/retrieve/fulltext [HR]`: p99 (4000 ms) is 12× the p50 (330 ms). Likely cause: Atlas HNSW cold-cache miss or connection pool exhaustion. Fix: ensure `retrieval.max_time_ms` is set in AiSearch.yaml and raise `ATLAS_MAX_POOL` if pool is saturated.
 - ⚠️ **Max latency spike** on `/retrieve/fulltext [HR]`: 4145 ms absolute max recorded. Consider a client-side timeout of 4 s.
-- ❌ **High tail latency** on `/retrieve/fulltext [IT]`: p99 (3400 ms) is 10× the p50 (340 ms). Likely cause: Atlas HNSW cold-cache miss or connection pool exhaustion. Fix: ensure `retrieval.max_time_ms` is set in searchaas.yaml and raise `ATLAS_MAX_POOL` if pool is saturated.
+- ❌ **High tail latency** on `/retrieve/fulltext [IT]`: p99 (3400 ms) is 10× the p50 (340 ms). Likely cause: Atlas HNSW cold-cache miss or connection pool exhaustion. Fix: ensure `retrieval.max_time_ms` is set in AiSearch.yaml and raise `ATLAS_MAX_POOL` if pool is saturated.
 - ⚠️ **Max latency spike** on `/retrieve/fulltext [IT]`: 4360 ms absolute max recorded. Consider a client-side timeout of 4 s.
-- ❌ **High tail latency** on `/retrieve/hybrid [HR]`: p99 (7900 ms) is 17× the p50 (460 ms). Likely cause: Atlas HNSW cold-cache miss or connection pool exhaustion. Fix: ensure `retrieval.max_time_ms` is set in searchaas.yaml and raise `ATLAS_MAX_POOL` if pool is saturated.
+- ❌ **High tail latency** on `/retrieve/hybrid [HR]`: p99 (7900 ms) is 17× the p50 (460 ms). Likely cause: Atlas HNSW cold-cache miss or connection pool exhaustion. Fix: ensure `retrieval.max_time_ms` is set in AiSearch.yaml and raise `ATLAS_MAX_POOL` if pool is saturated.
 - ⚠️ **Max latency spike** on `/retrieve/hybrid [HR]`: 9698 ms absolute max recorded. Consider a client-side timeout of 4 s.
-- ❌ **High tail latency** on `/retrieve/hybrid [IT]`: p99 (7900 ms) is 17× the p50 (460 ms). Likely cause: Atlas HNSW cold-cache miss or connection pool exhaustion. Fix: ensure `retrieval.max_time_ms` is set in searchaas.yaml and raise `ATLAS_MAX_POOL` if pool is saturated.
+- ❌ **High tail latency** on `/retrieve/hybrid [IT]`: p99 (7900 ms) is 17× the p50 (460 ms). Likely cause: Atlas HNSW cold-cache miss or connection pool exhaustion. Fix: ensure `retrieval.max_time_ms` is set in AiSearch.yaml and raise `ATLAS_MAX_POOL` if pool is saturated.
 - ⚠️ **Max latency spike** on `/retrieve/hybrid [IT]`: 9664 ms absolute max recorded. Consider a client-side timeout of 4 s.
-- ❌ **High tail latency** on `/retrieve/hybrid [top_k var]`: p99 (8700 ms) is 19× the p50 (470 ms). Likely cause: Atlas HNSW cold-cache miss or connection pool exhaustion. Fix: ensure `retrieval.max_time_ms` is set in searchaas.yaml and raise `ATLAS_MAX_POOL` if pool is saturated.
+- ❌ **High tail latency** on `/retrieve/hybrid [top_k var]`: p99 (8700 ms) is 19× the p50 (470 ms). Likely cause: Atlas HNSW cold-cache miss or connection pool exhaustion. Fix: ensure `retrieval.max_time_ms` is set in AiSearch.yaml and raise `ATLAS_MAX_POOL` if pool is saturated.
 - ⚠️ **Max latency spike** on `/retrieve/hybrid [top_k var]`: 9733 ms absolute max recorded. Consider a client-side timeout of 4 s.
-- ❌ **High tail latency** on `/retrieve/vector [HR]`: p99 (7700 ms) is 17× the p50 (450 ms). Likely cause: Atlas HNSW cold-cache miss or connection pool exhaustion. Fix: ensure `retrieval.max_time_ms` is set in searchaas.yaml and raise `ATLAS_MAX_POOL` if pool is saturated.
+- ❌ **High tail latency** on `/retrieve/vector [HR]`: p99 (7700 ms) is 17× the p50 (450 ms). Likely cause: Atlas HNSW cold-cache miss or connection pool exhaustion. Fix: ensure `retrieval.max_time_ms` is set in AiSearch.yaml and raise `ATLAS_MAX_POOL` if pool is saturated.
 - ⚠️ **Max latency spike** on `/retrieve/vector [HR]`: 9425 ms absolute max recorded. Consider a client-side timeout of 4 s.
-- ❌ **High tail latency** on `/retrieve/vector [IT]`: p99 (7700 ms) is 17× the p50 (450 ms). Likely cause: Atlas HNSW cold-cache miss or connection pool exhaustion. Fix: ensure `retrieval.max_time_ms` is set in searchaas.yaml and raise `ATLAS_MAX_POOL` if pool is saturated.
+- ❌ **High tail latency** on `/retrieve/vector [IT]`: p99 (7700 ms) is 17× the p50 (450 ms). Likely cause: Atlas HNSW cold-cache miss or connection pool exhaustion. Fix: ensure `retrieval.max_time_ms` is set in AiSearch.yaml and raise `ATLAS_MAX_POOL` if pool is saturated.
 - ⚠️ **Max latency spike** on `/retrieve/vector [IT]`: 8346 ms absolute max recorded. Consider a client-side timeout of 4 s.
-- ❌ **High tail latency** on `/retrieve/vector [vague]`: p99 (7800 ms) is 17× the p50 (450 ms). Likely cause: Atlas HNSW cold-cache miss or connection pool exhaustion. Fix: ensure `retrieval.max_time_ms` is set in searchaas.yaml and raise `ATLAS_MAX_POOL` if pool is saturated.
+- ❌ **High tail latency** on `/retrieve/vector [vague]`: p99 (7800 ms) is 17× the p50 (450 ms). Likely cause: Atlas HNSW cold-cache miss or connection pool exhaustion. Fix: ensure `retrieval.max_time_ms` is set in AiSearch.yaml and raise `ATLAS_MAX_POOL` if pool is saturated.
 - ⚠️ **Max latency spike** on `/retrieve/vector [vague]`: 9321 ms absolute max recorded. Consider a client-side timeout of 4 s.
 - ℹ️ **Hybrid overhead over fulltext**: +128 ms at p50 (463 ms vs 335 ms). This is the RRF fusion cost — acceptable.
 - ℹ️ **Auto-route NLU overhead**: +-108 ms avg (1035 ms vs 1143 ms for explicit hybrid). Each auto call runs QueryUnderstanding + RetrievalPlanner (2 LLM calls).
@@ -190,7 +190,7 @@
 
     | File | Path |
 |---|---|
-| `load_report.html` | /Users/venkatesh.shanbhag/Documents/AI-Search/searchaas/tests/load_report.html |
-| `load_report_stats.csv` | /Users/venkatesh.shanbhag/Documents/AI-Search/searchaas/tests/load_report_stats.csv |
-| `load_report_stats_history.csv` | /Users/venkatesh.shanbhag/Documents/AI-Search/searchaas/tests/load_report_stats_history.csv |
-| `load_report_failures.csv` | /Users/venkatesh.shanbhag/Documents/AI-Search/searchaas/tests/load_report_failures.csv |
+| `load_report.html` | /Users/venkatesh.shanbhag/Documents/AI-Search/AiSearch/tests/load_report.html |
+| `load_report_stats.csv` | /Users/venkatesh.shanbhag/Documents/AI-Search/AiSearch/tests/load_report_stats.csv |
+| `load_report_stats_history.csv` | /Users/venkatesh.shanbhag/Documents/AI-Search/AiSearch/tests/load_report_stats_history.csv |
+| `load_report_failures.csv` | /Users/venkatesh.shanbhag/Documents/AI-Search/AiSearch/tests/load_report_failures.csv |

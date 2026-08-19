@@ -1,7 +1,7 @@
 # agents/ — Cloud Run Deployment (Employee Support Copilot)
 
 Deploys the `agents/employee-support-copilot` Next.js app (chat UI + BFF
-`/api/chat`) as a single Cloud Run service, wired to the SearchaaS backend.
+`/api/chat`) as a single Cloud Run service, wired to the AiSearch backend.
 
 When the backend is a **Vertex AI Agent Engine (Reasoning Engine)** resource —
 the Gemini agent platform's managed agent runtime — the BFF authenticates with
@@ -17,11 +17,11 @@ No API keys or tokens are baked into the image.
 
 - gcloud CLI authenticated (`gcloud auth login` + `gcloud auth application-default login`)
 - Docker with buildx
-- The SearchaaS backend already deployed (Agent Engine via
+- The AiSearch backend already deployed (Agent Engine via
   [`../agent_runtime/`](../agent_runtime/README.md), or Cloud Run via
   [`../cloud_run/`](../cloud_run/README.md))
-- `agents/employee-support-copilot/.env.local` with `SEARCHAAS_BASE_URL`
-  pointing at that backend (or pass `--searchaas-url`)
+- `agents/employee-support-copilot/.env.local` with `AISEARCH_BASE_URL`
+  pointing at that backend (or pass `--AiSearch-url`)
 
 ## Deploy
 
@@ -37,16 +37,16 @@ All flags are optional and default to the gcloud config / `.env.local` values:
 |---|---|---|
 | `--project` | gcloud config | GCP project ID |
 | `--region` | `us-central1` | Cloud Run region |
-| `--repo` | `searchaas` | Artifact Registry repo |
+| `--repo` | `AiSearch` | Artifact Registry repo |
 | `--service` | `employee-support-copilot` | Cloud Run service name |
-| `--searchaas-url` | `SEARCHAAS_BASE_URL` from the app's `.env.local` | Backend the BFF calls |
+| `--AiSearch-url` | `AISEARCH_BASE_URL` from the app's `.env.local` | Backend the BFF calls |
 
 The script ends with a smoke test: it POSTs a sample query to
 `<url>/api/chat` and reports the resolved domain / strategy / citation count.
 
 > **First deploy:** the project-level `roles/aiplatform.user` grant can take
 > up to ~10 minutes to propagate to the Vertex AI data plane. If the smoke
-> test reports HTTP 503 / "SearchaaS error 403" right after a first-time
+> test reports HTTP 503 / "AiSearch error 403" right after a first-time
 > deploy, wait a few minutes and reload the app — no redeploy needed.
 
 Environment notes:
@@ -69,7 +69,7 @@ Environment notes:
 Browser ──► Cloud Run: employee-support-copilot (Next.js UI + /api/chat BFF)
                  │  Google ADC via attached service account (roles/aiplatform.user)
                  ▼
-            Vertex AI Agent Engine :query  (SearchaaSAgent — Gemini agent platform)
+            Vertex AI Agent Engine :query  (AiSearchAgent — Gemini agent platform)
                  │  per-request atlas/retrieval overrides
                  ▼
             MongoDB Atlas (ai_search.employee_support / ai_search.IT_helpdesk)
@@ -82,6 +82,6 @@ Browser ──► Cloud Run: employee-support-copilot (Next.js UI + /api/chat BF
 ./deployment/google/agents/deploy.sh
 
 # Point at a different backend (e.g. the Cloud Run FastAPI service):
-SEARCHAAS_BASE_URL=https://searchaas-api-<project-number>.us-central1.run.app \
+AISEARCH_BASE_URL=https://AiSearch-api-<project-number>.us-central1.run.app \
   ./deployment/google/agents/deploy.sh
 ```

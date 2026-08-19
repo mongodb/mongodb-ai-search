@@ -3,18 +3,18 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>SearchaaS — React UI · SearchaaS Docs</title>
+<title>AiSearch — React UI · AiSearch Docs</title>
 <link rel="stylesheet" href="../../../pages/assets/style.css">
 <link rel="stylesheet" href="../../../pages/assets/pygments.css">
 </head>
 <body>
 <header class="topbar">
-  <a class="brand" href="../../../index.html">SearchaaS Docs</a>
+  <a class="brand" href="../../../index.html">AiSearch Docs</a>
   <a class="back" href="../../../index.html">← All docs</a>
 </header>
 <main class="content">
-<h1 id="searchaas-react-ui">SearchaaS — React UI</h1>
-<p>A LeafyGreen-styled React + Vite + TypeScript front-end for the SearchaaS
+<h1 id="aisearch-react-ui">AiSearch — React UI</h1>
+<p>A LeafyGreen-styled React + Vite + TypeScript front-end for the AiSearch
 Phase 1 backends (FastAPI REST + FastMCP Streamable HTTP).</p>
 <h2 id="run">Run</h2>
 <div class="highlight"><pre><span></span><code>npm<span class="w"> </span>install
@@ -22,8 +22,8 @@ npm<span class="w"> </span>run<span class="w"> </span>dev<span class="w">       
 </code></pre></div>
 
 <p>Backends expected (run from the repo root):</p>
-<div class="highlight"><pre><span></span><code>uvicorn<span class="w"> </span>searchaas.api.app:app<span class="w"> </span>--host<span class="w"> </span><span class="m">0</span>.0.0.0<span class="w"> </span>--port<span class="w"> </span><span class="m">8000</span>
-python<span class="w"> </span>-m<span class="w"> </span>searchaas.mcp_server.server
+<div class="highlight"><pre><span></span><code>uvicorn<span class="w"> </span>AiSearch.api.app:app<span class="w"> </span>--host<span class="w"> </span><span class="m">0</span>.0.0.0<span class="w"> </span>--port<span class="w"> </span><span class="m">8000</span>
+python<span class="w"> </span>-m<span class="w"> </span>AiSearch.mcp_server.server
 </code></pre></div>
 
 <p>Both backends enable CORS for any <code>http://localhost:*</code> origin, so the dev
@@ -39,7 +39,7 @@ server can talk to them directly.</p>
 <tbody>
 <tr>
 <td><strong>Side pane</strong> (left)</td>
-<td>Live YAML config editor with collapse / expand. Required <code>atlas.*</code> fields are highlighted per strategy. Download produces <code>searchaas.yaml</code>.</td>
+<td>Live YAML config editor with collapse / expand. Required <code>atlas.*</code> fields are highlighted per strategy. Download produces <code>AiSearch.yaml</code>.</td>
 </tr>
 <tr>
 <td><strong>Header</strong> (top)</td>

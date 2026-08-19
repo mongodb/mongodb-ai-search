@@ -3,18 +3,18 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>SearchaaS — Google Cloud Run Deployment · SearchaaS Docs</title>
+<title>AiSearch — Google Cloud Run Deployment · AiSearch Docs</title>
 <link rel="stylesheet" href="../../../../pages/assets/style.css">
 <link rel="stylesheet" href="../../../../pages/assets/pygments.css">
 </head>
 <body>
 <header class="topbar">
-  <a class="brand" href="../../../../index.html">SearchaaS Docs</a>
+  <a class="brand" href="../../../../index.html">AiSearch Docs</a>
   <a class="back" href="../../../../index.html">← All docs</a>
 </header>
 <main class="content">
-<h1 id="searchaas-google-cloud-run-deployment">SearchaaS — Google Cloud Run Deployment</h1>
-<p>Deploy SearchaaS to Google Cloud Run (managed, serverless containers).</p>
+<h1 id="aisearch-google-cloud-run-deployment">AiSearch — Google Cloud Run Deployment</h1>
+<p>Deploy AiSearch to Google Cloud Run (managed, serverless containers).</p>
 <h2 id="two-deployment-modes">Two deployment modes</h2>
 <table>
 <thead>
@@ -52,9 +52,9 @@
 <h2 id="three-service-deployment">Three-service deployment</h2>
 <p>Deploys three independent Cloud Run services:</p>
 <ul>
-<li><code>searchaas-api</code> — FastAPI REST on port 8000</li>
-<li><code>searchaas-mcp</code> — FastMCP server on port 8001 (<code>/mcp</code> endpoint)</li>
-<li><code>searchaas-frontend</code> — React SPA via nginx on port 8080</li>
+<li><code>AiSearch-api</code> — FastAPI REST on port 8000</li>
+<li><code>AiSearch-mcp</code> — FastMCP server on port 8001 (<code>/mcp</code> endpoint)</li>
+<li><code>AiSearch-frontend</code> — React SPA via nginx on port 8080</li>
 </ul>
 <div class="highlight"><pre><span></span><code><span class="c1"># From the repo root:</span>
 ./deployment/google/cloud_run/deploy.sh
@@ -63,7 +63,7 @@
 ./deployment/google/cloud_run/deploy.sh<span class="w"> </span><span class="se">\</span>
 <span class="w">    </span>--project<span class="w"> </span>my-gcp-project<span class="w"> </span><span class="se">\</span>
 <span class="w">    </span>--region<span class="w"> </span>us-central1<span class="w"> </span><span class="se">\</span>
-<span class="w">    </span>--repo<span class="w"> </span>searchaas
+<span class="w">    </span>--repo<span class="w"> </span>AiSearch
 </code></pre></div>
 
 <p>The script:
@@ -112,7 +112,7 @@
 <h2 id="configuration">Configuration</h2>
 <p>All configuration is driven from the repo root <code>.env</code> file. Every <code>KEY=VALUE</code>
 pair is stored in Secret Manager and injected into the container at deploy time.
-The <code>searchaas/config/searchaas.yaml</code> file uses <code>${KEY:-default}</code> syntax so
+The <code>AiSearch/config/AiSearch.yaml</code> file uses <code>${KEY:-default}</code> syntax so
 no image rebuild is needed to change Atlas indexes, embedding provider, or LLM.</p>
 <p>Key environment variables:</p>
 <table>
@@ -153,7 +153,7 @@ no image rebuild is needed to change Atlas indexes, embedding provider, or LLM.<
 </tr>
 </tbody>
 </table>
-<p>See <code>searchaas/config/searchaas.yaml</code> for the full list with defaults.</p>
+<p>See <code>AiSearch/config/AiSearch.yaml</code> for the full list with defaults.</p>
 <hr />
 <h2 id="dockerfiles">Dockerfiles</h2>
 <table>
@@ -188,15 +188,15 @@ no image rebuild is needed to change Atlas indexes, embedding provider, or LLM.<
 <span class="nv">REGION</span><span class="o">=</span>us-central1
 
 <span class="c1"># Three-service mode</span>
-gcloud<span class="w"> </span>run<span class="w"> </span>services<span class="w"> </span>delete<span class="w"> </span>searchaas-api<span class="w">      </span>--region<span class="o">=</span><span class="nv">$REGION</span><span class="w"> </span>--project<span class="o">=</span><span class="nv">$PROJECT</span><span class="w"> </span>--quiet
-gcloud<span class="w"> </span>run<span class="w"> </span>services<span class="w"> </span>delete<span class="w"> </span>searchaas-mcp<span class="w">      </span>--region<span class="o">=</span><span class="nv">$REGION</span><span class="w"> </span>--project<span class="o">=</span><span class="nv">$PROJECT</span><span class="w"> </span>--quiet
-gcloud<span class="w"> </span>run<span class="w"> </span>services<span class="w"> </span>delete<span class="w"> </span>searchaas-frontend<span class="w"> </span>--region<span class="o">=</span><span class="nv">$REGION</span><span class="w"> </span>--project<span class="o">=</span><span class="nv">$PROJECT</span><span class="w"> </span>--quiet
+gcloud<span class="w"> </span>run<span class="w"> </span>services<span class="w"> </span>delete<span class="w"> </span>AiSearch-api<span class="w">      </span>--region<span class="o">=</span><span class="nv">$REGION</span><span class="w"> </span>--project<span class="o">=</span><span class="nv">$PROJECT</span><span class="w"> </span>--quiet
+gcloud<span class="w"> </span>run<span class="w"> </span>services<span class="w"> </span>delete<span class="w"> </span>AiSearch-mcp<span class="w">      </span>--region<span class="o">=</span><span class="nv">$REGION</span><span class="w"> </span>--project<span class="o">=</span><span class="nv">$PROJECT</span><span class="w"> </span>--quiet
+gcloud<span class="w"> </span>run<span class="w"> </span>services<span class="w"> </span>delete<span class="w"> </span>AiSearch-frontend<span class="w"> </span>--region<span class="o">=</span><span class="nv">$REGION</span><span class="w"> </span>--project<span class="o">=</span><span class="nv">$PROJECT</span><span class="w"> </span>--quiet
 
 <span class="c1"># Combined mode</span>
-gcloud<span class="w"> </span>run<span class="w"> </span>services<span class="w"> </span>delete<span class="w"> </span>searchaas<span class="w"> </span>--region<span class="o">=</span><span class="nv">$REGION</span><span class="w"> </span>--project<span class="o">=</span><span class="nv">$PROJECT</span><span class="w"> </span>--quiet
+gcloud<span class="w"> </span>run<span class="w"> </span>services<span class="w"> </span>delete<span class="w"> </span>AiSearch<span class="w"> </span>--region<span class="o">=</span><span class="nv">$REGION</span><span class="w"> </span>--project<span class="o">=</span><span class="nv">$PROJECT</span><span class="w"> </span>--quiet
 
 <span class="c1"># Remove Artifact Registry repo (also deletes all images)</span>
-gcloud<span class="w"> </span>artifacts<span class="w"> </span>repositories<span class="w"> </span>delete<span class="w"> </span>searchaas<span class="w"> </span>--location<span class="o">=</span><span class="nv">$REGION</span><span class="w"> </span>--project<span class="o">=</span><span class="nv">$PROJECT</span><span class="w"> </span>--quiet
+gcloud<span class="w"> </span>artifacts<span class="w"> </span>repositories<span class="w"> </span>delete<span class="w"> </span>AiSearch<span class="w"> </span>--location<span class="o">=</span><span class="nv">$REGION</span><span class="w"> </span>--project<span class="o">=</span><span class="nv">$PROJECT</span><span class="w"> </span>--quiet
 </code></pre></div>
 
 <hr />

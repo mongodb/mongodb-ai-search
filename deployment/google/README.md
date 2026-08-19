@@ -1,4 +1,4 @@
-# SearchaaS — Google Cloud Deployment
+# AiSearch — Google Cloud Deployment
 
 Three deployment targets are available under this directory:
 
@@ -109,7 +109,7 @@ deployment/google/
 └── agent_runtime/              ← Vertex AI Agent Engine (Reasoning Engine)
     ├── README.md
     ├── deploy.sh               End-to-end Agent Engine deploy (confirmation gate)
-    ├── deploy_agent_engine.py  SearchaaSAgent wrapper + AgentEngine create/update
+    ├── deploy_agent_engine.py  AiSearchAgent wrapper + AgentEngine create/update
     └── requirements-deploy.txt Deploy-time deps (Vertex AI SDK + cloudpickle)
 
 └── agents/                     ← Apps from agents/ (Employee Support Copilot)

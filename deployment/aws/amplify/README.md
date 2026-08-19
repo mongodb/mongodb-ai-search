@@ -1,7 +1,7 @@
 # Deploy the Employee Support Copilot on AWS Amplify Hosting
 
 Deploys [`agents/employee-support-copilot`](../../../agents/employee-support-copilot)
-— a Next.js 14 (App Router) chat UI whose BFF calls SearchaaS — to Amplify
+— a Next.js 14 (App Router) chat UI whose BFF calls AiSearch — to Amplify
 Hosting with server-side rendering.
 
 | | |
@@ -9,7 +9,7 @@ Hosting with server-side rendering.
 | Platform | `WEB_COMPUTE` (Amplify managed SSR compute) |
 | Deployment method | **Continuous deployment from Git** (required — see below) |
 | App root in repo | `agents/employee-support-copilot` (monorepo) |
-| Runtime env var | `SEARCHAAS_BASE_URL` → the SearchaaS FastAPI endpoint on ECS |
+| Runtime env var | `AISEARCH_BASE_URL` → the AiSearch FastAPI endpoint on ECS |
 
 ## Current deployment
 
@@ -17,7 +17,7 @@ Hosting with server-side rendering.
 | --- | --- |
 | App ID | `d37bm88drk3hu9` (us-east-1) |
 | URL | https://main.d37bm88drk3hu9.amplifyapp.com |
-| SearchaaS backend | `https://se-10bba725de864de489a8d0390d2c325a.ecs.us-east-1.on.aws` |
+| AiSearch backend | `https://se-10bba725de864de489a8d0390d2c325a.ecs.us-east-1.on.aws` |
 
 Verified working: `/chat` returns 200, and `POST /api/chat` classifies and
 routes correctly (`"VPN is not connecting"` → IT Helpdesk / hybrid;
@@ -39,7 +39,7 @@ not a deployment fault — see [Retrieval returns no results](#retrieval-returns
 
 The app is not a static site. [`src/app/api/chat/route.ts`](../../../agents/employee-support-copilot/src/app/api/chat/route.ts)
 is a server route (`export const runtime = "nodejs"`) that classifies the query
-and calls SearchaaS server-side, so it needs a Node runtime at request time.
+and calls AiSearch server-side, so it needs a Node runtime at request time.
 `next build` confirms it:
 
 ```
@@ -91,10 +91,10 @@ is no supported zip path to SSR compute.
    > be SSO-authorised for that org, and you need admin rights on the repo to
    > create the webhook. If you cannot meet that, use the console flow below —
    > it installs the Amplify GitHub App instead of using a token.
-3. **A running SearchaaS FastAPI service.** Get its URL from the ECS deployment:
+3. **A running AiSearch FastAPI service.** Get its URL from the ECS deployment:
    ```bash
    aws ecs describe-express-gateway-service \
-     --service-arn arn:aws:ecs:us-east-1:<ACCOUNT_ID>:service/default/searchaas-fastapi \
+     --service-arn arn:aws:ecs:us-east-1:<ACCOUNT_ID>:service/default/AiSearch-fastapi \
      --query 'service.activeConfigurations[0].ingressPaths[0].endpoint' --output text
    ```
    See [`../ecs/README.md`](../ecs/README.md).
@@ -106,19 +106,19 @@ is no supported zip path to SSR compute.
 ```bash
 export AWS_PROFILE=anuj-ps
 export GITHUB_ACCESS_TOKEN='ghp_...'
-export SEARCHAAS_BASE_URL='https://se-xxxxxxxx.ecs.us-east-1.on.aws'
+export AISEARCH_BASE_URL='https://se-xxxxxxxx.ecs.us-east-1.on.aws'
 
 ./deployment/aws/amplify/deploy.sh
 ```
 
-`SEARCHAAS_BASE_URL` falls back to the value in the app's `.env.local` if unset.
+`AISEARCH_BASE_URL` falls back to the value in the app's `.env.local` if unset.
 
 What it does (idempotent — safe to re-run):
 
 1. Creates the Amplify app with `--platform WEB_COMPUTE`, connected to the repo
    via `--access-token`, with `amplify.yml` applied as the build spec.
-2. Sets app-level environment variables — `SEARCHAAS_BASE_URL`,
-   `SEARCHAAS_API_KEY`, and `AMPLIFY_MONOREPO_APP_ROOT`.
+2. Sets app-level environment variables — `AISEARCH_BASE_URL`,
+   `AISEARCH_API_KEY`, and `AMPLIFY_MONOREPO_APP_ROOT`.
 3. Creates the `main` branch with `--framework 'Next.js - SSR'` and auto-build on.
 4. Runs `start-job --job-type RELEASE` and polls until it settles, dumping the
    per-step log URLs if it fails.
@@ -138,8 +138,8 @@ Use this when token-based repo access is not available.
 
    | Key | Value |
    | --- | --- |
-   | `SEARCHAAS_BASE_URL` | `https://se-xxxxxxxx.ecs.us-east-1.on.aws` |
-   | `SEARCHAAS_API_KEY` | *(blank unless SearchaaS is behind bearer auth)* |
+   | `AISEARCH_BASE_URL` | `https://se-xxxxxxxx.ecs.us-east-1.on.aws` |
+   | `AISEARCH_API_KEY` | *(blank unless AiSearch is behind bearer auth)* |
    | `AMPLIFY_MONOREPO_APP_ROOT` | `agents/employee-support-copilot` |
 
 5. Replace the build spec with the contents of [`amplify.yml`](./amplify.yml).
@@ -178,21 +178,21 @@ that layout and breaks the adapter. The file carries a comment to this effect.
 ### CORS is not involved
 
 The browser only ever calls the Amplify origin. `/api/chat` runs server-side and
-calls SearchaaS from Amplify's compute, so SearchaaS never sees a browser
-`Origin` header for these requests and `SEARCHAAS_CORS_ORIGINS` does not need
+calls AiSearch from Amplify's compute, so AiSearch never sees a browser
+`Origin` header for these requests and `AISEARCH_CORS_ORIGINS` does not need
 the Amplify domain. (It would only matter if a client component started calling
-SearchaaS directly.)
+AiSearch directly.)
 
 ### The collection registry is build-time
 
 `src/lib/collections.ts` hardcodes the Atlas collections (`IT_helpdesk`,
-`employee_support`) and their index names, and the BFF passes them to SearchaaS
+`employee_support`) and their index names, and the BFF passes them to AiSearch
 as per-request `atlas` overrides. Changing a collection or index name means
 editing that file and redeploying — it is not an environment variable.
 
 Note the BFF overrides `collection`, `vector_index`, `search_index`, `text_key`,
 and `embedding_key` — but **not `database`**. Queries therefore land in whatever
-database the SearchaaS service itself is configured with (`ATLAS_DB`). Both must
+database the AiSearch service itself is configured with (`ATLAS_DB`). Both must
 line up.
 
 ### Retrieval returns no results
@@ -219,7 +219,7 @@ Two gaps:
 Confirm the backend independently of the UI:
 
 ```bash
-curl -sS -X POST "$SEARCHAAS_BASE_URL/retrieve" -H 'content-type: application/json' -d '{
+curl -sS -X POST "$AISEARCH_BASE_URL/retrieve" -H 'content-type: application/json' -d '{
   "query":"VPN is not connecting","top_k":8,
   "atlas":{"collection":"IT_helpdesk","vector_index":"it_helpdesk_vector_index",
            "search_index":"it_helpdesk_search_index","text_key":"text","embedding_key":"embedding"},

@@ -1,6 +1,6 @@
-# SearchaaS — React UI
+# AiSearch — React UI
 
-A LeafyGreen-styled React + Vite + TypeScript front-end for the SearchaaS
+A LeafyGreen-styled React + Vite + TypeScript front-end for the AiSearch
 Phase 1 backends (FastAPI REST + FastMCP Streamable HTTP).
 
 ## Run
@@ -13,8 +13,8 @@ npm run dev          # → http://localhost:5173
 Backends expected (run from the repo root):
 
 ```bash
-uvicorn searchaas.api.app:app --host 0.0.0.0 --port 8000
-python -m searchaas.mcp_server.server
+uvicorn AiSearch.api.app:app --host 0.0.0.0 --port 8000
+python -m AiSearch.mcp_server.server
 ```
 
 Both backends enable CORS for any `http://localhost:*` origin, so the dev
@@ -24,7 +24,7 @@ server can talk to them directly.
 
 | Region                  | What it does                                                       |
 | ----------------------- | ------------------------------------------------------------------ |
-| **Side pane** (left)    | Live YAML config editor with collapse / expand. Required `atlas.*` fields are highlighted per strategy. Download produces `searchaas.yaml`. |
+| **Side pane** (left)    | Live YAML config editor with collapse / expand. Required `atlas.*` fields are highlighted per strategy. Download produces `AiSearch.yaml`. |
 | **Header** (top)        | Branded hero with active backend.                                  |
 | **Query panel** (right) | Backend toggle, strategy + top_k, query box, filters, run button.  |
 | **Intent panel**        | Shown when auto mode returns an `understood_query` — intent, rewritten query, entities, inferred filters, and the planner-chosen strategy compared to the intent's typical mapping. |

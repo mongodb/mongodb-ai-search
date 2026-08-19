@@ -5,7 +5,7 @@
 > you explicitly want to — the script refuses to run without confirmation.
 
 Amazon Bedrock AgentCore Runtime can host MCP servers directly. This packages
-the existing SearchaaS FastMCP surface (`searchaas/mcp_server/server.py`) as an
+the existing AiSearch FastMCP surface (`AiSearch/mcp_server/server.py`) as an
 ARM64 container and registers it as an AgentCore runtime with the **MCP**
 protocol.
 
@@ -17,8 +17,8 @@ Docs: <https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/runtime-mcp
 | ------------------------------- | ------------------------------------------------------------------- |
 | Platform must be `linux/arm64`  | `Dockerfile` uses `--platform=linux/arm64`; build uses `buildx`     |
 | MCP served at `0.0.0.0:8000/mcp`| `MCP_HOST=0.0.0.0`, `MCP_PORT=8000`, transport `streamable-http`    |
-| Image in ECR                    | Script creates `searchaas-agentcore` repo and pushes the image      |
-| Execution role                  | Script creates `searchaas-agentcore-runtime-role` (ECR + logs + Bedrock) |
+| Image in ECR                    | Script creates `AiSearch-agentcore` repo and pushes the image      |
+| Execution role                  | Script creates `AiSearch-agentcore-runtime-role` (ECR + logs + Bedrock) |
 | Protocol = MCP                  | `create-agent-runtime --protocol-configuration '{"serverProtocol":"MCP"}'` |
 
 ## Files
@@ -49,13 +49,13 @@ https://bedrock-agentcore.<region>.amazonaws.com/runtimes/<ENCODED_ARN>/invocati
 ```
 
 > **Create-only.** `deploy.sh` calls `create-agent-runtime`. If a runtime with
-> the same name (`AGENTCORE_RUNTIME_NAME`, default `searchaas_fastmcp`) already
+> the same name (`AGENTCORE_RUNTIME_NAME`, default `AiSearch_fastmcp`) already
 > exists, AWS rejects the create. Delete the old runtime first (see
 > [Manage / tear down](#manage--tear-down)) or deploy under a new name.
 
 ## Configuration options
 
-Everything in `searchaas/config/searchaas.yaml` uses `${VAR:-default}` syntax, so
+Everything in `AiSearch/config/AiSearch.yaml` uses `${VAR:-default}` syntax, so
 you configure the runtime purely with **environment variables** — no image
 rebuild. `deploy.sh` forwards any of the variables below that you export into the
 runtime's `environmentVariables`; anything you leave unset falls back to the YAML
@@ -119,7 +119,7 @@ index type (`ProviderIndexMismatch`). Pick one:
   (empty), and point `ATLAS_VECTOR_INDEX` at the autoEmbed index whose declared
   `model` equals `EMBEDDINGS_MODEL`.
 
-Dev-only escape hatch: `SEARCHAAS_SKIP_PROVIDER_INDEX_CHECK=1` bypasses this
+Dev-only escape hatch: `AISEARCH_SKIP_PROVIDER_INDEX_CHECK=1` bypasses this
 validation. Do not use in production.
 
 ### Planner LLM (query understanding + retrieval planning)
@@ -195,7 +195,7 @@ the "Set up Cognito user pool" appendix in the AWS AgentCore MCP docs.
 
 ## Tools exposed
 
-Same tools as the ECS FastMCP service (they share `searchaas/mcp_server/server.py`):
+Same tools as the ECS FastMCP service (they share `AiSearch/mcp_server/server.py`):
 `vector_search`, `fulltext_search`, `hybrid_search`, `graph_search`,
 `parent_doc_search`, `metadata_search`, `auto_search`.
 
