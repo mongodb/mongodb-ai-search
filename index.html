@@ -3,8 +3,8 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>SearchaaS — One retrieval platform. Every cloud. Every agent.</title>
-<meta name="description" content="SearchaaS — MongoDB Atlas retrieval platform: architecture, agents, and deployment guides for Google Cloud, AWS, and Azure.">
+<title>AiSearch — One retrieval platform. Every cloud. Every agent.</title>
+<meta name="description" content="AiSearch — MongoDB Atlas retrieval platform: architecture, agents, and deployment guides for Google Cloud, AWS, and Azure.">
 <link rel="stylesheet" href="pages/assets/style.css">
 <link rel="stylesheet" href="pages/assets/landing.css">
 <script src="pages/assets/landing.js" defer></script>
@@ -12,7 +12,7 @@
 <body>
 
 <header class="lnav">
-  <a class="logo" href="index.html"><span class="leaf">◈</span> SearchaaS</a>
+  <a class="logo" href="index.html"><span class="leaf">◈</span> AiSearch</a>
   <nav>
     <a href="#architecture">Architecture</a>
     <a href="#agents">Agents</a>
@@ -29,7 +29,7 @@
     <div>
       <p class="kicker">MongoDB Atlas Retrieval Platform</p>
       <h1>One retrieval platform. <em>Every cloud. Every agent.</em></h1>
-      <p class="sub">SearchaaS turns MongoDB Atlas into an AI-planned search service —
+      <p class="sub">AiSearch turns MongoDB Atlas into an AI-planned search service —
          vector, full-text, hybrid, graph, parent-doc and metadata retrieval with query
          understanding and grounded summarization, exposed over REST and MCP on
          Google Cloud, AWS, and Azure.</p>
@@ -49,14 +49,14 @@
     <!-- Live-style mock of the Employee Support Copilot agent -->
     <div class="chatdemo" aria-label="Chatbot demo">
       <div class="cd-head"><span class="dot"></span> Employee Support Copilot
-        <span class="sub">powered by SearchaaS</span></div>
+        <span class="sub">powered by AiSearch</span></div>
       <div class="cd-body" id="cd-body"></div>
       <div class="cd-suggests">
         <button type="button" data-ask="pto">How many PTO days do I get?</button>
         <button type="button" data-ask="vpn">VPN keeps disconnecting</button>
         <button type="button" data-ask="payroll">Update direct deposit</button>
       </div>
-      <div class="cd-note">Demo: the agent classifies the domain, calls SearchaaS
+      <div class="cd-note">Demo: the agent classifies the domain, calls AiSearch
         <code>/retrieve</code> with per-collection Atlas overrides, and renders a grounded answer.
         <a href="pages/demo.html" style="color:var(--mdb-forest);font-weight:700">Full interactive connection playground →</a></div>
     </div>
@@ -65,13 +65,13 @@
 
 <!-- ── Clickable architecture ───────────────────────────────────────────── -->
 <section class="lsec" id="architecture">
-  <p class="kicker">How SearchaaS works</p>
+  <p class="kicker">How AiSearch works</p>
   <h2>The retrieval pipeline, end to end</h2>
   <p class="lead">Every box is clickable and jumps to the doc that covers it. A query flows
      left to right: an agent calls REST or MCP, the factory pipeline understands, plans and
      retrieves, and MongoDB Atlas does the heavy lifting.</p>
   <div class="archwrap">
-  <svg viewBox="0 0 1160 520" role="img" aria-label="SearchaaS architecture diagram">
+  <svg viewBox="0 0 1160 520" role="img" aria-label="AiSearch architecture diagram">
     <defs>
       <marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
         <path d="M0 0L10 5L0 10z" fill="#9aa4ad"/></marker>
@@ -83,7 +83,7 @@
 
     <text class="achip-label" x="10" y="20">AGENTS &amp; APPS</text>
     <text class="achip-label" x="275" y="20">API SURFACES</text>
-    <text class="achip-label" x="530" y="20">SEARCHAAS CORE — FACTORY PIPELINE</text>
+    <text class="achip-label" x="530" y="20">AISEARCH CORE — FACTORY PIPELINE</text>
     <text class="achip-label" x="930" y="20">DATA &amp; MODELS</text>
 
     <!-- edges -->
@@ -195,7 +195,7 @@
 <!-- ── How agents interact ──────────────────────────────────────────────── -->
 <div class="lsec-alt">
 <section class="lsec" id="agents">
-  <p class="kicker">Agents × SearchaaS</p>
+  <p class="kicker">Agents × AiSearch</p>
   <h2>How an agent answers a question</h2>
   <p class="lead">The Employee Support Copilot is the reference agent: five steps from
      user question to grounded, cited answer — each step links to its doc.</p>
@@ -209,7 +209,7 @@
       <p>Keyword classifier routes to <code>IT_helpdesk</code> or <code>employee_support</code>.</p>
     </a>
     <a class="step" href="pages/README.html">
-      <span class="n">3</span><h3>Call SearchaaS</h3>
+      <span class="n">3</span><h3>Call AiSearch</h3>
       <p><code>POST /retrieve</code> with per-request <code>atlas</code> overrides — collection, indexes, weights.</p>
     </a>
     <a class="step" href="pages/docs/ARCHITECTURE_DIAGRAMS.html">
@@ -243,7 +243,7 @@
         <span class="desc">Employee Support Copilot — Next.js chat + BFF</span></div>
       <div class="clayer"><span class="lbl">Agent runtime</span><span class="svc">Vertex AI Agent Engine</span>
         <span class="desc">Managed serverless agent host (Reasoning Engine)</span></div>
-      <div class="clayer"><span class="lbl">SearchaaS runtime</span><span class="svc">Cloud Run</span>
+      <div class="clayer"><span class="lbl">AiSearch runtime</span><span class="svc">Cloud Run</span>
         <span class="desc">FastAPI REST + FastMCP containers · Secret Manager</span></div>
       <div class="clayer const"><span class="lbl">Data — unchanged</span><span class="svc">MongoDB Atlas</span>
         <span class="desc">Same collections, indexes &amp; guardrails on every cloud</span></div>
@@ -262,7 +262,7 @@
         <span class="desc">Copilot on Amplify Hosting · tester UI as static site</span></div>
       <div class="clayer"><span class="lbl">Agent runtime</span><span class="svc">Bedrock AgentCore</span>
         <span class="desc">AgentCore Runtime hosts the FastMCP surface</span></div>
-      <div class="clayer"><span class="lbl">SearchaaS runtime</span><span class="svc">ECS Express</span>
+      <div class="clayer"><span class="lbl">AiSearch runtime</span><span class="svc">ECS Express</span>
         <span class="desc">FastAPI REST + FastMCP services · Secrets Manager</span></div>
       <div class="clayer const"><span class="lbl">Data — unchanged</span><span class="svc">MongoDB Atlas</span>
         <span class="desc">Same collections, indexes &amp; guardrails on every cloud</span></div>
@@ -282,7 +282,7 @@
         <span class="desc">Employee Support Copilot — Next.js chat + BFF</span></div>
       <div class="clayer"><span class="lbl">Agent runtime</span><span class="svc">AI Foundry</span>
         <span class="desc">Foundry agent wired to the MCP endpoint</span></div>
-      <div class="clayer"><span class="lbl">SearchaaS runtime</span><span class="svc">Container Apps</span>
+      <div class="clayer"><span class="lbl">AiSearch runtime</span><span class="svc">Container Apps</span>
         <span class="desc">FastAPI REST + FastMCP containers · Key Vault</span></div>
       <div class="clayer const"><span class="lbl">Data — unchanged</span><span class="svc">MongoDB Atlas</span>
         <span class="desc">Same collections, indexes &amp; guardrails on every cloud</span></div>
@@ -307,18 +307,18 @@
   <section>
     <h2>Getting Started</h2>
     <div class="grid">
-      <a class="card" href="pages/README.html" data-title="searchaas — phase 1">
-        <h3>SearchaaS — Phase 1</h3>
+      <a class="card" href="pages/README.html" data-title="aisearch — phase 1">
+        <h3>AiSearch — Phase 1</h3>
         <p class="path">README.md</p>
         <p class="blurb">MongoDB Atlas-backed retrieval platform built around the Factory pattern. Phase 1 ships: query understanding (rewriting, entity &amp; typed-fact extraction, intent), AI-driven retrieval planning with Atla…</p>
       </a>
       <a class="card" href="pages/docs/Instructions.html" data-title="technical implementation architecture — python (factory pattern)">
         <h3>Technical Implementation Architecture — Python (Factory Pattern)</h3>
         <p class="path">docs/Instructions.md</p>
-        <p class="blurb">This document describes the implementation architecture of the SearchaaS retrieval platform in Python, organized around the Factory design pattern. Every pluggable concern (embeddings, retrievers, rer…</p>
+        <p class="blurb">This document describes the implementation architecture of the AiSearch retrieval platform in Python, organized around the Factory design pattern. Every pluggable concern (embeddings, retrievers, rera…</p>
       </a>
-      <a class="card" href="pages/docs/QUICK_REFERENCE.html" data-title="searchaas - quick reference guide">
-        <h3>SearchaaS - Quick Reference Guide</h3>
+      <a class="card" href="pages/docs/QUICK_REFERENCE.html" data-title="aisearch - quick reference guide">
+        <h3>AiSearch - Quick Reference Guide</h3>
         <p class="path">docs/QUICK_REFERENCE.md</p>
         <p class="blurb">MCP: mcpserver/server.py (FastMCP) └─→ tools/call (JSON-RPC)</p>
       </a>
@@ -328,20 +328,20 @@
   <section>
     <h2>Architecture & Internals</h2>
     <div class="grid">
-      <a class="card" href="pages/docs/ARCHITECTURE_DIAGRAMS.html" data-title="searchaas architecture diagrams">
-        <h3>SearchaaS Architecture Diagrams</h3>
+      <a class="card" href="pages/docs/ARCHITECTURE_DIAGRAMS.html" data-title="aisearch architecture diagrams">
+        <h3>AiSearch Architecture Diagrams</h3>
         <p class="path">docs/ARCHITECTURE_DIAGRAMS.md</p>
         <p class="blurb">Spacing &amp; Sizing ├── Radius │ ├── --radius: 12px (buttons, cards) │ ├── --radius-sm: 8px (inputs) │ └── --radius-xs: 6px (small elements) │ └── Shadows ├── --shadow-xs: 0 1px 2px ├── --shadow-sm: 0 2p…</p>
       </a>
-      <a class="card" href="pages/docs/CODEBASE_ANALYSIS.html" data-title="searchaas codebase analysis">
-        <h3>SearchaaS Codebase Analysis</h3>
+      <a class="card" href="pages/docs/CODEBASE_ANALYSIS.html" data-title="aisearch codebase analysis">
+        <h3>AiSearch Codebase Analysis</h3>
         <p class="path">docs/CODEBASE_ANALYSIS.md</p>
         <p class="blurb">/ Borders / --border: E4E7EE; / Primary border / --border-soft: EDF0F7; / Soft border /</p>
       </a>
-      <a class="card" href="pages/docs/DOCUMENTATION_INDEX.html" data-title="searchaas documentation index">
-        <h3>SearchaaS Documentation Index</h3>
+      <a class="card" href="pages/docs/DOCUMENTATION_INDEX.html" data-title="aisearch documentation index">
+        <h3>AiSearch Documentation Index</h3>
         <p class="path">docs/DOCUMENTATION_INDEX.md</p>
-        <p class="blurb">This directory contains comprehensive documentation for the SearchaaS project - a MongoDB Atlas-backed retrieval platform with AI-driven query planning and multiple search strategies.</p>
+        <p class="blurb">This directory contains comprehensive documentation for the AiSearch project - a MongoDB Atlas-backed retrieval platform with AI-driven query planning and multiple search strategies.</p>
       </a>
       <a class="card" href="pages/docs/known-issues.html" data-title="known issues">
         <h3>Known Issues</h3>
@@ -357,7 +357,7 @@
       <a class="card" href="pages/agents/employee-support-copilot/README.html" data-title="employee support copilot">
         <h3>Employee Support Copilot</h3>
         <p class="path">agents/employee-support-copilot/README.md</p>
-        <p class="blurb">A production-style chat application that routes employee questions to the right MongoDB Atlas collection via SearchaaS, dynamically passing collection name and vector search configuration on every req…</p>
+        <p class="blurb">A production-style chat application that routes employee questions to the right MongoDB Atlas collection via AiSearch, dynamically passing collection name and vector search configuration on every requ…</p>
       </a>
     </div>
   </section>
@@ -365,25 +365,25 @@
   <section>
     <h2>Deploy — Google Cloud</h2>
     <div class="grid">
-      <a class="card" href="pages/deployment/google/README.html" data-title="searchaas — google cloud deployment">
-        <h3>SearchaaS — Google Cloud Deployment</h3>
+      <a class="card" href="pages/deployment/google/README.html" data-title="aisearch — google cloud deployment">
+        <h3>AiSearch — Google Cloud Deployment</h3>
         <p class="path">deployment/google/README.md</p>
         <p class="blurb">Three deployment targets are available under this directory:</p>
       </a>
-      <a class="card" href="pages/deployment/google/agent_runtime/README.html" data-title="searchaas — vertex ai agent engine (reasoning engine) deployment">
-        <h3>SearchaaS — Vertex AI Agent Engine (Reasoning Engine) Deployment</h3>
+      <a class="card" href="pages/deployment/google/agent_runtime/README.html" data-title="aisearch — vertex ai agent engine (reasoning engine) deployment">
+        <h3>AiSearch — Vertex AI Agent Engine (Reasoning Engine) Deployment</h3>
         <p class="path">deployment/google/agent_runtime/README.md</p>
-        <p class="blurb">Deploys SearchaaS to the Google Cloud Gemini agent platform&#x27;s managed agent runtime — Vertex AI Agent Engine (formerly &quot;Reasoning Engine&quot;). This is the managed, serverless agent host: no Cloud Run ser…</p>
+        <p class="blurb">Deploys AiSearch to the Google Cloud Gemini agent platform&#x27;s managed agent runtime — Vertex AI Agent Engine (formerly &quot;Reasoning Engine&quot;). This is the managed, serverless agent host: no Cloud Run serv…</p>
       </a>
-      <a class="card" href="pages/deployment/google/cloud_run/README.html" data-title="searchaas — google cloud run deployment">
-        <h3>SearchaaS — Google Cloud Run Deployment</h3>
+      <a class="card" href="pages/deployment/google/cloud_run/README.html" data-title="aisearch — google cloud run deployment">
+        <h3>AiSearch — Google Cloud Run Deployment</h3>
         <p class="path">deployment/google/cloud_run/README.md</p>
-        <p class="blurb">Deploy SearchaaS to Google Cloud Run (managed, serverless containers).</p>
+        <p class="blurb">Deploy AiSearch to Google Cloud Run (managed, serverless containers).</p>
       </a>
       <a class="card" href="pages/deployment/google/agents/README.html" data-title="agents/ — cloud run deployment (employee support copilot)">
         <h3>agents/ — Cloud Run Deployment (Employee Support Copilot)</h3>
         <p class="path">deployment/google/agents/README.md</p>
-        <p class="blurb">Deploys the agents/employee-support-copilot Next.js app (chat UI + BFF /api/chat) as a single Cloud Run service, wired to the SearchaaS backend.</p>
+        <p class="blurb">Deploys the agents/employee-support-copilot Next.js app (chat UI + BFF /api/chat) as a single Cloud Run service, wired to the AiSearch backend.</p>
       </a>
     </div>
   </section>
@@ -394,7 +394,7 @@
       <a class="card" href="pages/deployment/aws/README.html" data-title="aws deployment">
         <h3>AWS Deployment</h3>
         <p class="path">deployment/aws/README.md</p>
-        <p class="blurb">Deploy SearchaaS on AWS. Three independent pieces:</p>
+        <p class="blurb">Deploy AiSearch on AWS. Three independent pieces:</p>
       </a>
       <a class="card" href="pages/deployment/aws/ecs/README.html" data-title="deploy on amazon ecs express mode">
         <h3>Deploy on Amazon ECS Express Mode</h3>
@@ -404,17 +404,17 @@
       <a class="card" href="pages/deployment/aws/agentcore/README.html" data-title="deploy fastmcp on amazon bedrock agentcore runtime (opt-in)">
         <h3>Deploy FastMCP on Amazon Bedrock AgentCore Runtime (opt-in)</h3>
         <p class="path">deployment/aws/agentcore/README.md</p>
-        <p class="blurb">Amazon Bedrock AgentCore Runtime can host MCP servers directly. This packages the existing SearchaaS FastMCP surface (searchaas/mcpserver/server.py) as an ARM64 container and registers it as an AgentC…</p>
+        <p class="blurb">Amazon Bedrock AgentCore Runtime can host MCP servers directly. This packages the existing AiSearch FastMCP surface (AiSearch/mcpserver/server.py) as an ARM64 container and registers it as an AgentCor…</p>
       </a>
       <a class="card" href="pages/deployment/aws/s3-ui/README.html" data-title="deploy the react ui to s3 (static website)">
         <h3>Deploy the React UI to S3 (static website)</h3>
         <p class="path">deployment/aws/s3-ui/README.md</p>
-        <p class="blurb">Deploys searchaas/uireact to an existing S3 bucket as a static website.</p>
+        <p class="blurb">Deploys AiSearch/uireact to an existing S3 bucket as a static website.</p>
       </a>
       <a class="card" href="pages/deployment/aws/amplify/README.html" data-title="deploy the employee support copilot on aws amplify hosting">
         <h3>Deploy the Employee Support Copilot on AWS Amplify Hosting</h3>
         <p class="path">deployment/aws/amplify/README.md</p>
-        <p class="blurb">Deploys agents/employee-support-copilot — a Next.js 14 (App Router) chat UI whose BFF calls SearchaaS — to Amplify Hosting with server-side rendering.</p>
+        <p class="blurb">Deploys agents/employee-support-copilot — a Next.js 14 (App Router) chat UI whose BFF calls AiSearch — to Amplify Hosting with server-side rendering.</p>
       </a>
     </div>
   </section>
@@ -422,10 +422,10 @@
   <section>
     <h2>Deploy — Azure</h2>
     <div class="grid">
-      <a class="card" href="pages/deployment/azure/DEPLOYMENT.html" data-title="deploying searchaas to azure container apps + ai foundry">
-        <h3>Deploying SearchaaS to Azure Container Apps + AI Foundry</h3>
+      <a class="card" href="pages/deployment/azure/DEPLOYMENT.html" data-title="deploying aisearch to azure container apps + ai foundry">
+        <h3>Deploying AiSearch to Azure Container Apps + AI Foundry</h3>
         <p class="path">deployment/azure/DEPLOYMENT.md</p>
-        <p class="blurb">This guide deploys the three SearchaaS surfaces to Azure Container Apps and wires the MCP endpoint into an AI Foundry agent.</p>
+        <p class="blurb">This guide deploys the three AiSearch surfaces to Azure Container Apps and wires the MCP endpoint into an AI Foundry agent.</p>
       </a>
     </div>
   </section>
@@ -433,13 +433,13 @@
   <section>
     <h2>Components & Testing</h2>
     <div class="grid">
-      <a class="card" href="pages/searchaas/ui_react/README.html" data-title="searchaas — react ui">
-        <h3>SearchaaS — React UI</h3>
+      <a class="card" href="pages/searchaas/ui_react/README.html" data-title="aisearch — react ui">
+        <h3>AiSearch — React UI</h3>
         <p class="path">searchaas/ui_react/README.md</p>
-        <p class="blurb">A LeafyGreen-styled React + Vite + TypeScript front-end for the SearchaaS Phase 1 backends (FastAPI REST + FastMCP Streamable HTTP).</p>
+        <p class="blurb">A LeafyGreen-styled React + Vite + TypeScript front-end for the AiSearch Phase 1 backends (FastAPI REST + FastMCP Streamable HTTP).</p>
       </a>
-      <a class="card" href="pages/searchaas/tests/README.html" data-title="searchaas test suite">
-        <h3>SearchaaS Test Suite</h3>
+      <a class="card" href="pages/searchaas/tests/README.html" data-title="aisearch test suite">
+        <h3>AiSearch Test Suite</h3>
         <p class="path">searchaas/tests/README.md</p>
         <p class="blurb">Tests for the metadata-filter allowlist fix (branch fix/llm-filter-allowlist), which stops the Query Understanding LLM from sending invented filter fields into Atlas $vectorSearch (the Path &#x27;&lt;field&gt;&#x27;…</p>
       </a>
@@ -456,7 +456,7 @@
 
 <footer class="lfooter">
   <div class="wrap">
-    <div><b>◈ SearchaaS</b><br>MongoDB Atlas retrieval platform — REST + MCP, on any cloud.</div>
+    <div><b>◈ AiSearch</b><br>MongoDB Atlas retrieval platform — REST + MCP, on any cloud.</div>
     <div>Generated from the repository's markdown docs by tools/build_docs_site.py</div>
   </div>
 </footer>

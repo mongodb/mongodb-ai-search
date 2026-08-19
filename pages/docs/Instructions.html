@@ -3,18 +3,18 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Technical Implementation Architecture — Python (Factory Pattern) · SearchaaS Docs</title>
+<title>Technical Implementation Architecture — Python (Factory Pattern) · AiSearch Docs</title>
 <link rel="stylesheet" href="../../pages/assets/style.css">
 <link rel="stylesheet" href="../../pages/assets/pygments.css">
 </head>
 <body>
 <header class="topbar">
-  <a class="brand" href="../../index.html">SearchaaS Docs</a>
+  <a class="brand" href="../../index.html">AiSearch Docs</a>
   <a class="back" href="../../index.html">← All docs</a>
 </header>
 <main class="content">
 <h1 id="technical-implementation-architecture-python-factory-pattern">Technical Implementation Architecture — Python (Factory Pattern)</h1>
-<p>This document describes the implementation architecture of the SearchaaS retrieval platform in <strong>Python</strong>, organized around the <strong>Factory design pattern</strong>. Every pluggable concern (embeddings, retrievers, rerankers, response generators, planners) is created through a factory so that providers and strategies can be swapped via configuration without changing call sites.</p>
+<p>This document describes the implementation architecture of the AiSearch retrieval platform in <strong>Python</strong>, organized around the <strong>Factory design pattern</strong>. Every pluggable concern (embeddings, retrievers, rerankers, response generators, planners) is created through a factory so that providers and strategies can be swapped via configuration without changing call sites.</p>
 <p><strong>Delivery phasing</strong></p>
 <ul>
 <li><strong>Phase 1 (core retrieval foundation):</strong> MongoDB Atlas as the Retrieval Foundation, Data Model, Query Understanding Layer, Query Embedding Strategy, AI-Driven Retrieval Planning, Retrieval Strategies (excluding the Self-Query Retriever), YAML Configuration, FastAPI + FastMCP exposure of every retrieval method, and a React testing UI.</li>
@@ -92,10 +92,10 @@
 <hr />
 <h1 id="phase-1">PHASE 1</h1>
 <h2 id="0-phase-1-project-layout">0. Phase 1 Project Layout</h2>
-<p>The Phase 1 implementation lives under <code>searchaas/</code>. Each module corresponds to a numbered section below.</p>
-<div class="highlight"><pre><span></span><code>searchaas/
+<p>The Phase 1 implementation lives under <code>AiSearch/</code>. Each module corresponds to a numbered section below.</p>
+<div class="highlight"><pre><span></span><code>AiSearch/
 ├── config/                 # §7   YAML + loader (single source of truth)
-│   ├── searchaas.yaml      #      runtime config (atlas, embeddings, planner, retrieval, server)
+│   ├── AiSearch.yaml      #      runtime config (atlas, embeddings, planner, retrieval, server)
 │   ├── loader.py           #      load_config() -&gt; AppConfig + .env auto-loading + validation
 │   └── __init__.py
 ├── observability/          # §10a Central logging (dictConfig, JSON/plain)
@@ -121,13 +121,13 @@
 │   └── app.py              # §8   FastAPI endpoints + request-ID middleware + /diagnose
 ├── mcp_server/
 │   └── server.py           # §9   FastMCP tools
-└── diagnose.py             # §10a CLI: python -m searchaas.diagnose
+└── diagnose.py             # §10a CLI: python -m AiSearch.diagnose
 </code></pre></div>
 
 <p>Run order:</p>
-<div class="highlight"><pre><span></span><code>uvicorn<span class="w"> </span>searchaas.api.app:app<span class="w"> </span>--port<span class="w"> </span><span class="m">8000</span><span class="w">      </span><span class="c1"># REST</span>
-python<span class="w">  </span>-m<span class="w"> </span>searchaas.mcp_server.server<span class="w">         </span><span class="c1"># MCP</span>
-python<span class="w">  </span>-m<span class="w"> </span>searchaas.diagnose<span class="w"> </span>--query<span class="w"> </span><span class="s2">&quot;...&quot;</span><span class="w">    </span><span class="c1"># vector-search self-check (no server needed)</span>
+<div class="highlight"><pre><span></span><code>uvicorn<span class="w"> </span>AiSearch.api.app:app<span class="w"> </span>--port<span class="w"> </span><span class="m">8000</span><span class="w">      </span><span class="c1"># REST</span>
+python<span class="w">  </span>-m<span class="w"> </span>AiSearch.mcp_server.server<span class="w">         </span><span class="c1"># MCP</span>
+python<span class="w">  </span>-m<span class="w"> </span>AiSearch.diagnose<span class="w"> </span>--query<span class="w"> </span><span class="s2">&quot;...&quot;</span><span class="w">    </span><span class="c1"># vector-search self-check (no server needed)</span>
 </code></pre></div>
 
 <h2 id="1-mongodb-atlas-as-the-retrieval-foundation">1. MongoDB Atlas as the Retrieval Foundation</h2>
@@ -137,14 +137,14 @@ python<span class="w">  </span>-m<span class="w"> </span>searchaas.diagnose<span
 <li><strong>Atlas Vector Search</strong> — semantic retrieval via vector similarity with HNSW indexing.</li>
 </ul>
 <p>Atlas collections also back: Search Profiles, Retrieval Policies, Deployment Configurations, Query Telemetry, Execution History, Evaluation Metrics, Prompt Templates, Synonym Management, Search Analytics.</p>
-<div class="highlight"><pre><span></span><code><span class="c1"># searchaas/infrastructure/atlas.py  (excerpt)</span>
+<div class="highlight"><pre><span></span><code><span class="c1"># AiSearch/infrastructure/atlas.py  (excerpt)</span>
 <span class="kn">from</span><span class="w"> </span><span class="nn">functools</span><span class="w"> </span><span class="kn">import</span> <span class="n">lru_cache</span>
 <span class="kn">from</span><span class="w"> </span><span class="nn">pymongo</span><span class="w"> </span><span class="kn">import</span> <span class="n">MongoClient</span>
 <span class="kn">from</span><span class="w"> </span><span class="nn">pymongo.errors</span><span class="w"> </span><span class="kn">import</span> <span class="n">ConfigurationError</span><span class="p">,</span> <span class="n">OperationFailure</span><span class="p">,</span> <span class="n">ServerSelectionTimeoutError</span>
-<span class="kn">from</span><span class="w"> </span><span class="nn">searchaas.config</span><span class="w"> </span><span class="kn">import</span> <span class="n">load_config</span>
-<span class="kn">from</span><span class="w"> </span><span class="nn">searchaas.observability</span><span class="w"> </span><span class="kn">import</span> <span class="n">get_logger</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">AiSearch.config</span><span class="w"> </span><span class="kn">import</span> <span class="n">load_config</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">AiSearch.observability</span><span class="w"> </span><span class="kn">import</span> <span class="n">get_logger</span>
 
-<span class="n">log</span> <span class="o">=</span> <span class="n">get_logger</span><span class="p">(</span><span class="s2">&quot;searchaas.infrastructure.atlas&quot;</span><span class="p">)</span>
+<span class="n">log</span> <span class="o">=</span> <span class="n">get_logger</span><span class="p">(</span><span class="s2">&quot;AiSearch.infrastructure.atlas&quot;</span><span class="p">)</span>
 
 <span class="k">class</span><span class="w"> </span><span class="nc">AtlasFactory</span><span class="p">:</span>
 <span class="w">    </span><span class="sd">&quot;&quot;&quot;Single source of truth for Atlas clients, databases, and collections.&quot;&quot;&quot;</span>
@@ -154,7 +154,7 @@ python<span class="w">  </span>-m<span class="w"> </span>searchaas.diagnose<span
     <span class="k">def</span><span class="w"> </span><span class="nf">client</span><span class="p">()</span> <span class="o">-&gt;</span> <span class="n">MongoClient</span><span class="p">:</span>
         <span class="n">cfg</span> <span class="o">=</span> <span class="n">load_config</span><span class="p">()</span><span class="o">.</span><span class="n">atlas</span>
         <span class="n">log</span><span class="o">.</span><span class="n">info</span><span class="p">(</span><span class="s2">&quot;Atlas: connecting to </span><span class="si">%s</span><span class="s2">&quot;</span><span class="p">,</span> <span class="n">_redact</span><span class="p">(</span><span class="n">cfg</span><span class="o">.</span><span class="n">uri</span><span class="p">))</span>
-        <span class="k">return</span> <span class="n">MongoClient</span><span class="p">(</span><span class="n">cfg</span><span class="o">.</span><span class="n">uri</span><span class="p">,</span> <span class="n">appname</span><span class="o">=</span><span class="s2">&quot;searchaas&quot;</span><span class="p">,</span> <span class="n">serverSelectionTimeoutMS</span><span class="o">=</span><span class="mi">8000</span><span class="p">)</span>
+        <span class="k">return</span> <span class="n">MongoClient</span><span class="p">(</span><span class="n">cfg</span><span class="o">.</span><span class="n">uri</span><span class="p">,</span> <span class="n">appname</span><span class="o">=</span><span class="s2">&quot;AiSearch&quot;</span><span class="p">,</span> <span class="n">serverSelectionTimeoutMS</span><span class="o">=</span><span class="mi">8000</span><span class="p">)</span>
 
     <span class="nd">@classmethod</span>
     <span class="k">def</span><span class="w"> </span><span class="nf">db</span><span class="p">(</span><span class="bp">cls</span><span class="p">):</span>          <span class="k">return</span> <span class="bp">cls</span><span class="o">.</span><span class="n">client</span><span class="p">()[</span><span class="n">load_config</span><span class="p">()</span><span class="o">.</span><span class="n">atlas</span><span class="o">.</span><span class="n">database</span><span class="p">]</span>
@@ -245,11 +245,11 @@ python<span class="w">  </span>-m<span class="w"> </span>searchaas.diagnose<span
 
 <h2 id="4-query-embedding-strategy">4. Query Embedding Strategy</h2>
 <p>Query embeddings are generated <strong>dynamically at runtime</strong> (document embeddings are pre-generated externally). This lets enterprises swap models without rearchitecting, support multiple providers, experiment on quality, and tune latency/cost. With <strong>Atlas Auto-Embeddings</strong>, query vectors can be generated automatically by Atlas using Voyage AI; otherwise the platform generates them via the configured provider before retrieval — balancing simplicity, model governance, cost, and quality.</p>
-<div class="highlight"><pre><span></span><code><span class="c1"># searchaas/embeddings/factory.py  (excerpt)</span>
+<div class="highlight"><pre><span></span><code><span class="c1"># AiSearch/embeddings/factory.py  (excerpt)</span>
 <span class="kn">from</span><span class="w"> </span><span class="nn">langchain_core.embeddings</span><span class="w"> </span><span class="kn">import</span> <span class="n">Embeddings</span>
-<span class="kn">from</span><span class="w"> </span><span class="nn">searchaas.observability</span><span class="w"> </span><span class="kn">import</span> <span class="n">get_logger</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">AiSearch.observability</span><span class="w"> </span><span class="kn">import</span> <span class="n">get_logger</span>
 
-<span class="n">log</span> <span class="o">=</span> <span class="n">get_logger</span><span class="p">(</span><span class="s2">&quot;searchaas.embeddings&quot;</span><span class="p">)</span>
+<span class="n">log</span> <span class="o">=</span> <span class="n">get_logger</span><span class="p">(</span><span class="s2">&quot;AiSearch.embeddings&quot;</span><span class="p">)</span>
 
 <span class="k">class</span><span class="w"> </span><span class="nc">EmbeddingFactory</span><span class="p">:</span>
     <span class="n">_registry</span> <span class="o">=</span> <span class="p">{</span>
@@ -289,15 +289,15 @@ python<span class="w">  </span>-m<span class="w"> </span>searchaas.diagnose<span
       output_dimension: 512        # forwarded to voyageai.Client.embed(...)</code></p>
 <p>This is what lets a YAML change make <code>voyage-4</code> emit 512-dim vectors to match a 512-dim Atlas Vector Search index. <code>EmbeddingFactory.create()</code> never mutates the caller's config dict, so a single config can be re-used to build the embedder for both the query path and the vector store.</p>
 <ul>
-<li><strong>Probe</strong> — <code>EmbeddingFactory.probe(embedder)</code> is used by both the <code>/diagnose</code> endpoint and the <code>searchaas.diagnose</code> CLI to verify keys + measure live embedding latency.</li>
+<li><strong>Probe</strong> — <code>EmbeddingFactory.probe(embedder)</code> is used by both the <code>/diagnose</code> endpoint and the <code>AiSearch.diagnose</code> CLI to verify keys + measure live embedding latency.</li>
 </ul>
 <h3 id="4a-llm-factory">4a. LLM Factory</h3>
 <p>LLMs power the Query Understanding Layer and the AI-Driven Retrieval Planner (Phase 1) and Grounded Response Generation (Phase 2). A dedicated <code>LLMFactory</code> keeps provider selection symmetric with embeddings — the planner's chat model is swappable through YAML.</p>
-<div class="highlight"><pre><span></span><code><span class="c1"># searchaas/llm/factory.py  (excerpt)</span>
+<div class="highlight"><pre><span></span><code><span class="c1"># AiSearch/llm/factory.py  (excerpt)</span>
 <span class="kn">from</span><span class="w"> </span><span class="nn">langchain_core.language_models</span><span class="w"> </span><span class="kn">import</span> <span class="n">BaseChatModel</span>
-<span class="kn">from</span><span class="w"> </span><span class="nn">searchaas.observability</span><span class="w"> </span><span class="kn">import</span> <span class="n">get_logger</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">AiSearch.observability</span><span class="w"> </span><span class="kn">import</span> <span class="n">get_logger</span>
 
-<span class="n">log</span> <span class="o">=</span> <span class="n">get_logger</span><span class="p">(</span><span class="s2">&quot;searchaas.llm&quot;</span><span class="p">)</span>
+<span class="n">log</span> <span class="o">=</span> <span class="n">get_logger</span><span class="p">(</span><span class="s2">&quot;AiSearch.llm&quot;</span><span class="p">)</span>
 
 <span class="k">class</span><span class="w"> </span><span class="nc">LLMFactory</span><span class="p">:</span>
     <span class="n">_registry</span> <span class="o">=</span> <span class="p">{</span>
@@ -385,11 +385,11 @@ python<span class="w">  </span>-m<span class="w"> </span>searchaas.diagnose<span
 <blockquote>
 <p>The <strong>Self-Query Retriever</strong> is delivered in Phase 2 (see Section 12) because it depends on the Metadata Intelligence layer to supply its <code>metadata_field_info</code>.</p>
 </blockquote>
-<div class="highlight"><pre><span></span><code><span class="c1"># searchaas/retrieval/factory.py  (excerpt)</span>
+<div class="highlight"><pre><span></span><code><span class="c1"># AiSearch/retrieval/factory.py  (excerpt)</span>
 <span class="kn">from</span><span class="w"> </span><span class="nn">langchain_core.retrievers</span><span class="w"> </span><span class="kn">import</span> <span class="n">BaseRetriever</span>
-<span class="kn">from</span><span class="w"> </span><span class="nn">searchaas.observability</span><span class="w"> </span><span class="kn">import</span> <span class="n">get_logger</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">AiSearch.observability</span><span class="w"> </span><span class="kn">import</span> <span class="n">get_logger</span>
 
-<span class="n">log</span> <span class="o">=</span> <span class="n">get_logger</span><span class="p">(</span><span class="s2">&quot;searchaas.retrieval&quot;</span><span class="p">)</span>
+<span class="n">log</span> <span class="o">=</span> <span class="n">get_logger</span><span class="p">(</span><span class="s2">&quot;AiSearch.retrieval&quot;</span><span class="p">)</span>
 
 <span class="k">class</span><span class="w"> </span><span class="nc">RetrieverFactory</span><span class="p">:</span>
 <span class="w">    </span><span class="sd">&quot;&quot;&quot;All field names and dimensions are injected from `AppConfig.atlas`.&quot;&quot;&quot;</span>
@@ -480,10 +480,10 @@ python<span class="w">  </span>-m<span class="w"> </span>searchaas.diagnose<span
 </blockquote>
 <h2 id="7-configuration-yaml">7. Configuration (YAML)</h2>
 <p>All providers, models, indexes, and runtime options are supplied through a single YAML file loaded at startup and used to drive every factory. Nothing is hard-coded — switching an embedding model, reranker, or LLM is a config change, not a code change.</p>
-<div class="highlight"><pre><span></span><code><span class="c1"># searchaas/config/searchaas.yaml</span>
+<div class="highlight"><pre><span></span><code><span class="c1"># AiSearch/config/AiSearch.yaml</span>
 <span class="nt">atlas</span><span class="p">:</span>
 <span class="w">  </span><span class="nt">uri</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">${ATLAS_URI}</span><span class="w">                       </span><span class="c1"># resolved from env / Azure Key Vault</span>
-<span class="w">  </span><span class="nt">database</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">${ATLAS_DB:-searchaas}</span>
+<span class="w">  </span><span class="nt">database</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">${ATLAS_DB:-AiSearch}</span>
 <span class="w">  </span><span class="nt">collection</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">knowledge_chunks</span>
 
 <span class="w">  </span><span class="c1"># ---- Vector Search index ----------------------------------------------------</span>
@@ -556,8 +556,8 @@ python<span class="w">  </span>-m<span class="w"> </span>searchaas.diagnose<span
 <span class="w">  </span><span class="nt">log_level</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">info</span>
 </code></pre></div>
 
-<p>Environment loading is automatic: <code>searchaas/config/loader.py</code> calls <code>python-dotenv</code> to load the nearest <code>.env</code> walking up from the config module, so <code>uvicorn</code> / the diagnose CLI all see <code>${ATLAS_URI}</code>, <code>${GOOGLE_API_KEY}</code>, etc. without a wrapper script. Real shell vars always win over <code>.env</code> (<code>override=False</code>).</p>
-<div class="highlight"><pre><span></span><code><span class="c1"># searchaas/config/loader.py  (excerpt)</span>
+<p>Environment loading is automatic: <code>AiSearch/config/loader.py</code> calls <code>python-dotenv</code> to load the nearest <code>.env</code> walking up from the config module, so <code>uvicorn</code> / the diagnose CLI all see <code>${ATLAS_URI}</code>, <code>${GOOGLE_API_KEY}</code>, etc. without a wrapper script. Real shell vars always win over <code>.env</code> (<code>override=False</code>).</p>
+<div class="highlight"><pre><span></span><code><span class="c1"># AiSearch/config/loader.py  (excerpt)</span>
 <span class="kn">import</span><span class="w"> </span><span class="nn">os</span><span class="o">,</span><span class="w"> </span><span class="nn">re</span><span class="o">,</span><span class="w"> </span><span class="nn">yaml</span>
 <span class="kn">from</span><span class="w"> </span><span class="nn">functools</span><span class="w"> </span><span class="kn">import</span> <span class="n">lru_cache</span>
 <span class="kn">from</span><span class="w"> </span><span class="nn">pathlib</span><span class="w"> </span><span class="kn">import</span> <span class="n">Path</span>
@@ -583,7 +583,7 @@ python<span class="w">  </span>-m<span class="w"> </span>searchaas.diagnose<span
 
 <span class="k">class</span><span class="w"> </span><span class="nc">AtlasConfig</span><span class="p">(</span><span class="n">BaseModel</span><span class="p">):</span>
     <span class="n">uri</span><span class="p">:</span> <span class="nb">str</span>
-    <span class="n">database</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s2">&quot;searchaas&quot;</span>
+    <span class="n">database</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s2">&quot;AiSearch&quot;</span>
     <span class="n">collection</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s2">&quot;knowledge_chunks&quot;</span>
     <span class="n">vector_index</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s2">&quot;vector_index&quot;</span>
     <span class="n">search_index</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s2">&quot;default&quot;</span>
@@ -629,9 +629,9 @@ python<span class="w">  </span>-m<span class="w"> </span>searchaas.diagnose<span
 
 <span class="nd">@lru_cache</span><span class="p">(</span><span class="n">maxsize</span><span class="o">=</span><span class="mi">1</span><span class="p">)</span>
 <span class="k">def</span><span class="w"> </span><span class="nf">load_config</span><span class="p">(</span><span class="n">path</span><span class="p">:</span> <span class="nb">str</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">AppConfig</span><span class="p">:</span>
-    <span class="n">cfg_path</span> <span class="o">=</span> <span class="n">Path</span><span class="p">(</span><span class="n">path</span><span class="p">)</span> <span class="k">if</span> <span class="n">path</span> <span class="k">else</span> <span class="p">(</span><span class="n">Path</span><span class="p">(</span><span class="vm">__file__</span><span class="p">)</span><span class="o">.</span><span class="n">resolve</span><span class="p">()</span><span class="o">.</span><span class="n">parent</span> <span class="o">/</span> <span class="s2">&quot;searchaas.yaml&quot;</span><span class="p">)</span>
-    <span class="k">if</span> <span class="n">os</span><span class="o">.</span><span class="n">environ</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;SEARCHAAS_CONFIG&quot;</span><span class="p">):</span>
-        <span class="n">cfg_path</span> <span class="o">=</span> <span class="n">Path</span><span class="p">(</span><span class="n">os</span><span class="o">.</span><span class="n">environ</span><span class="p">[</span><span class="s2">&quot;SEARCHAAS_CONFIG&quot;</span><span class="p">])</span>
+    <span class="n">cfg_path</span> <span class="o">=</span> <span class="n">Path</span><span class="p">(</span><span class="n">path</span><span class="p">)</span> <span class="k">if</span> <span class="n">path</span> <span class="k">else</span> <span class="p">(</span><span class="n">Path</span><span class="p">(</span><span class="vm">__file__</span><span class="p">)</span><span class="o">.</span><span class="n">resolve</span><span class="p">()</span><span class="o">.</span><span class="n">parent</span> <span class="o">/</span> <span class="s2">&quot;AiSearch.yaml&quot;</span><span class="p">)</span>
+    <span class="k">if</span> <span class="n">os</span><span class="o">.</span><span class="n">environ</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;AISEARCH_CONFIG&quot;</span><span class="p">):</span>
+        <span class="n">cfg_path</span> <span class="o">=</span> <span class="n">Path</span><span class="p">(</span><span class="n">os</span><span class="o">.</span><span class="n">environ</span><span class="p">[</span><span class="s2">&quot;AISEARCH_CONFIG&quot;</span><span class="p">])</span>
     <span class="k">with</span> <span class="n">cfg_path</span><span class="o">.</span><span class="n">open</span><span class="p">()</span> <span class="k">as</span> <span class="n">f</span><span class="p">:</span>
         <span class="k">return</span> <span class="n">AppConfig</span><span class="p">(</span><span class="o">**</span><span class="n">_expand</span><span class="p">(</span><span class="n">yaml</span><span class="o">.</span><span class="n">safe_load</span><span class="p">(</span><span class="n">f</span><span class="p">)))</span>
 </code></pre></div>
@@ -641,7 +641,7 @@ python<span class="w">  </span>-m<span class="w"> </span>searchaas.diagnose<span
 <h3 id="7a-configuration-driven-flow-phase-1">7a. Configuration-driven flow (Phase 1)</h3>
 <div class="highlight"><pre><span></span><code>.env (auto-loaded)  ──┐
                       ▼
-searchaas/config/searchaas.yaml
+AiSearch/config/AiSearch.yaml
         │  (${VAR} / ${VAR:-default} expansion)
         ▼
 config.load_config() ─► AppConfig (Pydantic-validated)
@@ -695,18 +695,18 @@ Shared `Container` (lru_cached singleton) ─► FastAPI / FastMCP / CLI
 <p>Switching embeddings from <strong>Gemini</strong> to <strong>Bedrock Titan</strong>, the planner LLM from <strong>Gemini</strong> to <strong>Azure OpenAI</strong>, or the vector index from <code>vector_index</code> (768) to <code>voyage_vector_index</code> (512), is a YAML change only — no call site changes.</p>
 <h2 id="8-api-layer-fastapi-endpoints">8. API Layer — FastAPI Endpoints</h2>
 <p>Every retrieval method is exposed as its own endpoint, alongside a planner-driven <code>/retrieve</code> route and an end-to-end <code>/query</code> route. A shared container wires the factories from the loaded YAML config.</p>
-<div class="highlight"><pre><span></span><code><span class="c1"># searchaas/api/app.py  (excerpt)</span>
+<div class="highlight"><pre><span></span><code><span class="c1"># AiSearch/api/app.py  (excerpt)</span>
 <span class="kn">import</span><span class="w"> </span><span class="nn">time</span><span class="o">,</span><span class="w"> </span><span class="nn">uuid</span>
 <span class="kn">from</span><span class="w"> </span><span class="nn">fastapi</span><span class="w"> </span><span class="kn">import</span> <span class="n">FastAPI</span><span class="p">,</span> <span class="n">HTTPException</span><span class="p">,</span> <span class="n">Request</span>
 <span class="kn">from</span><span class="w"> </span><span class="nn">pydantic</span><span class="w"> </span><span class="kn">import</span> <span class="n">BaseModel</span><span class="p">,</span> <span class="n">Field</span>
-<span class="kn">from</span><span class="w"> </span><span class="nn">searchaas.app.bootstrap</span><span class="w"> </span><span class="kn">import</span> <span class="n">get_container</span>
-<span class="kn">from</span><span class="w"> </span><span class="nn">searchaas.config</span><span class="w"> </span><span class="kn">import</span> <span class="n">load_config</span>
-<span class="kn">from</span><span class="w"> </span><span class="nn">searchaas.infrastructure</span><span class="w"> </span><span class="kn">import</span> <span class="n">AtlasFactory</span>
-<span class="kn">from</span><span class="w"> </span><span class="nn">searchaas.observability</span><span class="w"> </span><span class="kn">import</span> <span class="n">configure_logging</span><span class="p">,</span> <span class="n">get_logger</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">AiSearch.app.bootstrap</span><span class="w"> </span><span class="kn">import</span> <span class="n">get_container</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">AiSearch.config</span><span class="w"> </span><span class="kn">import</span> <span class="n">load_config</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">AiSearch.infrastructure</span><span class="w"> </span><span class="kn">import</span> <span class="n">AtlasFactory</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">AiSearch.observability</span><span class="w"> </span><span class="kn">import</span> <span class="n">configure_logging</span><span class="p">,</span> <span class="n">get_logger</span>
 
 <span class="n">configure_logging</span><span class="p">()</span>
-<span class="n">log</span> <span class="o">=</span> <span class="n">get_logger</span><span class="p">(</span><span class="s2">&quot;searchaas.api&quot;</span><span class="p">)</span>
-<span class="n">app</span> <span class="o">=</span> <span class="n">FastAPI</span><span class="p">(</span><span class="n">title</span><span class="o">=</span><span class="s2">&quot;SearchaaS Retrieval API&quot;</span><span class="p">)</span>
+<span class="n">log</span> <span class="o">=</span> <span class="n">get_logger</span><span class="p">(</span><span class="s2">&quot;AiSearch.api&quot;</span><span class="p">)</span>
+<span class="n">app</span> <span class="o">=</span> <span class="n">FastAPI</span><span class="p">(</span><span class="n">title</span><span class="o">=</span><span class="s2">&quot;AiSearch Retrieval API&quot;</span><span class="p">)</span>
 
 <span class="c1"># ---- request-ID + timing middleware ---------------------------------------</span>
 <span class="nd">@app</span><span class="o">.</span><span class="n">middleware</span><span class="p">(</span><span class="s2">&quot;http&quot;</span><span class="p">)</span>
@@ -771,7 +771,7 @@ Shared `Container` (lru_cached singleton) ─► FastAPI / FastMCP / CLI
 <span class="nd">@app</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;/diagnose&quot;</span><span class="p">)</span>
 <span class="k">def</span><span class="w"> </span><span class="nf">diagnose</span><span class="p">():</span>
 <span class="w">    </span><span class="sd">&quot;&quot;&quot;Full self-check: Atlas ping + collection stats + embedder probe.&quot;&quot;&quot;</span>
-    <span class="kn">from</span><span class="w"> </span><span class="nn">searchaas.embeddings</span><span class="w"> </span><span class="kn">import</span> <span class="n">EmbeddingFactory</span>
+    <span class="kn">from</span><span class="w"> </span><span class="nn">AiSearch.embeddings</span><span class="w"> </span><span class="kn">import</span> <span class="n">EmbeddingFactory</span>
     <span class="n">c</span> <span class="o">=</span> <span class="n">get_container</span><span class="p">()</span>
     <span class="k">return</span> <span class="p">{</span>
         <span class="s2">&quot;config&quot;</span><span class="p">:</span> <span class="p">{</span><span class="o">...</span><span class="p">},</span>
@@ -787,7 +787,7 @@ Shared `Container` (lru_cached singleton) ─► FastAPI / FastMCP / CLI
         <span class="n">req</span><span class="o">.</span><span class="n">query</span><span class="p">,</span> <span class="n">k</span><span class="o">=</span><span class="n">req</span><span class="o">.</span><span class="n">k</span><span class="p">,</span> <span class="n">filters</span><span class="o">=</span><span class="n">req</span><span class="o">.</span><span class="n">filters</span><span class="p">)</span>
 </code></pre></div>
 
-<p>Run with <code>uvicorn searchaas.api.app:app --host 0.0.0.0 --port 8000</code>. Response serializers strip the configured <code>embedding_key</code> from metadata (driven by YAML, not hardcoded), so changing <code>atlas.embedding_key</code> flows through to API output too.</p>
+<p>Run with <code>uvicorn AiSearch.api.app:app --host 0.0.0.0 --port 8000</code>. Response serializers strip the configured <code>embedding_key</code> from metadata (driven by YAML, not hardcoded), so changing <code>atlas.embedding_key</code> flows through to API output too.</p>
 <h2 id="9-mcp-layer-fastmcp-tools">9. MCP Layer — FastMCP Tools</h2>
 <p>The same retrieval methods are also published as MCP tools using <strong>FastMCP</strong>, so any MCP-compatible client or agent can call them. Each tool maps one-to-one to a strategy and reuses the identical factory container, guaranteeing parity between the REST and MCP surfaces.</p>
 <div class="highlight"><pre><span></span><code><span class="c1"># mcp/server.py</span>
@@ -795,7 +795,7 @@ Shared `Container` (lru_cached singleton) ─► FastAPI / FastMCP / CLI
 <span class="kn">from</span><span class="w"> </span><span class="nn">config.loader</span><span class="w"> </span><span class="kn">import</span> <span class="n">load_config</span>
 <span class="kn">from</span><span class="w"> </span><span class="nn">bootstrap</span><span class="w"> </span><span class="kn">import</span> <span class="n">build_container</span>
 
-<span class="n">mcp</span> <span class="o">=</span> <span class="n">FastMCP</span><span class="p">(</span><span class="s2">&quot;searchaas&quot;</span><span class="p">)</span>
+<span class="n">mcp</span> <span class="o">=</span> <span class="n">FastMCP</span><span class="p">(</span><span class="s2">&quot;AiSearch&quot;</span><span class="p">)</span>
 <span class="n">container</span> <span class="o">=</span> <span class="n">build_container</span><span class="p">(</span><span class="n">load_config</span><span class="p">())</span>
 
 <span class="k">def</span><span class="w"> </span><span class="nf">_retrieve</span><span class="p">(</span><span class="n">strategy</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">query</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span> <span class="n">top_k</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="mi">20</span><span class="p">,</span> <span class="n">filters</span><span class="p">:</span> <span class="nb">dict</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">):</span>
@@ -835,7 +835,7 @@ Shared `Container` (lru_cached singleton) ─► FastAPI / FastMCP / CLI
 <h2 id="10a-observability-diagnostics-phase-1">10a. Observability &amp; Diagnostics (Phase 1)</h2>
 <p>Phase 1 ships a small but opinionated observability layer so that the most common Atlas + retrieval failures (URI not set, vector index not found, field-name mismatch, dimension mismatch, empty collection) are diagnosable in seconds without reading the codebase.</p>
 <h3 id="central-logging">Central logging</h3>
-<p><code>searchaas/observability/logging.py</code> exposes <code>configure_logging()</code> (idempotent, dictConfig-based) and <code>get_logger(name)</code>. Every entrypoint — FastAPI, FastMCP, the CLI — calls <code>configure_logging()</code> at import time. Library loggers (<code>pymongo</code>, <code>langchain_mongodb</code>, <code>httpx</code>) are tuned through env vars instead of code changes:</p>
+<p><code>AiSearch/observability/logging.py</code> exposes <code>configure_logging()</code> (idempotent, dictConfig-based) and <code>get_logger(name)</code>. Every entrypoint — FastAPI, FastMCP, the CLI — calls <code>configure_logging()</code> at import time. Library loggers (<code>pymongo</code>, <code>langchain_mongodb</code>, <code>httpx</code>) are tuned through env vars instead of code changes:</p>
 <table>
 <thead>
 <tr>
@@ -846,12 +846,12 @@ Shared `Container` (lru_cached singleton) ─► FastAPI / FastMCP / CLI
 </thead>
 <tbody>
 <tr>
-<td><code>SEARCHAAS_LOG_LEVEL</code></td>
+<td><code>AISEARCH_LOG_LEVEL</code></td>
 <td><code>INFO</code></td>
-<td>Root + <code>searchaas.*</code> level</td>
+<td>Root + <code>AiSearch.*</code> level</td>
 </tr>
 <tr>
-<td><code>SEARCHAAS_LOG_FORMAT</code></td>
+<td><code>AISEARCH_LOG_FORMAT</code></td>
 <td><code>plain</code></td>
 <td><code>json</code> for structured log shipping</td>
 </tr>
@@ -868,8 +868,8 @@ Shared `Container` (lru_cached singleton) ─► FastAPI / FastMCP / CLI
 </tbody>
 </table>
 <p>Construction logs strip API keys / secrets, request middleware emits a per-request ID, and retriever builds log the configured <code>index / path / dim / k / filters</code> on every call.</p>
-<h3 id="searchaasdiagnose-cli"><code>searchaas.diagnose</code> CLI</h3>
-<div class="highlight"><pre><span></span><code>python<span class="w"> </span>-m<span class="w"> </span>searchaas.diagnose<span class="w"> </span>--query<span class="w"> </span><span class="s2">&quot;your test query&quot;</span><span class="w"> </span>--k<span class="w"> </span><span class="m">5</span><span class="w"> </span><span class="o">[</span>--filters<span class="w"> </span><span class="s1">&#39;{&quot;doc_type&quot;:&quot;policy&quot;}&#39;</span><span class="o">]</span><span class="w"> </span><span class="o">[</span>--json<span class="o">]</span>
+<h3 id="aisearchdiagnose-cli"><code>AiSearch.diagnose</code> CLI</h3>
+<div class="highlight"><pre><span></span><code>python<span class="w"> </span>-m<span class="w"> </span>AiSearch.diagnose<span class="w"> </span>--query<span class="w"> </span><span class="s2">&quot;your test query&quot;</span><span class="w"> </span>--k<span class="w"> </span><span class="m">5</span><span class="w"> </span><span class="o">[</span>--filters<span class="w"> </span><span class="s1">&#39;{&quot;doc_type&quot;:&quot;policy&quot;}&#39;</span><span class="o">]</span><span class="w"> </span><span class="o">[</span>--json<span class="o">]</span>
 </code></pre></div>
 
 <p>Walks six stages, prints a <code>PASS/FAIL/WARN</code> line for each, exits non-zero on failure (CI-friendly):</p>

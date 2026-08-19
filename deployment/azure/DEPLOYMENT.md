@@ -1,13 +1,13 @@
-# Deploying SearchaaS to Azure Container Apps + AI Foundry
+# Deploying AiSearch to Azure Container Apps + AI Foundry
 
-This guide deploys the three SearchaaS surfaces to **Azure Container Apps** and
+This guide deploys the three AiSearch surfaces to **Azure Container Apps** and
 wires the MCP endpoint into an **AI Foundry** agent.
 
 | Surface | Image | Port | Ingress | Purpose |
 |---------|-------|------|---------|---------|
-| MCP server | `searchaas-mcp` | 8001 | external `/mcp` | Consumed by AI Foundry agents (Bearer-gated) |
-| REST API | `searchaas-api` | 8000 | external | Playground backend |
-| React UI | `searchaas-ui` | 80 | external | Retrieval-testing playground |
+| MCP server | `AiSearch-mcp` | 8001 | external `/mcp` | Consumed by AI Foundry agents (Bearer-gated) |
+| REST API | `AiSearch-api` | 8000 | external | Playground backend |
+| React UI | `AiSearch-ui` | 80 | external | Retrieval-testing playground |
 
 Infrastructure (resource group, ACR, Log Analytics, Container Apps Environment,
 managed identity, three Container Apps) is provisioned by Bicep at
@@ -20,7 +20,7 @@ The deployment is structured to be reliable and repeatable:
 - **Step 3** deploys everything in one `az deployment sub create`. Internally
   `main.bicep` runs two ARM child deployments in sequence — first infra
   (environment, ACR, identity), then Container Apps. A deployment-script
-  readiness gate (`searchaas-env-ready`) polls the Container Apps Environment
+  readiness gate (`AiSearch-env-ready`) polls the Container Apps Environment
   until its `provisioningState` is genuinely `Succeeded`; the apps module
   depends on that gate's output, so apps never start while the environment is
   still `Updating`. This eliminates the intermittent
@@ -54,12 +54,12 @@ Make any changes required to `main.parameters.json` (location, namePrefix, atlas
 
 ```bash
 az deployment sub create \
-  --name searchaas-acr \
+  --name AiSearch-acr \
   --location centralindia \
   --template-file deployment/azure/infra/acr.bicep \
   --parameters deployment/azure/infra/main.parameters.json
 
-ACR_NAME=$(az deployment sub show -n searchaas-acr \
+ACR_NAME=$(az deployment sub show -n AiSearch-acr \
   --query properties.outputs.acrName.value -o tsv)
 echo "ACR: $ACR_NAME"
 ```
@@ -82,19 +82,19 @@ Then build and push:
 ./deployment/azure/scripts/build-and-push.sh "$ACR_NAME" latest
 ```
 
-This runs `az acr build` for `searchaas-mcp`, `searchaas-api`, and
-`searchaas-ui`. Builds happen in ACR, so no local Docker or matching CPU
+This runs `az acr build` for `AiSearch-mcp`, `AiSearch-api`, and
+`AiSearch-ui`. Builds happen in ACR, so no local Docker or matching CPU
 architecture is needed.
 
 ## Step 3 — Deploy infrastructure + Container Apps
 
 This single command runs two ARM deployments in sequence under the hood:
-`searchaas-resources` (infra) completes first, then `searchaas-apps` starts
+`AiSearch-resources` (infra) completes first, then `AiSearch-apps` starts
 once the Container Apps Environment is in `Succeeded` state.
 
 ```bash
 az deployment sub create \
-  --name searchaas \
+  --name AiSearch \
   --location centralindia \
   --template-file deployment/azure/infra/main.bicep \
   --parameters deployment/azure/infra/main.parameters.json \
@@ -112,16 +112,16 @@ az deployment sub create \
 Grab the URLs:
 
 ```bash
-az deployment sub show -n searchaas --query properties.outputs -o json
+az deployment sub show -n AiSearch --query properties.outputs -o json
 ```
 
 You'll get:
 
 ```json
 {
-  "mcpUrl": { "value": "https://searchaas-mcp.<...>.azurecontainerapps.io/mcp" },
-  "apiUrl": { "value": "https://searchaas-api.<...>.azurecontainerapps.io" },
-  "uiUrl":  { "value": "https://searchaas-ui.<...>.azurecontainerapps.io" }
+  "mcpUrl": { "value": "https://AiSearch-mcp.<...>.azurecontainerapps.io/mcp" },
+  "apiUrl": { "value": "https://AiSearch-api.<...>.azurecontainerapps.io" },
+  "uiUrl":  { "value": "https://AiSearch-ui.<...>.azurecontainerapps.io" }
 }
 ```
 
@@ -132,7 +132,7 @@ You'll get:
 Initialize a session (note the Bearer header):
 
 ```bash
-MCP_URL="https://searchaas-mcp.<...>.azurecontainerapps.io/mcp"
+MCP_URL="https://AiSearch-mcp.<...>.azurecontainerapps.io/mcp"
 
 curl -N -X POST "$MCP_URL" \
   -H "Authorization: Bearer $MCP_API_KEY" \
@@ -167,7 +167,7 @@ origin. Tighten `allowedOrigins` in `deployment/azure/infra/resources.bicep` for
 Use the URLs from Step 3's output:
 
 ```bash
-az deployment sub show -n searchaas --query 'properties.outputs.{mcp:mcpUrl.value,api:apiUrl.value,ui:uiUrl.value}' -o json
+az deployment sub show -n AiSearch --query 'properties.outputs.{mcp:mcpUrl.value,api:apiUrl.value,ui:uiUrl.value}' -o json
 ```
 
 1. In the **AI Foundry** portal, open your project and create/edit an agent.
@@ -207,7 +207,7 @@ Environment variables consumed by the containers (set via Bicep secrets/env):
 
 ### Runtime config overrides (no image rebuild)
 
-`searchaas/config/searchaas.yaml` is baked into the image, but **every value is
+`AiSearch/config/AiSearch.yaml` is baked into the image, but **every value is
 `${VAR:-default}`-driven**, so you can retune the deployment by setting env vars
 via the `configOverrides` Bicep parameter — then redeploy/restart. **No image
 rebuild required.**
@@ -245,7 +245,7 @@ Only non-empty entries are injected; everything else uses the yaml default.
 
 # roll the apps to the new tag (same command as Step 3, just add imageTag=v2)
 az deployment sub create \
-  --name searchaas \
+  --name AiSearch \
   --location centralindia \
   --template-file deployment/azure/infra/main.bicep \
   --parameters deployment/azure/infra/main.parameters.json \
@@ -285,13 +285,13 @@ apps deployment actually updates.
 The Container Apps Environment reports ARM success before its backend has
 finished provisioning, and any re-PUT bounces it into `Updating`. If apps are
 written during that window they fail with `ManagedEnvironmentNotProvisioned`.
-The `searchaas-env-ready` deployment-script gate now prevents this in fresh
+The `AiSearch-env-ready` deployment-script gate now prevents this in fresh
 runs. If you still hit it (e.g. on an older template or a partially-failed RG):
 
 1. Wait for the environment to settle to `Succeeded`:
 
    ```bash
-   az resource show -g rg-searchaas -n searchaas-env \
+   az resource show -g rg-AiSearch -n AiSearch-env \
      --resource-type Microsoft.App/managedEnvironments \
      --query "properties.provisioningState" -o tsv
    ```
@@ -299,18 +299,18 @@ runs. If you still hit it (e.g. on an older template or a partially-failed RG):
 2. Deploy **only** the apps module against the ready environment (no env re-PUT):
 
    ```bash
-   ENV_ID=$(az deployment group show -g rg-searchaas -n searchaas-resources \
+   ENV_ID=$(az deployment group show -g rg-AiSearch -n AiSearch-resources \
      --query "properties.outputs.environmentId.value" -o tsv)
-   ID_ID=$(az deployment group show -g rg-searchaas -n searchaas-resources \
+   ID_ID=$(az deployment group show -g rg-AiSearch -n AiSearch-resources \
      --query "properties.outputs.identityId.value" -o tsv)
-   ACR=$(az deployment group show -g rg-searchaas -n searchaas-resources \
+   ACR=$(az deployment group show -g rg-AiSearch -n AiSearch-resources \
      --query "properties.outputs.acrLoginServer.value" -o tsv)
 
    az deployment group create \
-     --resource-group rg-searchaas \
-     --name searchaas-apps-only \
+     --resource-group rg-AiSearch \
+     --name AiSearch-apps-only \
      --template-file deployment/azure/infra/apps.bicep \
-     --parameters location=centralindia namePrefix=searchaas imageTag=latest \
+     --parameters location=centralindia namePrefix=AiSearch imageTag=latest \
          atlasDb=sample_mflix uiEmbedMcpKey=true \
          environmentId="$ENV_ID" identityId="$ID_ID" acrServer="$ACR" \
          atlasUri="$ATLAS_URI" voyageApiKey="$VOYAGE_API_KEY" \

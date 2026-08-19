@@ -3,22 +3,22 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>SearchaaS — Vertex AI Agent Engine (Reasoning Engine) Deployment · SearchaaS Docs</title>
+<title>AiSearch — Vertex AI Agent Engine (Reasoning Engine) Deployment · AiSearch Docs</title>
 <link rel="stylesheet" href="../../../../pages/assets/style.css">
 <link rel="stylesheet" href="../../../../pages/assets/pygments.css">
 </head>
 <body>
 <header class="topbar">
-  <a class="brand" href="../../../../index.html">SearchaaS Docs</a>
+  <a class="brand" href="../../../../index.html">AiSearch Docs</a>
   <a class="back" href="../../../../index.html">← All docs</a>
 </header>
 <main class="content">
-<h1 id="searchaas-vertex-ai-agent-engine-reasoning-engine-deployment">SearchaaS — Vertex AI Agent Engine (Reasoning Engine) Deployment</h1>
-<p>Deploys SearchaaS to the <strong>Google Cloud Gemini agent platform's managed agent
+<h1 id="aisearch-vertex-ai-agent-engine-reasoning-engine-deployment">AiSearch — Vertex AI Agent Engine (Reasoning Engine) Deployment</h1>
+<p>Deploys AiSearch to the <strong>Google Cloud Gemini agent platform's managed agent
 runtime — Vertex AI Agent Engine</strong> (formerly "Reasoning Engine"). This is the
 managed, serverless agent host: <strong>no Cloud Run service, no locally-built
 container image</strong>. The Agent Engine service builds and runs the agent
-container server-side from the pickled agent object, the <code>searchaas</code> package,
+container server-side from the pickled agent object, the <code>AiSearch</code> package,
 and the pip requirements uploaded to a staging bucket.</p>
 <p>Docs:
 - <a href="https://cloud.google.com/vertex-ai/generative-ai/docs/agent-engine/overview">https://cloud.google.com/vertex-ai/generative-ai/docs/agent-engine/overview</a>
@@ -39,15 +39,15 @@ remains available under <a href="../cloud_run/README.html"><code>../cloud_run/</
 <tbody>
 <tr>
 <td>Queryable agent object</td>
-<td><code>SearchaaSAgent</code> in <code>deploy_agent_engine.py</code> implements <code>query()</code> + <code>stream_query()</code> (custom reasoning-engine template)</td>
+<td><code>AiSearchAgent</code> in <code>deploy_agent_engine.py</code> implements <code>query()</code> + <code>stream_query()</code> (custom reasoning-engine template)</td>
 </tr>
 <tr>
 <td><code>set_up()</code> hook</td>
-<td>Builds the SearchaaS <code>Container</code> remotely after unpickling (Atlas client, embedder, planner LLM, retrievers)</td>
+<td>Builds the AiSearch <code>Container</code> remotely after unpickling (Atlas client, embedder, planner LLM, retrievers)</td>
 </tr>
 <tr>
 <td>Code packaged</td>
-<td><code>extra_packages=["searchaas"]</code> — the repo package is tarred, uploaded to the staging bucket, and importable in the remote runtime</td>
+<td><code>extra_packages=["AiSearch"]</code> — the repo package is tarred, uploaded to the staging bucket, and importable in the remote runtime</td>
 </tr>
 <tr>
 <td>Dependencies</td>
@@ -71,7 +71,7 @@ remains available under <a href="../cloud_run/README.html"><code>../cloud_run/</
 </tr>
 </tbody>
 </table>
-<p>The <code>searchaas</code> application code is <strong>not modified</strong> — the agent wrapper lives
+<p>The <code>AiSearch</code> application code is <strong>not modified</strong> — the agent wrapper lives
 entirely in this directory and reuses the identical pipeline as the FastAPI
 <code>/retrieve</code> endpoint and the MCP <code>auto_search</code> tool
 (understand → plan → retrieve → summarize).</p>
@@ -91,7 +91,7 @@ entirely in this directory and reuses the identical pipeline as the FastAPI
 </tr>
 <tr>
 <td><code>deploy_agent_engine.py</code></td>
-<td><code>SearchaaSAgent</code> wrapper class + <code>AgentEngine.create()/update()</code> driver</td>
+<td><code>AiSearchAgent</code> wrapper class + <code>AgentEngine.create()/update()</code> driver</td>
 </tr>
 <tr>
 <td><code>requirements-deploy.txt</code></td>
@@ -168,12 +168,12 @@ entirely in this directory and reuses the identical pipeline as the FastAPI
 <h3 id="from-the-console-gemini-agent-platform">From the console / Gemini agent platform</h3>
 <p>Open <strong>Vertex AI → Agent Builder → Agent Engines</strong>
 (<a href="https://console.cloud.google.com/vertex-ai/agents/agent-engines">https://console.cloud.google.com/vertex-ai/agents/agent-engines</a>) — the
-<code>searchaas-agent</code> engine appears there once deployed, with a built-in
+<code>AiSearch-agent</code> engine appears there once deployed, with a built-in
 playground for <code>query</code> / <code>streamQuery</code> calls, and can be registered as a tool
 for Gemini Enterprise agents.</p>
 <hr />
 <h2 id="configuration">Configuration</h2>
-<p>All configuration in <code>searchaas/config/searchaas.yaml</code> uses <code>${VAR:-default}</code>
+<p>All configuration in <code>AiSearch/config/AiSearch.yaml</code> uses <code>${VAR:-default}</code>
 syntax, so the deployed agent is configured purely with <strong>environment
 variables</strong> — no redeploy of code needed beyond re-running <code>deploy.sh</code>.
 Export variables before deploying and they are forwarded:</p>
@@ -278,7 +278,7 @@ Export variables before deploying and they are forwarded:</p>
   <code>ATLAS_DIMENSIONS=-1</code>, <code>ATLAS_RELEVANCE_FN=</code> (empty), and point
   <code>ATLAS_VECTOR_INDEX</code> at an <code>autoEmbed</code>-type index.</li>
 </ul>
-<p>Dev escape hatch: <code>SEARCHAAS_SKIP_PROVIDER_INDEX_CHECK=1</code> bypasses startup
+<p>Dev escape hatch: <code>AISEARCH_SKIP_PROVIDER_INDEX_CHECK=1</code> bypasses startup
 validation. Do not use in production.</p>
 <h3 id="planner-llm">Planner LLM</h3>
 <table>
@@ -373,12 +373,12 @@ gcloud<span class="w"> </span>storage<span class="w"> </span>buckets<span class=
 <h2 id="notes-caveats">Notes / caveats</h2>
 <ul>
 <li><strong>Server-side build.</strong> <code>AgentEngine.create()</code> uploads the pickled agent,
-  <code>searchaas</code> package, and requirements to the staging bucket; the managed
+  <code>AiSearch</code> package, and requirements to the staging bucket; the managed
   service then pip-installs requirements and boots the runtime. Expect
   ~5–15 minutes per deploy.</li>
 <li><strong>Python version.</strong> The remote runtime Python matches the local interpreter
   (3.10–3.13 supported). Use the repo <code>./venv</code> (3.13) — it is the default.</li>
-<li><strong>Cold starts.</strong> The first <code>query</code> on a fresh engine builds the SearchaaS
+<li><strong>Cold starts.</strong> The first <code>query</code> on a fresh engine builds the AiSearch
   container (Atlas connection, embedder, planner) — allow 30–60 s. Subsequent
   calls are warm.</li>
 <li><strong>Secrets.</strong> Atlas URI and API keys are referenced via Secret Manager

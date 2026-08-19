@@ -1,10 +1,10 @@
-# SearchaaS — Vertex AI Agent Engine (Reasoning Engine) Deployment
+# AiSearch — Vertex AI Agent Engine (Reasoning Engine) Deployment
 
-Deploys SearchaaS to the **Google Cloud Gemini agent platform's managed agent
+Deploys AiSearch to the **Google Cloud Gemini agent platform's managed agent
 runtime — Vertex AI Agent Engine** (formerly "Reasoning Engine"). This is the
 managed, serverless agent host: **no Cloud Run service, no locally-built
 container image**. The Agent Engine service builds and runs the agent
-container server-side from the pickled agent object, the `searchaas` package,
+container server-side from the pickled agent object, the `AiSearch` package,
 and the pip requirements uploaded to a staging bucket.
 
 Docs:
@@ -20,16 +20,16 @@ Docs:
 
 | Requirement | How it's met |
 |---|---|
-| Queryable agent object | `SearchaaSAgent` in `deploy_agent_engine.py` implements `query()` + `stream_query()` (custom reasoning-engine template) |
-| `set_up()` hook | Builds the SearchaaS `Container` remotely after unpickling (Atlas client, embedder, planner LLM, retrievers) |
-| Code packaged | `extra_packages=["searchaas"]` — the repo package is tarred, uploaded to the staging bucket, and importable in the remote runtime |
+| Queryable agent object | `AiSearchAgent` in `deploy_agent_engine.py` implements `query()` + `stream_query()` (custom reasoning-engine template) |
+| `set_up()` hook | Builds the AiSearch `Container` remotely after unpickling (Atlas client, embedder, planner LLM, retrievers) |
+| Code packaged | `extra_packages=["AiSearch"]` — the repo package is tarred, uploaded to the staging bucket, and importable in the remote runtime |
 | Dependencies | repo-root `requirements.txt` (minus `pytest`) is installed server-side |
 | Config | Plain env vars (`ATLAS_DB`, `EMBEDDINGS_PROVIDER`, …) via `env_vars` |
 | Secrets | `ATLAS_URI`, API keys via **Secret Manager `SecretRef`** — never baked into the agent |
 | Staging | `gs://<project>-agent-engine-staging` bucket, created by `deploy.sh` |
 | IAM | `deploy.sh` grants the Agent Engine service agent `secretmanager.secretAccessor` + `storage.objectViewer` on the staging bucket |
 
-The `searchaas` application code is **not modified** — the agent wrapper lives
+The `AiSearch` application code is **not modified** — the agent wrapper lives
 entirely in this directory and reuses the identical pipeline as the FastAPI
 `/retrieve` endpoint and the MCP `auto_search` tool
 (understand → plan → retrieve → summarize).
@@ -41,7 +41,7 @@ entirely in this directory and reuses the identical pipeline as the FastAPI
 | File | Purpose |
 |---|---|
 | `deploy.sh` | End-to-end deploy: APIs → staging bucket → secrets → IAM → Agent Engine |
-| `deploy_agent_engine.py` | `SearchaaSAgent` wrapper class + `AgentEngine.create()/update()` driver |
+| `deploy_agent_engine.py` | `AiSearchAgent` wrapper class + `AgentEngine.create()/update()` driver |
 | `requirements-deploy.txt` | Deploy-time deps installed into the local venv (Vertex AI SDK + cloudpickle) |
 
 ---
@@ -123,7 +123,7 @@ The response dict matches the REST `/retrieve` payload: `strategy`, `summary`,
 
 Open **Vertex AI → Agent Builder → Agent Engines**
 (<https://console.cloud.google.com/vertex-ai/agents/agent-engines>) — the
-`searchaas-agent` engine appears there once deployed, with a built-in
+`AiSearch-agent` engine appears there once deployed, with a built-in
 playground for `query` / `streamQuery` calls, and can be registered as a tool
 for Gemini Enterprise agents.
 
@@ -131,7 +131,7 @@ for Gemini Enterprise agents.
 
 ## Configuration
 
-All configuration in `searchaas/config/searchaas.yaml` uses `${VAR:-default}`
+All configuration in `AiSearch/config/AiSearch.yaml` uses `${VAR:-default}`
 syntax, so the deployed agent is configured purely with **environment
 variables** — no redeploy of code needed beyond re-running `deploy.sh`.
 Export variables before deploying and they are forwarded:
@@ -178,7 +178,7 @@ export ATLAS_DIMENSIONS=-1
   `ATLAS_DIMENSIONS=-1`, `ATLAS_RELEVANCE_FN=` (empty), and point
   `ATLAS_VECTOR_INDEX` at an `autoEmbed`-type index.
 
-Dev escape hatch: `SEARCHAAS_SKIP_PROVIDER_INDEX_CHECK=1` bypasses startup
+Dev escape hatch: `AISEARCH_SKIP_PROVIDER_INDEX_CHECK=1` bypasses startup
 validation. Do not use in production.
 
 ### Planner LLM
@@ -236,12 +236,12 @@ gcloud storage buckets delete gs://${PROJECT}-agent-engine-staging \
 ## Notes / caveats
 
 - **Server-side build.** `AgentEngine.create()` uploads the pickled agent,
-  `searchaas` package, and requirements to the staging bucket; the managed
+  `AiSearch` package, and requirements to the staging bucket; the managed
   service then pip-installs requirements and boots the runtime. Expect
   ~5–15 minutes per deploy.
 - **Python version.** The remote runtime Python matches the local interpreter
   (3.10–3.13 supported). Use the repo `./venv` (3.13) — it is the default.
-- **Cold starts.** The first `query` on a fresh engine builds the SearchaaS
+- **Cold starts.** The first `query` on a fresh engine builds the AiSearch
   container (Atlas connection, embedder, planner) — allow 30–60 s. Subsequent
   calls are warm.
 - **Secrets.** Atlas URI and API keys are referenced via Secret Manager

@@ -3,13 +3,13 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Deploy on Amazon ECS Express Mode · SearchaaS Docs</title>
+<title>Deploy on Amazon ECS Express Mode · AiSearch Docs</title>
 <link rel="stylesheet" href="../../../../pages/assets/style.css">
 <link rel="stylesheet" href="../../../../pages/assets/pygments.css">
 </head>
 <body>
 <header class="topbar">
-  <a class="brand" href="../../../../index.html">SearchaaS Docs</a>
+  <a class="brand" href="../../../../index.html">AiSearch Docs</a>
   <a class="back" href="../../../../index.html">← All docs</a>
 </header>
 <main class="content">
@@ -17,8 +17,8 @@
 <p>Uses <strong><code>aws ecs create-express-gateway-service</code></strong> (<a href="https://docs.aws.amazon.com/AmazonECS/latest/developerguide/express-service-getting-started.html">docs</a>).
 One service per process:</p>
 <ul>
-<li><strong>FastAPI</strong> → <code>searchaas-fastapi</code> → <code>https://searchaas-fastapi.ecs.&lt;region&gt;.on.aws</code></li>
-<li><strong>FastMCP</strong> (streamable-http) → <code>searchaas-fastmcp</code> → <code>https://searchaas-fastmcp.ecs.&lt;region&gt;.on.aws</code></li>
+<li><strong>FastAPI</strong> → <code>AiSearch-fastapi</code> → <code>https://AiSearch-fastapi.ecs.&lt;region&gt;.on.aws</code></li>
+<li><strong>FastMCP</strong> (streamable-http) → <code>AiSearch-fastmcp</code> → <code>https://AiSearch-fastmcp.ecs.&lt;region&gt;.on.aws</code></li>
 </ul>
 <blockquote>
 <p>Express Mode auto-provisions an internet-facing ALB + HTTPS URL per service.
@@ -40,7 +40,7 @@ plain Fargate.</p>
 </tr>
 <tr>
 <td><code>primary-container-fastmcp.json</code></td>
-<td><code>--primary-container</code> payload, FastMCP on <code>:8001</code>, command <code>python -m searchaas.mcp_server.server</code></td>
+<td><code>--primary-container</code> payload, FastMCP on <code>:8001</code>, command <code>python -m AiSearch.mcp_server.server</code></td>
 </tr>
 <tr>
 <td><code>deploy.sh</code></td>
@@ -52,15 +52,15 @@ plain Fargate.</p>
 </tr>
 </tbody>
 </table>
-<p><strong>Two separate images / two ECR repos</strong> — <code>searchaas-fastapi</code> (built from
-<code>Dockerfile.fastapi</code>) and <code>searchaas-fastmcp</code> (built from <code>Dockerfile.fastmcp</code>).
+<p><strong>Two separate images / two ECR repos</strong> — <code>AiSearch-fastapi</code> (built from
+<code>Dockerfile.fastapi</code>) and <code>AiSearch-fastmcp</code> (built from <code>Dockerfile.fastmcp</code>).
 Each payload's <code>command</code> field pins the entrypoint for its image.</p>
 <h2 id="run-it">Run it</h2>
 <div class="highlight"><pre><span></span><code><span class="nb">export</span><span class="w"> </span><span class="nv">AWS_REGION</span><span class="o">=</span>us-east-1
 <span class="nb">export</span><span class="w"> </span><span class="nv">ATLAS_URI</span><span class="o">=</span><span class="s1">&#39;mongodb+srv://USER:PASS@cluster.mongodb.net/?retryWrites=true&#39;</span>
 <span class="nb">export</span><span class="w"> </span><span class="nv">ATLAS_DB</span><span class="o">=</span><span class="s1">&#39;your_database_name&#39;</span><span class="w">   </span><span class="c1"># required — the Atlas database holding the chunks collection</span>
 
-<span class="c1"># Optional — each defaults to the value baked into searchaas/config/searchaas.yaml</span>
+<span class="c1"># Optional — each defaults to the value baked into AiSearch/config/AiSearch.yaml</span>
 <span class="nb">export</span><span class="w"> </span><span class="nv">ATLAS_COLLECTION</span><span class="o">=</span><span class="s1">&#39;retail&#39;</span>
 <span class="nb">export</span><span class="w"> </span><span class="nv">EMBEDDINGS_PROVIDER</span><span class="o">=</span><span class="s1">&#39;auto&#39;</span><span class="w">      </span><span class="c1"># server-side AutoEmbeddings (no API key)</span>
 <span class="nb">export</span><span class="w"> </span><span class="nv">EMBEDDINGS_MODEL</span><span class="o">=</span><span class="s1">&#39;voyage-4&#39;</span><span class="w">     </span><span class="c1"># must equal the autoEmbed model on the index</span>
@@ -75,14 +75,14 @@ Each payload's <code>command</code> field pins the entrypoint for its image.</p>
 
 <p>What the script does (idempotent — safe to re-run):</p>
 <ol>
-<li>Creates <code>ecsTaskExecutionRole</code>, <code>ecsInfrastructureRoleForExpressServices</code>, and <code>searchaas-task-role</code> if missing, attaches the two AWS-managed policies, and puts an inline <code>BedrockInvoke</code> policy on the task role (the planner LLM defaults to Bedrock).</li>
-<li>Creates the <code>searchaas-fastapi</code> and <code>searchaas-fastmcp</code> ECR repos if missing, builds <strong>both</strong> images for <code>linux/amd64</code>, pushes <code>:latest</code>.</li>
+<li>Creates <code>ecsTaskExecutionRole</code>, <code>ecsInfrastructureRoleForExpressServices</code>, and <code>AiSearch-task-role</code> if missing, attaches the two AWS-managed policies, and puts an inline <code>BedrockInvoke</code> policy on the task role (the planner LLM defaults to Bedrock).</li>
+<li>Creates the <code>AiSearch-fastapi</code> and <code>AiSearch-fastmcp</code> ECR repos if missing, builds <strong>both</strong> images for <code>linux/amd64</code>, pushes <code>:latest</code>.</li>
 <li>Renders the two <code>primary-container-*.json</code> files, substituting <code>&lt;ACCOUNT_ID&gt;</code>, <code>&lt;REGION&gt;</code>, <code>&lt;ATLAS_URI&gt;</code>, <code>&lt;ATLAS_DB&gt;</code>, <code>&lt;ATLAS_COLLECTION&gt;</code>, <code>&lt;CORS_ORIGINS&gt;</code>, <code>&lt;EMBEDDINGS_PROVIDER&gt;</code>, <code>&lt;EMBEDDINGS_MODEL&gt;</code>.</li>
 <li>Calls <code>aws ecs create-express-gateway-service</code> (or <code>update-...</code> if the service already exists) for each one with <code>--monitor-resources</code> so you watch provisioning in real time.</li>
 <li>Prints the two <code>https://...ecs.&lt;region&gt;.on.aws</code> URLs.</li>
 </ol>
 <h2 id="configuration-options">Configuration options</h2>
-<p>Everything in <code>searchaas/config/searchaas.yaml</code> uses <code>${VAR:-default}</code> syntax, so
+<p>Everything in <code>AiSearch/config/AiSearch.yaml</code> uses <code>${VAR:-default}</code> syntax, so
 you configure the services purely with <strong>environment variables</strong> — no image
 rebuild. On ECS, <code>deploy.sh</code> substitutes <code>&lt;ATLAS_URI&gt;</code>, <code>&lt;ATLAS_DB&gt;</code>,
 <code>&lt;ATLAS_COLLECTION&gt;</code>, <code>&lt;CORS_ORIGINS&gt;</code>, <code>&lt;EMBEDDINGS_PROVIDER&gt;</code>, and
@@ -99,18 +99,18 @@ rebuild. On ECS, <code>deploy.sh</code> substitutes <code>&lt;ATLAS_URI&gt;</cod
 </code></pre></div>
 
 <p>Anything you leave unset falls back to the default baked into
-<code>searchaas/config/searchaas.yaml</code>. Do <strong>not</strong> commit filled-in secret values —
+<code>AiSearch/config/AiSearch.yaml</code>. Do <strong>not</strong> commit filled-in secret values —
 keep placeholders in git (see Caveats).</p>
 <blockquote>
 <p><strong>Do not override the container wiring</strong> already set in the JSON files:
-<code>PYTHONUNBUFFERED</code>, <code>PYTHONPATH</code>, <code>SEARCHAAS_CONFIG</code>, <code>AWS_REGION</code> /
+<code>PYTHONUNBUFFERED</code>, <code>PYTHONPATH</code>, <code>AISEARCH_CONFIG</code>, <code>AWS_REGION</code> /
 <code>AWS_DEFAULT_REGION</code> (boto3 needs one of these to reach Bedrock — there is no
 <code>region_name</code> in the YAML planner block), and the container ports (<code>8000</code>
-FastAPI / <code>8001</code> FastMCP). CORS is set via <code>SEARCHAAS_CORS_ORIGINS</code>
+FastAPI / <code>8001</code> FastMCP). CORS is set via <code>AISEARCH_CORS_ORIGINS</code>
 (see the <a href="#cors">CORS</a> section).</p>
 </blockquote>
 <h3 id="atlas-connection-index">Atlas connection &amp; index</h3>
-<p>Defaults below are the ones in <code>searchaas/config/searchaas.yaml</code> — that file is
+<p>Defaults below are the ones in <code>AiSearch/config/AiSearch.yaml</code> — that file is
 authored for <strong>Mode B (server-side AutoEmbeddings)</strong>.</p>
 <table>
 <thead>
@@ -202,7 +202,7 @@ be silently dropped.</p>
 <code>embeddings.config</code> block only defines <code>model</code> and <code>voyage_api_key</code>, and
 <code>langchain_aws.BedrockEmbeddings</code> rejects both (<code>extra_forbidden</code>) — the
 container dies at startup with a pydantic <code>ValidationError</code>. To use Titan,
-first change <code>embeddings.config</code> in <code>searchaas.yaml</code> to <code>model_id</code> +
+first change <code>embeddings.config</code> in <code>AiSearch.yaml</code> to <code>model_id</code> +
 <code>region_name</code>, then set <code>EMBEDDINGS_PROVIDER=bedrock_titan</code>. The task role
 already grants <code>bedrock:InvokeModel</code>.</p>
 </blockquote>
@@ -216,13 +216,13 @@ index type (<code>ProviderIndexMismatch</code>). Pick one:</p>
   model declared in an <code>autoEmbed</code>-type index. <code>EMBEDDINGS_PROVIDER=auto</code>,
   <code>ATLAS_EMBEDDING_KEY=</code> (empty), <code>ATLAS_DIMENSIONS=-1</code>, <code>ATLAS_RELEVANCE_FN=</code>
   (empty), and <code>ATLAS_VECTOR_INDEX</code> pointing at an autoEmbed index whose declared
-  <code>model</code> equals <code>EMBEDDINGS_MODEL</code>. This is what <code>searchaas.yaml</code> ships with.</li>
+  <code>model</code> equals <code>EMBEDDINGS_MODEL</code>. This is what <code>AiSearch.yaml</code> ships with.</li>
 <li><strong>Mode A — client-side embeddings</strong>: the app embeds queries (Voyage / Bedrock
   Titan). Requires a <code>vector</code>-type index. Set <code>ATLAS_EMBEDDING_KEY</code>, a real
   <code>ATLAS_DIMENSIONS</code>, and <code>ATLAS_RELEVANCE_FN</code> (e.g. <code>cosine</code>) — plus the
   provider's own key.</li>
 </ul>
-<p>Dev-only escape hatch: <code>SEARCHAAS_SKIP_PROVIDER_INDEX_CHECK=1</code> bypasses this
+<p>Dev-only escape hatch: <code>AISEARCH_SKIP_PROVIDER_INDEX_CHECK=1</code> bypasses this
 validation. Do not use in production.</p>
 <h3 id="planner-llm-query-understanding-retrieval-planning">Planner LLM (query understanding + retrieval planning)</h3>
 <p>Set <code>PLANNER_LLM_PROVIDER</code>. This deployment uses AWS Bedrock; other providers
@@ -315,7 +315,7 @@ payloads; removing them breaks the planner with <code>NoRegionError</code>.</p>
 <p>Only <code>auto</code>, <code>vector</code>, <code>hybrid</code>, and <code>parent_doc</code> build the vector store at
 startup. A <code>graph</code>/<code>fulltext</code>/<code>metadata</code> default strategy defers it, so no
 vector index is auto-created on the collection until a vector-needing request
-arrives (<code>searchaas/app/bootstrap.py</code>).</p>
+arrives (<code>AiSearch/app/bootstrap.py</code>).</p>
 </blockquote>
 <h3 id="logging">Logging</h3>
 <table>
@@ -369,7 +369,7 @@ these to the <code>environment</code> array in <strong>both</strong> <code>prima
 <tr>
 <td>Health check</td>
 <td><code>/health</code> (FastAPI), <code>/healthz</code> (FastMCP)</td>
-<td><code>/healthz</code> was added to <code>searchaas/mcp_server/server.py</code> because <code>/mcp</code> requires an SSE handshake</td>
+<td><code>/healthz</code> was added to <code>AiSearch/mcp_server/server.py</code> because <code>/mcp</code> requires an SSE handshake</td>
 </tr>
 <tr>
 <td>Container port</td>
@@ -379,7 +379,7 @@ these to the <code>environment</code> array in <strong>both</strong> <code>prima
 </tbody>
 </table>
 <h2 id="cors">CORS</h2>
-<p>Both services read <code>SEARCHAAS_CORS_ORIGINS</code> (comma-separated list, or <code>*</code> for all)
+<p>Both services read <code>AISEARCH_CORS_ORIGINS</code> (comma-separated list, or <code>*</code> for all)
 in addition to the built-in localhost regex. The deploy script defaults to <code>*</code>
 during initial setup. To lock it down, re-run with your real origins:</p>
 <div class="highlight"><pre><span></span><code><span class="nv">CORS_ORIGINS</span><span class="o">=</span><span class="s2">&quot;https://app.example.com,https://ui.example.com&quot;</span><span class="w"> </span><span class="se">\</span>
@@ -390,22 +390,22 @@ during initial setup. To lock it down, re-run with your real origins:</p>
 <p>If a preflight is rejected you'll now see a one-line warning in the FastAPI
 container logs:</p>
 <div class="highlight"><pre><span></span><code>CORS PREFLIGHT REJECTED: origin=&#39;http://...&#39; method=POST path=/retrieve status=400.
-Add this origin to SEARCHAAS_CORS_ORIGINS env var (comma-separated) ...
+Add this origin to AISEARCH_CORS_ORIGINS env var (comma-separated) ...
 </code></pre></div>
 
 <h2 id="useful-commands">Useful commands</h2>
 <div class="highlight"><pre><span></span><code><span class="c1"># Watch a deploy</span>
 aws<span class="w"> </span>ecs<span class="w"> </span>monitor-express-gateway-service<span class="w"> </span><span class="se">\</span>
-<span class="w">  </span>--service-arn<span class="w"> </span>arn:aws:ecs:<span class="nv">$AWS_REGION</span>:&lt;ACCOUNT_ID&gt;:service/default/searchaas-fastapi
+<span class="w">  </span>--service-arn<span class="w"> </span>arn:aws:ecs:<span class="nv">$AWS_REGION</span>:&lt;ACCOUNT_ID&gt;:service/default/AiSearch-fastapi
 
 <span class="c1"># Inspect</span>
 aws<span class="w"> </span>ecs<span class="w"> </span>describe-express-gateway-service<span class="w"> </span><span class="se">\</span>
-<span class="w">  </span>--service-arn<span class="w"> </span>arn:aws:ecs:<span class="nv">$AWS_REGION</span>:&lt;ACCOUNT_ID&gt;:service/default/searchaas-fastmcp
+<span class="w">  </span>--service-arn<span class="w"> </span>arn:aws:ecs:<span class="nv">$AWS_REGION</span>:&lt;ACCOUNT_ID&gt;:service/default/AiSearch-fastmcp
 
 <span class="c1"># Get the public URL. NOTE: there is no top-level `service.url` field —</span>
 <span class="c1"># the hostname lives under activeConfigurations[0].ingressPaths[0].endpoint.</span>
 aws<span class="w"> </span>ecs<span class="w"> </span>describe-express-gateway-service<span class="w"> </span><span class="se">\</span>
-<span class="w">  </span>--service-arn<span class="w"> </span>arn:aws:ecs:<span class="nv">$AWS_REGION</span>:&lt;ACCOUNT_ID&gt;:service/default/searchaas-fastapi<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--service-arn<span class="w"> </span>arn:aws:ecs:<span class="nv">$AWS_REGION</span>:&lt;ACCOUNT_ID&gt;:service/default/AiSearch-fastapi<span class="w"> </span><span class="se">\</span>
 <span class="w">  </span>--query<span class="w"> </span><span class="s1">&#39;service.activeConfigurations[0].ingressPaths[0].endpoint&#39;</span><span class="w"> </span>--output<span class="w"> </span>text
 
 <span class="c1"># Check what config a running service actually loaded</span>
@@ -413,7 +413,7 @@ curl<span class="w"> </span>-s<span class="w"> </span>https://&lt;endpoint&gt;/s
 
 <span class="c1"># Tear down</span>
 aws<span class="w"> </span>ecs<span class="w"> </span>delete-express-gateway-service<span class="w"> </span><span class="se">\</span>
-<span class="w">  </span>--service-arn<span class="w"> </span>arn:aws:ecs:<span class="nv">$AWS_REGION</span>:&lt;ACCOUNT_ID&gt;:service/default/searchaas-fastapi<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--service-arn<span class="w"> </span>arn:aws:ecs:<span class="nv">$AWS_REGION</span>:&lt;ACCOUNT_ID&gt;:service/default/AiSearch-fastapi<span class="w"> </span><span class="se">\</span>
 <span class="w">  </span>--monitor-resources
 </code></pre></div>
 
@@ -430,7 +430,7 @@ your task config — but Express Mode currently provisions x86_64 tasks, so
 stick with <code>linux/amd64</code>.</p>
 <h2 id="caveats">Caveats</h2>
 <ul>
-<li><strong><code>searchaas.yaml</code> is baked into the image</strong> (<code>COPY searchaas/ ./searchaas/</code>), so a running service keeps serving the YAML defaults from whenever it was last built. Editing the YAML in git changes nothing until you re-run <code>deploy.sh</code>. <code>curl https://&lt;endpoint&gt;/settings</code> shows what a live service actually loaded — compare it against the repo before assuming they match.</li>
+<li><strong><code>AiSearch.yaml</code> is baked into the image</strong> (<code>COPY AiSearch/ ./AiSearch/</code>), so a running service keeps serving the YAML defaults from whenever it was last built. Editing the YAML in git changes nothing until you re-run <code>deploy.sh</code>. <code>curl https://&lt;endpoint&gt;/settings</code> shows what a live service actually loaded — compare it against the repo before assuming they match.</li>
 <li>The Express Mode CLI commands (<code>create-express-gateway-service</code>, etc.) require a recent AWS CLI v2 release. If you get <code>Invalid choice</code>, run <code>aws --version</code> and update.</li>
 <li>Plain <code>environment</code> values are visible in <code>DescribeService</code> output and the ECS console. You explicitly chose env vars over Secrets Manager — fine, just don't commit a filled-in <code>primary-container-*.json</code> to git.</li>
 <li><code>ATLAS_URI</code> is injected by <code>deploy.sh</code> at render time; the committed JSON only has the <code>&lt;ATLAS_URI&gt;</code> placeholder.</li>

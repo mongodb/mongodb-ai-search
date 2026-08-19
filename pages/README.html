@@ -3,17 +3,17 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>SearchaaS — Phase 1 · SearchaaS Docs</title>
+<title>AiSearch — Phase 1 · AiSearch Docs</title>
 <link rel="stylesheet" href="../pages/assets/style.css">
 <link rel="stylesheet" href="../pages/assets/pygments.css">
 </head>
 <body>
 <header class="topbar">
-  <a class="brand" href="../index.html">SearchaaS Docs</a>
+  <a class="brand" href="../index.html">AiSearch Docs</a>
   <a class="back" href="../index.html">← All docs</a>
 </header>
 <main class="content">
-<h1 id="searchaas-phase-1">SearchaaS — Phase 1</h1>
+<h1 id="aisearch-phase-1">AiSearch — Phase 1</h1>
 <p>MongoDB Atlas-backed retrieval platform built around the <strong>Factory pattern</strong>.
 Phase 1 ships: query understanding (rewriting, entity &amp; typed-fact extraction,
 intent), AI-driven retrieval planning with Atlas-managed guardrails, six
@@ -40,7 +40,7 @@ or retrieval strategy is a config change, not a code change.</p>
 │   ├── aws/                      # S3 UI + ECS Express (default) + Bedrock AgentCore
 │   ├── azure/                    # Container Apps + AI Foundry (Bicep)
 │   └── google/                   # Cloud Run (combined or separate services)
-└── searchaas/                # application package
+└── AiSearch/                # application package
     ├── config/               # YAML config + loader (single source of truth; ${VAR:-default} expansion)
     ├── infrastructure/       # AtlasFactory (Mongo client / db / collections, ping, stats)
     ├── domain/               # Pydantic models (Chunk, SourceRef)
@@ -58,7 +58,7 @@ or retrieval strategy is a config change, not a code change.</p>
     ├── facts.py              # query-fact routing → Atlas pre-filters vs in-memory post-filters
     ├── filtering.py          # filter allowlist sanitization (drops non-indexable paths)
     ├── utils.py              # shared serialization / summarization helpers
-    └── diagnose.py           # `python -m searchaas.diagnose` self-check CLI
+    └── diagnose.py           # `python -m AiSearch.diagnose` self-check CLI
 </code></pre></div>
 
 <h2 id="setup">Setup</h2>
@@ -67,7 +67,7 @@ pip<span class="w"> </span>install<span class="w"> </span>-r<span class="w"> </s
 cp<span class="w"> </span>.env.example<span class="w"> </span>.env<span class="w">         </span><span class="c1"># fill in ATLAS_URI, provider keys, ...</span>
 </code></pre></div>
 
-<p>Edit <code>searchaas/config/searchaas.yaml</code> to pick providers/models/indexes. The
+<p>Edit <code>AiSearch/config/AiSearch.yaml</code> to pick providers/models/indexes. The
 default build runs <strong>server-side AutoEmbeddings</strong> (Atlas embeds the query and
 document text internally, <code>embeddings.provider: auto</code>, <code>voyage-4</code> model) with
 <strong>Gemini</strong> as the planner LLM. Every value is <code>${VAR:-default}</code>-driven, so you
@@ -80,7 +80,7 @@ via environment variables — no image rebuild required.</p>
 <li><strong>Mode A — client-side embeddings:</strong> e.g. <code>provider: voyageai</code>, with
   <code>embedding_key</code>/<code>dimensions</code>/<code>relevance_score_fn</code> matching a <code>vector</code> index.</li>
 </ul>
-<p>The bootstrap layer (<code>searchaas/app/bootstrap.py</code>) refuses to start on a
+<p>The bootstrap layer (<code>AiSearch/app/bootstrap.py</code>) refuses to start on a
 provider↔index-type mismatch.</p>
 <p><strong>Supported providers</strong></p>
 <ul>
@@ -90,20 +90,20 @@ provider↔index-type mismatch.</p>
 </ul>
 <h2 id="run">Run</h2>
 <div class="highlight"><pre><span></span><code><span class="c1"># REST API</span>
-uvicorn<span class="w"> </span>searchaas.api.app:app<span class="w"> </span>--host<span class="w"> </span><span class="m">0</span>.0.0.0<span class="w"> </span>--port<span class="w"> </span><span class="m">8000</span>
+uvicorn<span class="w"> </span>AiSearch.api.app:app<span class="w"> </span>--host<span class="w"> </span><span class="m">0</span>.0.0.0<span class="w"> </span>--port<span class="w"> </span><span class="m">8000</span>
 
 <span class="c1"># FastMCP server</span>
-python<span class="w"> </span>-m<span class="w"> </span>searchaas.mcp_server.server
+python<span class="w"> </span>-m<span class="w"> </span>AiSearch.mcp_server.server
 
-<span class="c1"># React UI (from searchaas/ui_react)</span>
+<span class="c1"># React UI (from AiSearch/ui_react)</span>
 npm<span class="w"> </span>install<span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span>npm<span class="w"> </span>run<span class="w"> </span>dev
 
 <span class="c1"># Self-check (Atlas ping, collection stats, embedder probe)</span>
-python<span class="w"> </span>-m<span class="w"> </span>searchaas.diagnose
+python<span class="w"> </span>-m<span class="w"> </span>AiSearch.diagnose
 </code></pre></div>
 
 <h2 id="rest-api">REST API</h2>
-<p>FastAPI surface (<code>searchaas/api/app.py</code>). Every <code>/retrieve*</code> response includes
+<p>FastAPI surface (<code>AiSearch/api/app.py</code>). Every <code>/retrieve*</code> response includes
 the chosen <code>strategy</code>, the <code>plan</code>, <code>results</code>, the <code>understood_query</code>, an LLM
 <code>summary</code>, per-stage <code>timings</code>, and the <strong>real captured Atlas aggregation
 <code>pipeline</code></strong> that produced the results.</p>
@@ -186,7 +186,7 @@ the chosen <code>strategy</code>, the <code>plan</code>, <code>results</code>, t
 <p>Request body (<code>RetrieveRequest</code>): <code>query</code>, <code>top_k</code> (1–100), optional <code>filters</code>,
 and optional per-request <code>atlas</code> / <code>retrieval</code> overrides.</p>
 <h2 id="retrieval-strategies">Retrieval strategies</h2>
-<p><code>RetrieverFactory</code> (<code>searchaas/retrieval/factory.py</code>) dispatches on the plan's
+<p><code>RetrieverFactory</code> (<code>AiSearch/retrieval/factory.py</code>) dispatches on the plan's
 strategy:</p>
 <table>
 <thead>
@@ -376,14 +376,14 @@ pm.collectionVariables.set("sessionId", pm.response.headers.get("mcp-session-id"
 server is up; MCP requires <code>POST</code> with a valid JSON-RPC body. A plain
 <code>GET /healthz</code> route is also exposed for load-balancer health checks.</p>
 <h2 id="react-testing-ui">React testing UI</h2>
-<p><code>searchaas/ui_react</code> is a Vite + TypeScript + React playground for both
+<p><code>AiSearch/ui_react</code> is a Vite + TypeScript + React playground for both
 backends. It shows conversation turns, per-turn results, the LLM summary, an
 understood-query intent panel (rewrite, entities, filters, chosen strategy),
 latency timings, and the real captured MongoDB aggregation pipeline. Backend
 URLs are injected at runtime via <code>public/config.js</code> (so one build points at any
 backend), falling back to <code>http://localhost:8000</code> and
 <code>http://localhost:8001/mcp</code>.</p>
-<div class="highlight"><pre><span></span><code><span class="nb">cd</span><span class="w"> </span>searchaas/ui_react
+<div class="highlight"><pre><span></span><code><span class="nb">cd</span><span class="w"> </span>AiSearch/ui_react
 npm<span class="w"> </span>install
 npm<span class="w"> </span>run<span class="w"> </span>dev<span class="w">        </span><span class="c1"># dev server</span>
 npm<span class="w"> </span>run<span class="w"> </span>build<span class="w">      </span><span class="c1"># production build → dist/</span>
@@ -391,7 +391,7 @@ npm<span class="w"> </span>run<span class="w"> </span>build<span class="w">     
 
 <h2 id="end-to-end-flow">End-to-end flow</h2>
 <pre class="mermaid">flowchart TD
-    YAML[&quot;searchaas.yaml&quot;] --&gt; AppConfig[&quot;AppConfig (loader)&quot;]
+    YAML[&quot;AiSearch.yaml&quot;] --&gt; AppConfig[&quot;AppConfig (loader)&quot;]
     AppConfig --&gt; AtlasFactory[&quot;AtlasFactory&quot;]
     AppConfig --&gt; EmbeddingFactory[&quot;EmbeddingFactory&quot;]
     AppConfig --&gt; LLMFactory[&quot;LLMFactory&quot;]
@@ -423,7 +423,7 @@ npm<span class="w"> </span>run<span class="w"> </span>build<span class="w">     
 </pre>
 <p><strong>Components</strong></p>
 <ul>
-<li><strong>searchaas.yaml</strong> — The single source of truth for providers, models,
+<li><strong>AiSearch.yaml</strong> — The single source of truth for providers, models,
   indexes, and runtime options. Every value is <code>${VAR:-default}</code>-driven so the
   deployment can be retuned via environment variables without a rebuild.</li>
 <li><strong>AppConfig (loader)</strong> — Parses the YAML, expands environment variables, and
@@ -540,8 +540,8 @@ for full details:</p>
 <span class="c1"># 2. Deploy the UI to your existing S3 bucket, pointing at those URLs.</span>
 ./deployment/aws/s3-ui/deploy.sh<span class="w"> </span><span class="se">\</span>
 <span class="w">  </span>--bucket<span class="w"> </span>my-existing-ui-bucket<span class="w"> </span><span class="se">\</span>
-<span class="w">  </span>--api-url<span class="w"> </span><span class="s2">&quot;https://searchaas-fastapi.ecs.</span><span class="si">${</span><span class="nv">AWS_REGION</span><span class="si">}</span><span class="s2">.on.aws&quot;</span><span class="w"> </span><span class="se">\</span>
-<span class="w">  </span>--mcp-url<span class="w"> </span><span class="s2">&quot;https://searchaas-fastmcp.ecs.</span><span class="si">${</span><span class="nv">AWS_REGION</span><span class="si">}</span><span class="s2">.on.aws/mcp&quot;</span>
+<span class="w">  </span>--api-url<span class="w"> </span><span class="s2">&quot;https://AiSearch-fastapi.ecs.</span><span class="si">${</span><span class="nv">AWS_REGION</span><span class="si">}</span><span class="s2">.on.aws&quot;</span><span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--mcp-url<span class="w"> </span><span class="s2">&quot;https://AiSearch-fastmcp.ecs.</span><span class="si">${</span><span class="nv">AWS_REGION</span><span class="si">}</span><span class="s2">.on.aws/mcp&quot;</span>
 
 <span class="c1"># Optional: FastMCP on Bedrock AgentCore (requires typed confirmation)</span>
 ./deployment/aws/agentcore/deploy.sh
@@ -554,16 +554,16 @@ Analytics, Container Apps Environment, managed identity, three Container Apps) i
 provisioned by subscription-scope Bicep with a readiness gate. Full walkthrough:
 <a href="deployment/azure/DEPLOYMENT.html">Azure deployment guide</a>.</p>
 <div class="highlight"><pre><span></span><code><span class="c1"># 1. Create resource group + ACR</span>
-az<span class="w"> </span>deployment<span class="w"> </span>sub<span class="w"> </span>create<span class="w"> </span>--name<span class="w"> </span>searchaas-acr<span class="w"> </span>--location<span class="w"> </span>centralindia<span class="w"> </span><span class="se">\</span>
+az<span class="w"> </span>deployment<span class="w"> </span>sub<span class="w"> </span>create<span class="w"> </span>--name<span class="w"> </span>AiSearch-acr<span class="w"> </span>--location<span class="w"> </span>centralindia<span class="w"> </span><span class="se">\</span>
 <span class="w">  </span>--template-file<span class="w"> </span>deployment/azure/infra/acr.bicep<span class="w"> </span><span class="se">\</span>
 <span class="w">  </span>--parameters<span class="w"> </span>deployment/azure/infra/main.parameters.json
-<span class="nv">ACR_NAME</span><span class="o">=</span><span class="k">$(</span>az<span class="w"> </span>deployment<span class="w"> </span>sub<span class="w"> </span>show<span class="w"> </span>-n<span class="w"> </span>searchaas-acr<span class="w"> </span>--query<span class="w"> </span>properties.outputs.acrName.value<span class="w"> </span>-o<span class="w"> </span>tsv<span class="k">)</span>
+<span class="nv">ACR_NAME</span><span class="o">=</span><span class="k">$(</span>az<span class="w"> </span>deployment<span class="w"> </span>sub<span class="w"> </span>show<span class="w"> </span>-n<span class="w"> </span>AiSearch-acr<span class="w"> </span>--query<span class="w"> </span>properties.outputs.acrName.value<span class="w"> </span>-o<span class="w"> </span>tsv<span class="k">)</span>
 
 <span class="c1"># 2. Build &amp; push all three images (server-side in ACR)</span>
 ./deployment/azure/scripts/build-and-push.sh<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$ACR_NAME</span><span class="s2">&quot;</span><span class="w"> </span>latest
 
 <span class="c1"># 3. Deploy infra + Container Apps</span>
-az<span class="w"> </span>deployment<span class="w"> </span>sub<span class="w"> </span>create<span class="w"> </span>--name<span class="w"> </span>searchaas<span class="w"> </span>--location<span class="w"> </span>centralindia<span class="w"> </span><span class="se">\</span>
+az<span class="w"> </span>deployment<span class="w"> </span>sub<span class="w"> </span>create<span class="w"> </span>--name<span class="w"> </span>AiSearch<span class="w"> </span>--location<span class="w"> </span>centralindia<span class="w"> </span><span class="se">\</span>
 <span class="w">  </span>--template-file<span class="w"> </span>deployment/azure/infra/main.bicep<span class="w"> </span><span class="se">\</span>
 <span class="w">  </span>--parameters<span class="w"> </span>deployment/azure/infra/main.parameters.json<span class="w"> </span><span class="se">\</span>
 <span class="w">  </span>--parameters<span class="w"> </span><span class="nv">atlasUri</span><span class="o">=</span><span class="s2">&quot;</span><span class="nv">$ATLAS_URI</span><span class="s2">&quot;</span><span class="w"> </span><span class="nv">voyageApiKey</span><span class="o">=</span><span class="s2">&quot;</span><span class="nv">$VOYAGE_API_KEY</span><span class="s2">&quot;</span><span class="w"> </span><span class="se">\</span>
@@ -624,32 +624,32 @@ Script: <a href="https://github.com/mongodb/mongodb-enterprise-search/blob/main/
 </thead>
 <tbody>
 <tr>
-<td><code>searchaas-api</code></td>
+<td><code>AiSearch-api</code></td>
 <td><code>/retrieve*</code>, <code>/health</code>, <code>/docs</code></td>
 <td>FastAPI REST server</td>
 </tr>
 <tr>
-<td><code>searchaas-mcp</code></td>
+<td><code>AiSearch-mcp</code></td>
 <td><code>/mcp</code></td>
 <td>FastMCP server</td>
 </tr>
 <tr>
-<td><code>searchaas-frontend</code></td>
+<td><code>AiSearch-frontend</code></td>
 <td><code>/</code></td>
 <td>React SPA (pre-configured with backend URLs)</td>
 </tr>
 </tbody>
 </table>
 <p><strong>Update frontend backend URLs after deploy:</strong></p>
-<div class="highlight"><pre><span></span><code>gcloud<span class="w"> </span>run<span class="w"> </span>services<span class="w"> </span>update<span class="w"> </span>searchaas-frontend<span class="w"> </span><span class="se">\</span>
+<div class="highlight"><pre><span></span><code>gcloud<span class="w"> </span>run<span class="w"> </span>services<span class="w"> </span>update<span class="w"> </span>AiSearch-frontend<span class="w"> </span><span class="se">\</span>
 <span class="w">  </span>--region<span class="o">=</span>&lt;REGION&gt;<span class="w"> </span><span class="se">\</span>
-<span class="w">  </span>--update-env-vars<span class="o">=</span><span class="s2">&quot;SEARCHAAS_API_URL=https://searchaas-api-xyz.run.app,SEARCHAAS_MCP_URL=https://searchaas-mcp-xyz.run.app/mcp&quot;</span>
+<span class="w">  </span>--update-env-vars<span class="o">=</span><span class="s2">&quot;AISEARCH_API_URL=https://AiSearch-api-xyz.run.app,AISEARCH_MCP_URL=https://AiSearch-mcp-xyz.run.app/mcp&quot;</span>
 </code></pre></div>
 
 <p><strong>Update CORS allowed origins:</strong></p>
-<div class="highlight"><pre><span></span><code>gcloud<span class="w"> </span>run<span class="w"> </span>services<span class="w"> </span>update<span class="w"> </span>searchaas-api<span class="w"> </span><span class="se">\</span>
+<div class="highlight"><pre><span></span><code>gcloud<span class="w"> </span>run<span class="w"> </span>services<span class="w"> </span>update<span class="w"> </span>AiSearch-api<span class="w"> </span><span class="se">\</span>
 <span class="w">  </span>--region<span class="o">=</span>&lt;REGION&gt;<span class="w"> </span><span class="se">\</span>
-<span class="w">  </span>--update-env-vars<span class="o">=</span><span class="s2">&quot;CORS_ORIGINS=https://searchaas-frontend-xyz.run.app&quot;</span>
+<span class="w">  </span>--update-env-vars<span class="o">=</span><span class="s2">&quot;CORS_ORIGINS=https://AiSearch-frontend-xyz.run.app&quot;</span>
 </code></pre></div>
 </main>
 <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>

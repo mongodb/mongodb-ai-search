@@ -3,17 +3,17 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>SearchaaS Test Suite · SearchaaS Docs</title>
+<title>AiSearch Test Suite · AiSearch Docs</title>
 <link rel="stylesheet" href="../../../pages/assets/style.css">
 <link rel="stylesheet" href="../../../pages/assets/pygments.css">
 </head>
 <body>
 <header class="topbar">
-  <a class="brand" href="../../../index.html">SearchaaS Docs</a>
+  <a class="brand" href="../../../index.html">AiSearch Docs</a>
   <a class="back" href="../../../index.html">← All docs</a>
 </header>
 <main class="content">
-<h1 id="searchaas-test-suite">SearchaaS Test Suite</h1>
+<h1 id="aisearch-test-suite">AiSearch Test Suite</h1>
 <p>Tests for the metadata-filter allowlist fix (branch <code>fix/llm-filter-allowlist</code>),
 which stops the Query Understanding LLM from sending invented filter fields
 into Atlas <code>$vectorSearch</code> (the <code>Path '&lt;field&gt;' needs to be indexed as filter</code>
@@ -31,20 +31,20 @@ project <code>.env</code>, so <code>ATLAS_URI</code> / <code>ATLAS_DB</code> are
 present; if they are absent the tests still pass (the one config test sets its
 own env via <code>monkeypatch</code>).</p>
 <h2 id="running">Running</h2>
-<div class="highlight"><pre><span></span><code><span class="c1"># Run everything (uses pytest.ini -&gt; testpaths = searchaas/tests)</span>
+<div class="highlight"><pre><span></span><code><span class="c1"># Run everything (uses pytest.ini -&gt; testpaths = AiSearch/tests)</span>
 pytest
 
 <span class="c1"># Equivalent explicit form</span>
-python3<span class="w"> </span>-m<span class="w"> </span>pytest<span class="w"> </span>searchaas/tests/
+python3<span class="w"> </span>-m<span class="w"> </span>pytest<span class="w"> </span>AiSearch/tests/
 
 <span class="c1"># Verbose: list every test name</span>
 pytest<span class="w"> </span>-v
 
 <span class="c1"># Run a single file</span>
-pytest<span class="w"> </span>searchaas/tests/test_retriever_filter_allowlist.py
+pytest<span class="w"> </span>AiSearch/tests/test_retriever_filter_allowlist.py
 
 <span class="c1"># Run a single test</span>
-pytest<span class="w"> </span>searchaas/tests/test_query_understanding_filters.py::test_aws03_repro_company_filter_is_dropped
+pytest<span class="w"> </span>AiSearch/tests/test_query_understanding_filters.py::test_aws03_repro_company_filter_is_dropped
 
 <span class="c1"># Filter by keyword</span>
 pytest<span class="w"> </span>-k<span class="w"> </span><span class="s2">&quot;aws03 or allowlist&quot;</span>
@@ -67,7 +67,7 @@ pytest<span class="w"> </span>-x<span class="w"> </span>-l
 <tbody>
 <tr>
 <td><code>test_filtering.py</code></td>
-<td><code>sanitize_filters()</code> + <code>AtlasConfig.filter_fields</code> / <code>search_filter_fields</code> derivation from the index definitions in <code>searchaas.yaml</code></td>
+<td><code>sanitize_filters()</code> + <code>AtlasConfig.filter_fields</code> / <code>search_filter_fields</code> derivation from the index definitions in <code>AiSearch.yaml</code></td>
 </tr>
 <tr>
 <td><code>test_query_understanding_filters.py</code></td>
@@ -100,29 +100,29 @@ fake LLM will hallucinate for that query.</p>
 <h2 id="expected-output">Expected output</h2>
 <div class="highlight"><pre><span></span><code>collected 32 items
 
-searchaas/tests/test_filtering.py ...............                        [ 46%]
-searchaas/tests/test_query_understanding_filters.py .......              [ 68%]
-searchaas/tests/test_retriever_filter_allowlist.py ..........            [100%]
+AiSearch/tests/test_filtering.py ...............                        [ 46%]
+AiSearch/tests/test_query_understanding_filters.py .......              [ 68%]
+AiSearch/tests/test_retriever_filter_allowlist.py ..........            [100%]
 
 ============================== 32 passed in 0.22s ==============================
 </code></pre></div>
 
 <h2 id="coverage-optional">Coverage (optional)</h2>
 <div class="highlight"><pre><span></span><code>pip<span class="w"> </span>install<span class="w"> </span>pytest-cov
-pytest<span class="w"> </span>--cov<span class="o">=</span>searchaas.filtering<span class="w"> </span><span class="se">\</span>
-<span class="w">       </span>--cov<span class="o">=</span>searchaas.config.loader<span class="w"> </span><span class="se">\</span>
-<span class="w">       </span>--cov<span class="o">=</span>searchaas.query_understanding.layer<span class="w"> </span><span class="se">\</span>
-<span class="w">       </span>--cov<span class="o">=</span>searchaas.retrieval.factory<span class="w"> </span><span class="se">\</span>
+pytest<span class="w"> </span>--cov<span class="o">=</span>AiSearch.filtering<span class="w"> </span><span class="se">\</span>
+<span class="w">       </span>--cov<span class="o">=</span>AiSearch.config.loader<span class="w"> </span><span class="se">\</span>
+<span class="w">       </span>--cov<span class="o">=</span>AiSearch.query_understanding.layer<span class="w"> </span><span class="se">\</span>
+<span class="w">       </span>--cov<span class="o">=</span>AiSearch.retrieval.factory<span class="w"> </span><span class="se">\</span>
 <span class="w">       </span>--cov-report<span class="o">=</span>term-missing
 </code></pre></div>
 
 <h2 id="troubleshooting">Troubleshooting</h2>
 <ul>
-<li><strong><code>ModuleNotFoundError: searchaas</code></strong> — run from the repo root, not from
-  inside <code>searchaas/</code>. <code>conftest.py</code> also inserts the repo root onto
+<li><strong><code>ModuleNotFoundError: AiSearch</code></strong> — run from the repo root, not from
+  inside <code>AiSearch/</code>. <code>conftest.py</code> also inserts the repo root onto
   <code>sys.path</code> as a fallback.</li>
-<li><strong><code>caplog</code> assertions empty</strong> — the <code>searchaas</code> logger sets
-  <code>propagate=False</code>; the autouse <code>_propagate_searchaas_logs</code> fixture in
+<li><strong><code>caplog</code> assertions empty</strong> — the <code>AiSearch</code> logger sets
+  <code>propagate=False</code>; the autouse <code>_propagate_AiSearch_logs</code> fixture in
   <code>conftest.py</code> re-enables propagation so <code>caplog</code> can capture warnings. Keep
   that fixture if you add log-assertion tests.</li>
 </ul>

@@ -1,8 +1,8 @@
-# SearchaaS Codebase Analysis
+# AiSearch Codebase Analysis
 
 ## Project Overview
 
-**SearchaaS** is a MongoDB Atlas-backed retrieval platform built around the **Factory pattern**. It's a Phase 1 implementation that provides a production-ready retrieval system with multiple search strategies and intelligent query planning.
+**AiSearch** is a MongoDB Atlas-backed retrieval platform built around the **Factory pattern**. It's a Phase 1 implementation that provides a production-ready retrieval system with multiple search strategies and intelligent query planning.
 
 **Key Features:**
 - Multi-strategy retrieval (Vector / Full-text / Hybrid / Graph / Parent-doc)
@@ -19,7 +19,7 @@
 ### Root Directory
 ```
 AI-Search/
-├── searchaas/                    # Main Python backend package
+├── AiSearch/                    # Main Python backend package
 ├── requirements.txt              # Python dependencies
 ├── README.md                     # Project documentation
 ├── Instructions.md               # Detailed architecture guide
@@ -27,12 +27,12 @@ AI-Search/
 └── venv/                        # Python virtual environment
 ```
 
-### Python Backend Structure (`searchaas/`)
+### Python Backend Structure (`AiSearch/`)
 ```
-searchaas/
+AiSearch/
 ├── config/                      # YAML config + loader (single source of truth)
-│   ├── loader.py               # Load & parse searchaas.yaml
-│   └── searchaas.yaml          # Configuration file
+│   ├── loader.py               # Load & parse AiSearch.yaml
+│   └── AiSearch.yaml          # Configuration file
 ├── infrastructure/              # AtlasFactory for MongoDB connectivity
 │   └── factory.py              # MongoDB client management
 ├── domain/                      # Pydantic models
@@ -157,7 +157,7 @@ The main application uses a **2-column grid layout**:
 #### Key Components
 
 ##### 1. **Header.tsx**
-- Displays project title: "SearchaaS — Retrieval Tester"
+- Displays project title: "AiSearch — Retrieval Tester"
 - Shows MongoDB Atlas info & current backend (FastAPI or FastMCP)
 - Minimal, informational component
 
@@ -166,7 +166,7 @@ The main application uses a **2-column grid layout**:
 - YAML configuration editor with tabs for different config sections
 - Live validation of required `atlas.*` fields per retrieval strategy
 - Visual indicators (chips) for missing required fields
-- Download `searchaas.yaml` functionality
+- Download `AiSearch.yaml` functionality
 
 **Tabs:**
 - **Atlas:** Connection URI, database, collection, indices, embedding configuration
@@ -526,7 +526,7 @@ Display Results:
 ### Configuration Management
 1. **Live Editing:** ConfigPane allows editing all config sections with live YAML preview
 2. **Required Fields:** Dynamically validated per strategy
-3. **YAML Export:** Download current state as `searchaas.yaml`
+3. **YAML Export:** Download current state as `AiSearch.yaml`
 4. **Provider Selection:** Dropdown for embeddings & LLM providers with nested config
 
 ### Retrieval Strategies

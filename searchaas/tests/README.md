@@ -1,4 +1,4 @@
-# SearchaaS Test Suite
+# AiSearch Test Suite
 
 Tests for the metadata-filter allowlist fix (branch `fix/llm-filter-allowlist`),
 which stops the Query Understanding LLM from sending invented filter fields
@@ -24,20 +24,20 @@ own env via `monkeypatch`).
 ## Running
 
 ```bash
-# Run everything (uses pytest.ini -> testpaths = searchaas/tests)
+# Run everything (uses pytest.ini -> testpaths = AiSearch/tests)
 pytest
 
 # Equivalent explicit form
-python3 -m pytest searchaas/tests/
+python3 -m pytest AiSearch/tests/
 
 # Verbose: list every test name
 pytest -v
 
 # Run a single file
-pytest searchaas/tests/test_retriever_filter_allowlist.py
+pytest AiSearch/tests/test_retriever_filter_allowlist.py
 
 # Run a single test
-pytest searchaas/tests/test_query_understanding_filters.py::test_aws03_repro_company_filter_is_dropped
+pytest AiSearch/tests/test_query_understanding_filters.py::test_aws03_repro_company_filter_is_dropped
 
 # Filter by keyword
 pytest -k "aws03 or allowlist"
@@ -54,7 +54,7 @@ All commands are run from the **repo root**
 
 | File | Focus |
 |---|---|
-| `test_filtering.py` | `sanitize_filters()` + `AtlasConfig.filter_fields` / `search_filter_fields` derivation from the index definitions in `searchaas.yaml` |
+| `test_filtering.py` | `sanitize_filters()` + `AtlasConfig.filter_fields` / `search_filter_fields` derivation from the index definitions in `AiSearch.yaml` |
 | `test_query_understanding_filters.py` | `QueryUnderstandingLayer` strips hallucinated filters and injects the allowed-fields constraint into the LLM prompt |
 | `test_retriever_filter_allowlist.py` | `RetrieverFactory.create()` choke point — no invented `pre_filter` reaches `$vectorSearch`; allowlisted fields pass through; per-strategy allowlists |
 | `conftest.py` | Shared fixtures, fakes (`FakeLLM`, `FakeVectorStore`), and the prompt subset |
@@ -82,9 +82,9 @@ fake LLM will hallucinate for that query.
 ```
 collected 32 items
 
-searchaas/tests/test_filtering.py ...............                        [ 46%]
-searchaas/tests/test_query_understanding_filters.py .......              [ 68%]
-searchaas/tests/test_retriever_filter_allowlist.py ..........            [100%]
+AiSearch/tests/test_filtering.py ...............                        [ 46%]
+AiSearch/tests/test_query_understanding_filters.py .......              [ 68%]
+AiSearch/tests/test_retriever_filter_allowlist.py ..........            [100%]
 
 ============================== 32 passed in 0.22s ==============================
 ```
@@ -93,19 +93,19 @@ searchaas/tests/test_retriever_filter_allowlist.py ..........            [100%]
 
 ```bash
 pip install pytest-cov
-pytest --cov=searchaas.filtering \
-       --cov=searchaas.config.loader \
-       --cov=searchaas.query_understanding.layer \
-       --cov=searchaas.retrieval.factory \
+pytest --cov=AiSearch.filtering \
+       --cov=AiSearch.config.loader \
+       --cov=AiSearch.query_understanding.layer \
+       --cov=AiSearch.retrieval.factory \
        --cov-report=term-missing
 ```
 
 ## Troubleshooting
 
-- **`ModuleNotFoundError: searchaas`** — run from the repo root, not from
-  inside `searchaas/`. `conftest.py` also inserts the repo root onto
+- **`ModuleNotFoundError: AiSearch`** — run from the repo root, not from
+  inside `AiSearch/`. `conftest.py` also inserts the repo root onto
   `sys.path` as a fallback.
-- **`caplog` assertions empty** — the `searchaas` logger sets
-  `propagate=False`; the autouse `_propagate_searchaas_logs` fixture in
+- **`caplog` assertions empty** — the `AiSearch` logger sets
+  `propagate=False`; the autouse `_propagate_AiSearch_logs` fixture in
   `conftest.py` re-enables propagation so `caplog` can capture warnings. Keep
   that fixture if you add log-assertion tests.

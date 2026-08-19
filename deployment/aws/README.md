@@ -1,6 +1,6 @@
 # AWS Deployment
 
-Deploy SearchaaS on AWS. Three independent pieces:
+Deploy AiSearch on AWS. Three independent pieces:
 
 | # | What                         | Where it runs                          | Script                                | Default? |
 | - | ---------------------------- | -------------------------------------- | ------------------------------------- | -------- |
@@ -53,8 +53,8 @@ export ATLAS_DB='your_database_name'
 # 2. Deploy the UI to your existing S3 bucket, pointing at those URLs.
 ./deployment/aws/s3-ui/deploy.sh \
   --bucket my-existing-ui-bucket \
-  --api-url "https://searchaas-fastapi.ecs.${AWS_REGION}.on.aws" \
-  --mcp-url "https://searchaas-fastmcp.ecs.${AWS_REGION}.on.aws/mcp"
+  --api-url "https://AiSearch-fastapi.ecs.${AWS_REGION}.on.aws" \
+  --mcp-url "https://AiSearch-fastmcp.ecs.${AWS_REGION}.on.aws/mcp"
 ```
 
 ### Optional: FastMCP on Bedrock AgentCore instead of / in addition to ECS

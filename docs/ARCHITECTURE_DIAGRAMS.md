@@ -1,11 +1,11 @@
-# SearchaaS Architecture Diagrams
+# AiSearch Architecture Diagrams
 
 ## 1. Application Layout (UI Structure)
 
 ```
 ┌─────────────────────────────────────────────────────────────────────┐
 │                          Header                                      │
-│          SearchaaS — Retrieval Tester  |  Backend: FastAPI (REST)  │
+│          AiSearch — Retrieval Tester  |  Backend: FastAPI (REST)  │
 ├─────────────────────┬─────────────────────────────────────────────────┤
 │                     │                                                 │
 │   ConfigPane        │                  Main Area                      │
@@ -115,7 +115,7 @@ App
 └──────────────────────────────────────────────────────────────────┘
                       ↓ HTTP/SSE
 ┌──────────────────────────────────────────────────────────────────┐
-│                   Python Backend (searchaas/)                    │
+│                   Python Backend (AiSearch/)                    │
 │                                                                  │
 │  FastAPI (api/app.py)              FastMCP (mcp_server/server)  │
 │  Routes:                           Tools:                        │
@@ -234,7 +234,7 @@ Query Input
 
 ```
 ┌─────────────────────────────────────┐
-│     searchaas.yaml (YAML file)      │
+│     AiSearch.yaml (YAML file)      │
 │                                     │
 │  atlas:                             │
 │    uri: mongodb+srv://...           │

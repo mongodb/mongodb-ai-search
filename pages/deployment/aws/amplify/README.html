@@ -3,19 +3,19 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Deploy the Employee Support Copilot on AWS Amplify Hosting · SearchaaS Docs</title>
+<title>Deploy the Employee Support Copilot on AWS Amplify Hosting · AiSearch Docs</title>
 <link rel="stylesheet" href="../../../../pages/assets/style.css">
 <link rel="stylesheet" href="../../../../pages/assets/pygments.css">
 </head>
 <body>
 <header class="topbar">
-  <a class="brand" href="../../../../index.html">SearchaaS Docs</a>
+  <a class="brand" href="../../../../index.html">AiSearch Docs</a>
   <a class="back" href="../../../../index.html">← All docs</a>
 </header>
 <main class="content">
 <h1 id="deploy-the-employee-support-copilot-on-aws-amplify-hosting">Deploy the Employee Support Copilot on AWS Amplify Hosting</h1>
 <p>Deploys <a href="https://github.com/mongodb/mongodb-enterprise-search/blob/main/agents/employee-support-copilot"><code>agents/employee-support-copilot</code></a>
-— a Next.js 14 (App Router) chat UI whose BFF calls SearchaaS — to Amplify
+— a Next.js 14 (App Router) chat UI whose BFF calls AiSearch — to Amplify
 Hosting with server-side rendering.</p>
 <table>
 <thead>
@@ -39,7 +39,7 @@ Hosting with server-side rendering.</p>
 </tr>
 <tr>
 <td>Runtime env var</td>
-<td><code>SEARCHAAS_BASE_URL</code> → the SearchaaS FastAPI endpoint on ECS</td>
+<td><code>AISEARCH_BASE_URL</code> → the AiSearch FastAPI endpoint on ECS</td>
 </tr>
 </tbody>
 </table>
@@ -61,7 +61,7 @@ Hosting with server-side rendering.</p>
 <td>https://main.d37bm88drk3hu9.amplifyapp.com</td>
 </tr>
 <tr>
-<td>SearchaaS backend</td>
+<td>AiSearch backend</td>
 <td><code>https://se-10bba725de864de489a8d0390d2c325a.ecs.us-east-1.on.aws</code></td>
 </tr>
 </tbody>
@@ -94,7 +94,7 @@ not a deployment fault — see <a href="#retrieval-returns-no-results">Retrieval
 <h2 id="why-this-must-be-git-connected">Why this must be Git-connected</h2>
 <p>The app is not a static site. <a href="https://github.com/mongodb/mongodb-enterprise-search/blob/main/agents/employee-support-copilot/src/app/api/chat/route.ts"><code>src/app/api/chat/route.ts</code></a>
 is a server route (<code>export const runtime = "nodejs"</code>) that classifies the query
-and calls SearchaaS server-side, so it needs a Node runtime at request time.
+and calls AiSearch server-side, so it needs a Node runtime at request time.
 <code>next build</code> confirms it:</p>
 <div class="highlight"><pre><span></span><code>Route (app)                    Size     First Load JS
 ├ ƒ /api/chat                  0 B      0 B          ← ƒ = server-rendered on demand
@@ -140,10 +140,10 @@ create the webhook. If you cannot meet that, use the console flow below —
 it installs the Amplify GitHub App instead of using a token.</p>
 </blockquote>
 </li>
-<li><strong>A running SearchaaS FastAPI service.</strong> Get its URL from the ECS deployment:
+<li><strong>A running AiSearch FastAPI service.</strong> Get its URL from the ECS deployment:
    <code>bash
    aws ecs describe-express-gateway-service \
-     --service-arn arn:aws:ecs:us-east-1:&lt;ACCOUNT_ID&gt;:service/default/searchaas-fastapi \
+     --service-arn arn:aws:ecs:us-east-1:&lt;ACCOUNT_ID&gt;:service/default/AiSearch-fastapi \
      --query 'service.activeConfigurations[0].ingressPaths[0].endpoint' --output text</code>
    See <a href="../ecs/README.html"><code>../ecs/README.md</code></a>.</li>
 </ol>
@@ -151,18 +151,18 @@ it installs the Amplify GitHub App instead of using a token.</p>
 <h2 id="option-a-scripted-recommended">Option A — scripted (recommended)</h2>
 <div class="highlight"><pre><span></span><code><span class="nb">export</span><span class="w"> </span><span class="nv">AWS_PROFILE</span><span class="o">=</span>anuj-ps
 <span class="nb">export</span><span class="w"> </span><span class="nv">GITHUB_ACCESS_TOKEN</span><span class="o">=</span><span class="s1">&#39;ghp_...&#39;</span>
-<span class="nb">export</span><span class="w"> </span><span class="nv">SEARCHAAS_BASE_URL</span><span class="o">=</span><span class="s1">&#39;https://se-xxxxxxxx.ecs.us-east-1.on.aws&#39;</span>
+<span class="nb">export</span><span class="w"> </span><span class="nv">AISEARCH_BASE_URL</span><span class="o">=</span><span class="s1">&#39;https://se-xxxxxxxx.ecs.us-east-1.on.aws&#39;</span>
 
 ./deployment/aws/amplify/deploy.sh
 </code></pre></div>
 
-<p><code>SEARCHAAS_BASE_URL</code> falls back to the value in the app's <code>.env.local</code> if unset.</p>
+<p><code>AISEARCH_BASE_URL</code> falls back to the value in the app's <code>.env.local</code> if unset.</p>
 <p>What it does (idempotent — safe to re-run):</p>
 <ol>
 <li>Creates the Amplify app with <code>--platform WEB_COMPUTE</code>, connected to the repo
    via <code>--access-token</code>, with <code>amplify.yml</code> applied as the build spec.</li>
-<li>Sets app-level environment variables — <code>SEARCHAAS_BASE_URL</code>,
-   <code>SEARCHAAS_API_KEY</code>, and <code>AMPLIFY_MONOREPO_APP_ROOT</code>.</li>
+<li>Sets app-level environment variables — <code>AISEARCH_BASE_URL</code>,
+   <code>AISEARCH_API_KEY</code>, and <code>AMPLIFY_MONOREPO_APP_ROOT</code>.</li>
 <li>Creates the <code>main</code> branch with <code>--framework 'Next.js - SSR'</code> and auto-build on.</li>
 <li>Runs <code>start-job --job-type RELEASE</code> and polls until it settles, dumping the
    per-step log URLs if it fails.</li>
@@ -188,12 +188,12 @@ it installs the Amplify GitHub App instead of using a token.</p>
 </thead>
 <tbody>
 <tr>
-<td><code>SEARCHAAS_BASE_URL</code></td>
+<td><code>AISEARCH_BASE_URL</code></td>
 <td><code>https://se-xxxxxxxx.ecs.us-east-1.on.aws</code></td>
 </tr>
 <tr>
-<td><code>SEARCHAAS_API_KEY</code></td>
-<td><em>(blank unless SearchaaS is behind bearer auth)</em></td>
+<td><code>AISEARCH_API_KEY</code></td>
+<td><em>(blank unless AiSearch is behind bearer auth)</em></td>
 </tr>
 <tr>
 <td><code>AMPLIFY_MONOREPO_APP_ROOT</code></td>
@@ -228,18 +228,18 @@ compute from it. Setting <code>output: "standalone"</code> or <code>output: "exp
 that layout and breaks the adapter. The file carries a comment to this effect.</p>
 <h3 id="cors-is-not-involved">CORS is not involved</h3>
 <p>The browser only ever calls the Amplify origin. <code>/api/chat</code> runs server-side and
-calls SearchaaS from Amplify's compute, so SearchaaS never sees a browser
-<code>Origin</code> header for these requests and <code>SEARCHAAS_CORS_ORIGINS</code> does not need
+calls AiSearch from Amplify's compute, so AiSearch never sees a browser
+<code>Origin</code> header for these requests and <code>AISEARCH_CORS_ORIGINS</code> does not need
 the Amplify domain. (It would only matter if a client component started calling
-SearchaaS directly.)</p>
+AiSearch directly.)</p>
 <h3 id="the-collection-registry-is-build-time">The collection registry is build-time</h3>
 <p><code>src/lib/collections.ts</code> hardcodes the Atlas collections (<code>IT_helpdesk</code>,
-<code>employee_support</code>) and their index names, and the BFF passes them to SearchaaS
+<code>employee_support</code>) and their index names, and the BFF passes them to AiSearch
 as per-request <code>atlas</code> overrides. Changing a collection or index name means
 editing that file and redeploying — it is not an environment variable.</p>
 <p>Note the BFF overrides <code>collection</code>, <code>vector_index</code>, <code>search_index</code>, <code>text_key</code>,
 and <code>embedding_key</code> — but <strong>not <code>database</code></strong>. Queries therefore land in whatever
-database the SearchaaS service itself is configured with (<code>ATLAS_DB</code>). Both must
+database the AiSearch service itself is configured with (<code>ATLAS_DB</code>). Both must
 line up.</p>
 <h3 id="retrieval-returns-no-results">Retrieval returns no results</h3>
 <p>If the UI answers "I couldn't find a specific answer…" with zero citations while
@@ -260,7 +260,7 @@ employee_support  docs=0   search_indexes=[(&#39;employee_support_vector_index&#
    Atlas Search indexes, or point <code>searchIndex</code> at one that exists.</li>
 </ol>
 <p>Confirm the backend independently of the UI:</p>
-<div class="highlight"><pre><span></span><code>curl<span class="w"> </span>-sS<span class="w"> </span>-X<span class="w"> </span>POST<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$SEARCHAAS_BASE_URL</span><span class="s2">/retrieve&quot;</span><span class="w"> </span>-H<span class="w"> </span><span class="s1">&#39;content-type: application/json&#39;</span><span class="w"> </span>-d<span class="w"> </span><span class="s1">&#39;{</span>
+<div class="highlight"><pre><span></span><code>curl<span class="w"> </span>-sS<span class="w"> </span>-X<span class="w"> </span>POST<span class="w"> </span><span class="s2">&quot;</span><span class="nv">$AISEARCH_BASE_URL</span><span class="s2">/retrieve&quot;</span><span class="w"> </span>-H<span class="w"> </span><span class="s1">&#39;content-type: application/json&#39;</span><span class="w"> </span>-d<span class="w"> </span><span class="s1">&#39;{</span>
 <span class="s1">  &quot;query&quot;:&quot;VPN is not connecting&quot;,&quot;top_k&quot;:8,</span>
 <span class="s1">  &quot;atlas&quot;:{&quot;collection&quot;:&quot;IT_helpdesk&quot;,&quot;vector_index&quot;:&quot;it_helpdesk_vector_index&quot;,</span>
 <span class="s1">           &quot;search_index&quot;:&quot;it_helpdesk_search_index&quot;,&quot;text_key&quot;:&quot;text&quot;,&quot;embedding_key&quot;:&quot;embedding&quot;},</span>

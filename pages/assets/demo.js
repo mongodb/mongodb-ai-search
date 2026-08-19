@@ -1,9 +1,9 @@
-/* SearchaaS Connection Playground — interactive agent ↔ backend demo.
+/* AiSearch Connection Playground — interactive agent ↔ backend demo.
  *
  * Faithfully mirrors the real request path:
  *   agents/employee-support-copilot/src/lib/classifier.ts      (domain routing)
- *   agents/employee-support-copilot/src/lib/searchaas-client.ts (payload + wire)
- *   searchaas/api/app.py                                        (REST surface)
+ *   agents/employee-support-copilot/src/lib/AiSearch-client.ts (payload + wire)
+ *   AiSearch/api/app.py                                        (REST surface)
  */
 (function () {
   "use strict";
@@ -86,8 +86,8 @@
   var KEYWORD_WEIGHT = 1;
 
   /* ════════════════════════════════════════════════════════════════════════
-     2. Deployed environments — where the agent runs + how it reaches SearchaaS
-        (mirrors the transports in searchaas-client.ts and the deployment READMEs)
+     2. Deployed environments — where the agent runs + how it reaches AiSearch
+        (mirrors the transports in AiSearch-client.ts and the deployment READMEs)
      ════════════════════════════════════════════════════════════════════════ */
   var ENVS = {
     local: {
@@ -96,7 +96,7 @@
       backend: "FastAPI · http://localhost:8000",
       method: "POST",
       url: "http://localhost:8000/retrieve",
-      auth: ["Content-Type: application/json", "# optional: Authorization: Bearer $SEARCHAAS_API_KEY"],
+      auth: ["Content-Type: application/json", "# optional: Authorization: Bearer $AISEARCH_API_KEY"],
       envelope: "direct",
       hopSub: "POST /retrieve",
       docs: [
@@ -115,31 +115,31 @@
       hopSub: "POST :query · Agent Engine envelope",
       docs: [
         ["Copilot on Cloud Run", "deployment/google/agents/README.html"],
-        ["SearchaaS on Agent Engine", "deployment/google/agent_runtime/README.html"],
-        ["SearchaaS on Cloud Run", "deployment/google/cloud_run/README.html"],
+        ["AiSearch on Agent Engine", "deployment/google/agent_runtime/README.html"],
+        ["AiSearch on Cloud Run", "deployment/google/cloud_run/README.html"],
       ],
     },
     aws: {
       label: "AWS",
       agentHost: "Amplify Hosting (SSR) · copilot",
-      backend: "ECS Express · searchaas FastAPI service",
+      backend: "ECS Express · AiSearch FastAPI service",
       method: "POST",
-      url: "https://searchaas-api.us-east-1.ecs.aws.dev/retrieve",
-      auth: ["Content-Type: application/json", "Authorization: Bearer $SEARCHAAS_API_KEY  # Secrets Manager"],
+      url: "https://AiSearch-api.us-east-1.ecs.aws.dev/retrieve",
+      auth: ["Content-Type: application/json", "Authorization: Bearer $AISEARCH_API_KEY  # Secrets Manager"],
       envelope: "direct",
       hopSub: "POST /retrieve · bearer key",
       docs: [
         ["Copilot on Amplify", "deployment/aws/amplify/README.html"],
-        ["SearchaaS on ECS Express", "deployment/aws/ecs/README.html"],
+        ["AiSearch on ECS Express", "deployment/aws/ecs/README.html"],
       ],
     },
     azure: {
       label: "Azure",
       agentHost: "Container Apps · copilot",
-      backend: "Container Apps · searchaas-api",
+      backend: "Container Apps · AiSearch-api",
       method: "POST",
-      url: "https://searchaas-api.wittymoss-1234.eastus.azurecontainerapps.io/retrieve",
-      auth: ["Content-Type: application/json", "Authorization: Bearer $SEARCHAAS_API_KEY  # Key Vault"],
+      url: "https://AiSearch-api.wittymoss-1234.eastus.azurecontainerapps.io/retrieve",
+      auth: ["Content-Type: application/json", "Authorization: Bearer $AISEARCH_API_KEY  # Key Vault"],
       envelope: "direct",
       hopSub: "POST /retrieve · bearer key",
       docs: [
@@ -149,7 +149,7 @@
   };
 
   /* ════════════════════════════════════════════════════════════════════════
-     3. Canned SearchaaS responses (modelled on real /retrieve replies)
+     3. Canned AiSearch responses (modelled on real /retrieve replies)
      ════════════════════════════════════════════════════════════════════════ */
   var SCENARIOS = {
     pto: {
@@ -163,7 +163,7 @@
         "up to a 40-hour cap; anything above that expires on Dec 31.",
       cites: ["Employee Handbook · p.14", "Leave & Time-Off Policy", "Benefits FAQ"],
       pipeline: "db.employee_support.aggregate([\n  { $vectorSearch: { index: \"employee_support_vector_index\", numCandidates: 150, … } },\n  { $search: { index: \"employee_support_search_index\", … } },\n  { $rankFusion: { input: { pipelines: { vector: …, fulltext: … } } } }\n])",
-      timings: { classificationMs: 2, searchaasMs: 412, mongoMs: 187 },
+      timings: { classificationMs: 2, AiSearchMs: 412, mongoMs: 187 },
     },
     vpn: {
       q: "My VPN keeps disconnecting on my MacBook",
@@ -176,7 +176,7 @@
         "the tunnel protocol from UDP to TCP in the VPN profile.",
       cites: ["VPN Troubleshooting Guide", "macOS Known Issues", "KB-2214"],
       pipeline: "db.IT_helpdesk.aggregate([\n  { $vectorSearch: {\n      index: \"it_helpdesk_vector_index\",\n      path: \"embedding\", numCandidates: 150, limit: 8 } }\n])",
-      timings: { classificationMs: 1, searchaasMs: 358, mongoMs: 164 },
+      timings: { classificationMs: 1, AiSearchMs: 358, mongoMs: 164 },
     },
     payroll: {
       q: "How do I update my direct deposit?",
@@ -189,7 +189,7 @@
         "a micro-deposit verification is required for new accounts.",
       cites: ["Payroll & Compensation Policy", "Workday How-To · p.3"],
       pipeline: "db.employee_support.aggregate([\n  { $search: { index: \"employee_support_search_index\",\n      text: { query: \"update direct deposit\", path: \"text\" } } },\n  { $limit: 8 }\n])",
-      timings: { classificationMs: 2, searchaasMs: 296, mongoMs: 121 },
+      timings: { classificationMs: 2, AiSearchMs: 296, mongoMs: 121 },
     },
     mfa: {
       q: "How do I set up MFA on a new phone?",
@@ -202,7 +202,7 @@
         "must be re-issued by the IT Service Desk.",
       cites: ["MFA Setup Guide", "Okta End-User FAQ", "KB-1042"],
       pipeline: "db.IT_helpdesk.aggregate([\n  { $vectorSearch: { index: \"it_helpdesk_vector_index\", … } },\n  { $search: { index: \"it_helpdesk_search_index\", … } },\n  { $rankFusion: … }\n])",
-      timings: { classificationMs: 2, searchaasMs: 377, mongoMs: 172 },
+      timings: { classificationMs: 2, AiSearchMs: 377, mongoMs: 172 },
     },
     /* Ambiguous — both domains score equally → BFF fans out to both collections. */
     dual: {
@@ -219,7 +219,7 @@
         IT_helpdesk: { strategy: "hybrid", strategyLabel: "hybrid · $rankFusion", ms: 401, mongoMs: 178 },
         employee_support: { strategy: "fulltext", strategyLabel: "fulltext · $search", ms: 342, mongoMs: 133 },
       },
-      timings: { classificationMs: 2, searchaasMs: 401, mongoMs: 178 },
+      timings: { classificationMs: 2, AiSearchMs: 401, mongoMs: 178 },
     },
     /* Neutral dual answer for free-text queries that score low on both domains. */
     dualGeneric: {
@@ -236,17 +236,17 @@
         IT_helpdesk: { strategy: "hybrid", strategyLabel: "hybrid · $rankFusion", ms: 388, mongoMs: 171 },
         employee_support: { strategy: "hybrid", strategyLabel: "hybrid · $rankFusion", ms: 356, mongoMs: 158 },
       },
-      timings: { classificationMs: 2, searchaasMs: 388, mongoMs: 171 },
+      timings: { classificationMs: 2, AiSearchMs: 388, mongoMs: 171 },
     },
     /* Fallback for free-text questions with no canned answer. */
     generic: {
       answer:
-        "I routed your question through SearchaaS and grounded the answer in the " +
+        "I routed your question through AiSearch and grounded the answer in the " +
         "<b>{collection}</b> collection. In a live deployment the retrieved chunks are " +
         "assembled here with citation cards — try one of the suggested questions to see " +
         "a full grounded answer.",
       pipeline: "db.{collection}.aggregate([\n  { $vectorSearch: { index: \"{vectorIndex}\", numCandidates: 150, … } }\n])",
-      timings: { classificationMs: 2, searchaasMs: 334, mongoMs: 149 },
+      timings: { classificationMs: 2, AiSearchMs: 334, mongoMs: 149 },
     },
   };
 
@@ -296,7 +296,7 @@
   }
 
   /* ════════════════════════════════════════════════════════════════════════
-     5. Payload + wire — port of buildPayload() / callSearchaaS()
+     5. Payload + wire — port of buildPayload() / callAiSearch()
      ════════════════════════════════════════════════════════════════════════ */
   function buildPayload(query, col, bias, topK) {
     var weights;
@@ -377,8 +377,8 @@
   var HOPS = [
     { id: "ui",       icon: "💬", title: "Browser → Agent BFF",   sub: "POST /api/chat" },
     { id: "classify", icon: "🧭", title: "Domain classifier",     sub: "classifier.ts · < 1 ms" },
-    { id: "wire",     icon: "🔌", title: "BFF → SearchaaS",       sub: "POST /retrieve" },
-    { id: "core",     icon: "⚙️", title: "SearchaaS pipeline",    sub: "plan → retrieve" },
+    { id: "wire",     icon: "🔌", title: "BFF → AiSearch",       sub: "POST /retrieve" },
+    { id: "core",     icon: "⚙️", title: "AiSearch pipeline",    sub: "plan → retrieve" },
     { id: "atlas",    icon: "🍃", title: "MongoDB Atlas",         sub: "aggregation pipeline" },
     { id: "resp",     icon: "✨", title: "Grounded response",     sub: "answer + citations" },
   ];
@@ -464,7 +464,7 @@
 
   /* ── Inspector ─────────────────────────────────────────────────────────── */
   var inspectorTab = "request";
-  var inspectorData = { request: "// send a question to see the exact wire payload", response: "// the SearchaaS /retrieve response appears here" };
+  var inspectorData = { request: "// send a question to see the exact wire payload", response: "// the AiSearch /retrieve response appears here" };
 
   function renderInspector() {
     var content = inspectorData[inspectorTab];
@@ -495,7 +495,7 @@
           t: "1 · Browser → Agent BFF",
           d: "The Next.js chat UI posts <code>{ query, topK }</code> to the BFF route " +
              "<code>POST /api/chat</code> on the agent host — <b>" + env.agentHost + "</b>. " +
-             "The browser never talks to SearchaaS or MongoDB Atlas directly; the BFF is the only egress.",
+             "The browser never talks to AiSearch or MongoDB Atlas directly; the BFF is the only egress.",
           l: linkList([["Employee Support Copilot", "agents/employee-support-copilot/README.html"]].concat(env.docs.slice(0, 1))),
         };
       case "classify":
@@ -509,19 +509,19 @@
         };
       case "wire":
         return {
-          t: "3 · BFF → SearchaaS — the wire call",
-          d: "<code>searchaas-client.ts → buildPayload()</code> attaches <b>per-request atlas overrides</b> " +
+          t: "3 · BFF → AiSearch — the wire call",
+          d: "<code>AiSearch-client.ts → buildPayload()</code> attaches <b>per-request atlas overrides</b> " +
              "(collection, vector/search indexes, field keys) and retrieval weights, so the backend never needs a " +
-             "restart when collections change. <code>callSearchaaS()</code> picks the transport from " +
-             "<code>SEARCHAAS_BASE_URL</code>: a plain <code>POST /retrieve</code> to FastAPI, or the Agent Engine " +
+             "restart when collections change. <code>callAiSearch()</code> picks the transport from " +
+             "<code>AISEARCH_BASE_URL</code>: a plain <code>POST /retrieve</code> to FastAPI, or the Agent Engine " +
              "<code>:query</code> envelope with an ADC-minted OAuth2 token.<br><br>" +
              "<b>" + env.label + ":</b> <code>" + esc(env.method + " " + env.url) + "</code><br>" +
              env.auth.map(function (a) { return "<code>" + esc(a) + "</code>"; }).join("<br>"),
-          l: linkList([["SearchaaS REST API", "README.html"]].concat(env.docs)),
+          l: linkList([["AiSearch REST API", "README.html"]].concat(env.docs)),
         };
       case "core":
         return {
-          t: "4 · SearchaaS factory pipeline",
+          t: "4 · AiSearch factory pipeline",
           d: "The copilot sends <code>understand: false</code> — NLU already happened in the BFF classifier, " +
              "so <b>query understanding is skipped</b>. The <b>Retrieval Planner</b> still applies Atlas-managed " +
              "guardrails from the policy store, and the <b>RetrieverFactory</b> dispatches one of six strategies " +
@@ -575,7 +575,7 @@
     });
     chatHost.textContent = env.agentHost;
     envNote.innerHTML =
-      "Agent on <b>" + env.agentHost + "</b> → SearchaaS on <b>" + env.backend + "</b> · " +
+      "Agent on <b>" + env.agentHost + "</b> → AiSearch on <b>" + env.backend + "</b> · " +
       env.docs.map(function (d) { return '<a href="' + d[1] + '">' + d[0] + " →</a>"; }).join(" ");
     hopEls.wire.sub.textContent = env.hopSub;
     if (!state.ran) resetFlow();
@@ -638,7 +638,7 @@
         { content: "…" + (sc.cites && sc.cites[1] ? sc.cites[1] : "supporting chunk") + "…", metadata: { source: (sc.cites || ["doc", "doc"])[1] || "doc" }, score: 0.79 },
       ],
       summary: null,
-      timings: { mongo_ms: sc.timings.mongoMs, planning_ms: 41, understanding_ms: null, summarize_ms: null, total_ms: sc.timings.searchaasMs },
+      timings: { mongo_ms: sc.timings.mongoMs, planning_ms: 41, understanding_ms: null, summarize_ms: null, total_ms: sc.timings.AiSearchMs },
       pipeline: "/* captured server-side */\n" + (sc.pipeline || SCENARIOS.generic.pipeline)
         .replace(/\{collection\}/g, col.collection).replace(/\{vectorIndex\}/g, col.vectorIndex),
     };
@@ -746,8 +746,8 @@
               /* Response in inspector */
               if (cls.ambiguous && sc.perDomain) {
                 inspectorData.response = {
-                  "← call 1 · IT_helpdesk": fakeResponse({ strategy: sc.perDomain.IT_helpdesk.strategy, cites: [sc.cites[0]], timings: { mongoMs: sc.perDomain.IT_helpdesk.mongoMs, searchaasMs: sc.perDomain.IT_helpdesk.ms } }, "IT_helpdesk"),
-                  "← call 2 · employee_support": fakeResponse({ strategy: sc.perDomain.employee_support.strategy, cites: [sc.cites[1]], timings: { mongoMs: sc.perDomain.employee_support.mongoMs, searchaasMs: sc.perDomain.employee_support.ms } }, "employee_support"),
+                  "← call 1 · IT_helpdesk": fakeResponse({ strategy: sc.perDomain.IT_helpdesk.strategy, cites: [sc.cites[0]], timings: { mongoMs: sc.perDomain.IT_helpdesk.mongoMs, AiSearchMs: sc.perDomain.IT_helpdesk.ms } }, "IT_helpdesk"),
+                  "← call 2 · employee_support": fakeResponse({ strategy: sc.perDomain.employee_support.strategy, cites: [sc.cites[1]], timings: { mongoMs: sc.perDomain.employee_support.mongoMs, AiSearchMs: sc.perDomain.employee_support.ms } }, "employee_support"),
                 };
               } else {
                 inspectorData.response = { "← 200 OK": fakeResponse(sc, sc.domain || cls.domain) };
@@ -758,7 +758,7 @@
               hopStart("resp", "assembler.ts → ChatResponse");
               return sleep(420).then(function () {
                 typing.remove();
-                hopDone("resp", "✓ " + (sc.timings.searchaasMs + sc.timings.classificationMs + 14) + " ms total");
+                hopDone("resp", "✓ " + (sc.timings.AiSearchMs + sc.timings.classificationMs + 14) + " ms total");
                 var badges = [];
                 if (cls.ambiguous) {
                   var pd = sc.perDomain;
@@ -770,7 +770,7 @@
                   badges.push({ text: "routed → " + COLLECTIONS[d].icon + " " + COLLECTIONS[d].label });
                   badges.push({ text: sc.strategyLabel || "vector · $vectorSearch", cls: "strategy" });
                   badges.push({ text: "conf " + Math.round(cls.confidence * 100) + "%", cls: "conf" });
-                  badges.push({ text: "mongo " + sc.timings.mongoMs + " ms · total " + sc.timings.searchaasMs + " ms", cls: "time" });
+                  badges.push({ text: "mongo " + sc.timings.mongoMs + " ms · total " + sc.timings.AiSearchMs + " ms", cls: "time" });
                 }
                 addAnswer(sc.answer, { badges: badges, cites: sc.cites });
                 state.busy = false;
@@ -802,7 +802,7 @@
       state.ran = false;
       chatBody.innerHTML = "";
       inspectorData.request = "// send a question to see the exact wire payload";
-      inspectorData.response = "// the SearchaaS /retrieve response appears here";
+      inspectorData.response = "// the AiSearch /retrieve response appears here";
       renderInspector();
       resetFlow();
       closeDrawer();

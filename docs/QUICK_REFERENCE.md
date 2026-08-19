@@ -1,8 +1,8 @@
-# SearchaaS - Quick Reference Guide
+# AiSearch - Quick Reference Guide
 
 ## Project at a Glance
 
-**SearchaaS** = MongoDB Atlas-backed retrieval platform with:
+**AiSearch** = MongoDB Atlas-backed retrieval platform with:
 - 6 retrieval strategies (vector, fulltext, hybrid, graph, parent-doc, auto)
 - Query understanding & AI-driven planning
 - Python backend (FastAPI + MCP) + React frontend
@@ -54,7 +54,7 @@ MCP: mcp_server/server.py (FastMCP)
   └─→ tools/call (JSON-RPC)
   
 Config: config/loader.py
-  └─→ searchaas.yaml
+  └─→ AiSearch.yaml
   
 Container: app/bootstrap.py
   └─→ Wires all factories
@@ -295,7 +295,7 @@ interface UnderstoodQuery {
 
 ### Setup
 ```bash
-cd searchaas/ui_react
+cd AiSearch/ui_react
 npm install
 npm run dev  # Starts on http://localhost:5173
 ```
@@ -316,10 +316,10 @@ npm run preview  # Preview production build
 ### Python Backend
 ```bash
 # FastAPI
-uvicorn searchaas.api.app:app --host 0.0.0.0 --port 8000
+uvicorn AiSearch.api.app:app --host 0.0.0.0 --port 8000
 
 # MCP
-python -m searchaas.mcp_server.server
+python -m AiSearch.mcp_server.server
 
 ```
 
@@ -352,7 +352,7 @@ ConfigPane (Sidebar)
   ↓ Select tab (Atlas, Embeddings, etc.)
   ↓ Edit fields (live validation)
   ↓ Required field indicators (chips)
-  ↓ Download searchaas.yaml button
+  ↓ Download AiSearch.yaml button
   ↓ Preview YAML (disclosure)
 ```
 

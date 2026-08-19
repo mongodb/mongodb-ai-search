@@ -1,6 +1,6 @@
 # Employee Support Copilot
 
-A production-style chat application that routes employee questions to the right MongoDB Atlas collection via SearchaaS, dynamically passing collection name and vector search configuration on every request.
+A production-style chat application that routes employee questions to the right MongoDB Atlas collection via AiSearch, dynamically passing collection name and vector search configuration on every request.
 
 ---
 
@@ -12,12 +12,12 @@ Browser (Next.js UI)
     ▼
 BFF (Next.js API Route — /api/chat)
     ├── classifier.ts   → domain + retrieval bias
-    ├── searchaas-client.ts → build payload + call SearchaaS
+    ├── AiSearch-client.ts → build payload + call AiSearch
     └── assembler.ts    → format answer + citations
          │
          │  POST /retrieve  { query, atlas: { collection, ... }, retrieval: { ... } }
          ▼
-    SearchaaS (localhost:8000)
+    AiSearch (localhost:8000)
          │
          ▼
     MongoDB Atlas
@@ -25,7 +25,7 @@ BFF (Next.js API Route — /api/chat)
          └── employee_support     collection
 ```
 
-**Key design principle:** The frontend never touches MongoDB Atlas. All retrieval flows through SearchaaS, which receives full atlas overrides (collection name, vector index, search index, field keys) on every request. Switching collections is a config change only.
+**Key design principle:** The frontend never touches MongoDB Atlas. All retrieval flows through AiSearch, which receives full atlas overrides (collection name, vector index, search index, field keys) on every request. Switching collections is a config change only.
 
 ---
 
@@ -36,7 +36,7 @@ agents/employee-support-copilot/
 ├── src/
 │   ├── lib/
 │   │   ├── collections.ts        ← Collection registry + routing signals (edit here to add collections)
-│   │   ├── searchaas-client.ts   ← SearchaaS HTTP client + payload builder
+│   │   ├── AiSearch-client.ts   ← AiSearch HTTP client + payload builder
 │   │   ├── classifier.ts         ← Keyword/pattern query classifier
 │   │   └── assembler.ts          ← Answer formatter + citation builder
 │   ├── app/
@@ -65,14 +65,14 @@ agents/employee-support-copilot/
 ### Prerequisites
 
 - Node.js 18+
-- SearchaaS running at `http://localhost:8000` (see parent repo)
+- AiSearch running at `http://localhost:8000` (see parent repo)
 - MongoDB Atlas collections: `IT_helpdesk` and `employee_support` with Atlas Search + Vector Search indexes
 
-### Run SearchaaS first
+### Run AiSearch first
 
 ```bash
 # From the repo root
-uvicorn searchaas.api.app:app --host 0.0.0.0 --port 8000 --reload
+uvicorn AiSearch.api.app:app --host 0.0.0.0 --port 8000 --reload
 ```
 
 ### Run the copilot
@@ -90,7 +90,7 @@ Open [http://localhost:3000/chat](http://localhost:3000/chat).
 
 ---
 
-## SearchaaS request shape
+## AiSearch request shape
 
 Every query is translated to:
 
@@ -160,14 +160,14 @@ legal_compliance: {
 > "VPN is not connecting on my Mac"
 
 - Classifier: `IT_helpdesk` (confidence ~90%), bias: `auto`
-- SearchaaS payload: `collection: IT_helpdesk, vector_index: it_helpdesk_vector_index`
+- AiSearch payload: `collection: IT_helpdesk, vector_index: it_helpdesk_vector_index`
 - Response: top VPN troubleshooting chunks + source citations
 
 ### Journey 2 — Clear HR question
 > "What is the leave policy for new joiners?"
 
 - Classifier: `employee_support` (confidence ~85%), bias: `fulltext-heavy`
-- SearchaaS payload: `collection: employee_support, fulltext_weight: 0.7`
+- AiSearch payload: `collection: employee_support, fulltext_weight: 0.7`
 - Response: leave policy document chunks
 
 ### Journey 3 — Ambiguous / dual-domain
@@ -183,5 +183,5 @@ legal_compliance: {
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `SEARCHAAS_BASE_URL` | `http://localhost:8000` | SearchaaS base URL |
-| `SEARCHAAS_API_KEY` | _(empty)_ | Bearer token if SearchaaS requires auth |
+| `AISEARCH_BASE_URL` | `http://localhost:8000` | AiSearch base URL |
+| `AISEARCH_API_KEY` | _(empty)_ | Bearer token if AiSearch requires auth |

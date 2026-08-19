@@ -3,19 +3,19 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>SearchaaS - Quick Reference Guide · SearchaaS Docs</title>
+<title>AiSearch - Quick Reference Guide · AiSearch Docs</title>
 <link rel="stylesheet" href="../../pages/assets/style.css">
 <link rel="stylesheet" href="../../pages/assets/pygments.css">
 </head>
 <body>
 <header class="topbar">
-  <a class="brand" href="../../index.html">SearchaaS Docs</a>
+  <a class="brand" href="../../index.html">AiSearch Docs</a>
   <a class="back" href="../../index.html">← All docs</a>
 </header>
 <main class="content">
-<h1 id="searchaas-quick-reference-guide">SearchaaS - Quick Reference Guide</h1>
+<h1 id="aisearch-quick-reference-guide">AiSearch - Quick Reference Guide</h1>
 <h2 id="project-at-a-glance">Project at a Glance</h2>
-<p><strong>SearchaaS</strong> = MongoDB Atlas-backed retrieval platform with:
+<p><strong>AiSearch</strong> = MongoDB Atlas-backed retrieval platform with:
 - 6 retrieval strategies (vector, fulltext, hybrid, graph, parent-doc, auto)
 - Query understanding &amp; AI-driven planning
 - Python backend (FastAPI + MCP) + React frontend
@@ -62,7 +62,7 @@ MCP: mcp_server/server.py (FastMCP)
   └─→ tools/call (JSON-RPC)
 
 Config: config/loader.py
-  └─→ searchaas.yaml
+  └─→ AiSearch.yaml
 
 Container: app/bootstrap.py
   └─→ Wires all factories
@@ -396,7 +396,7 @@ Panels:    .intent-panel, .summary-panel, .result, .code-block
 <hr />
 <h2 id="development-workflow">Development Workflow</h2>
 <h3 id="setup">Setup</h3>
-<div class="highlight"><pre><span></span><code><span class="nb">cd</span><span class="w"> </span>searchaas/ui_react
+<div class="highlight"><pre><span></span><code><span class="nb">cd</span><span class="w"> </span>AiSearch/ui_react
 npm<span class="w"> </span>install
 npm<span class="w"> </span>run<span class="w"> </span>dev<span class="w">  </span><span class="c1"># Starts on http://localhost:5173</span>
 </code></pre></div>
@@ -414,10 +414,10 @@ npm<span class="w"> </span>run<span class="w"> </span>preview<span class="w">  <
 
 <h3 id="python-backend_1">Python Backend</h3>
 <div class="highlight"><pre><span></span><code><span class="c1"># FastAPI</span>
-uvicorn<span class="w"> </span>searchaas.api.app:app<span class="w"> </span>--host<span class="w"> </span><span class="m">0</span>.0.0.0<span class="w"> </span>--port<span class="w"> </span><span class="m">8000</span>
+uvicorn<span class="w"> </span>AiSearch.api.app:app<span class="w"> </span>--host<span class="w"> </span><span class="m">0</span>.0.0.0<span class="w"> </span>--port<span class="w"> </span><span class="m">8000</span>
 
 <span class="c1"># MCP</span>
-python<span class="w"> </span>-m<span class="w"> </span>searchaas.mcp_server.server
+python<span class="w"> </span>-m<span class="w"> </span>AiSearch.mcp_server.server
 </code></pre></div>
 
 <hr />
@@ -445,7 +445,7 @@ python<span class="w"> </span>-m<span class="w"> </span>searchaas.mcp_server.ser
   ↓ Select tab (Atlas, Embeddings, etc.)
   ↓ Edit fields (live validation)
   ↓ Required field indicators (chips)
-  ↓ Download searchaas.yaml button
+  ↓ Download AiSearch.yaml button
   ↓ Preview YAML (disclosure)
 </code></pre></div>
 

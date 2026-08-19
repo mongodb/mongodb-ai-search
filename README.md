@@ -1,4 +1,4 @@
-# SearchaaS — Phase 1
+# AiSearch — Phase 1
 
 MongoDB Atlas-backed retrieval platform built around the **Factory pattern**.
 Phase 1 ships: query understanding (rewriting, entity & typed-fact extraction,
@@ -31,7 +31,7 @@ mongodb-ai-search/
 │   ├── aws/                      # S3 UI + ECS Express (default) + Bedrock AgentCore
 │   ├── azure/                    # Container Apps + AI Foundry (Bicep)
 │   └── google/                   # Cloud Run (combined or separate services)
-└── searchaas/                # application package
+└── AiSearch/                # application package
     ├── config/               # YAML config + loader (single source of truth; ${VAR:-default} expansion)
     ├── infrastructure/       # AtlasFactory (Mongo client / db / collections, ping, stats)
     ├── domain/               # Pydantic models (Chunk, SourceRef)
@@ -49,7 +49,7 @@ mongodb-ai-search/
     ├── facts.py              # query-fact routing → Atlas pre-filters vs in-memory post-filters
     ├── filtering.py          # filter allowlist sanitization (drops non-indexable paths)
     ├── utils.py              # shared serialization / summarization helpers
-    └── diagnose.py           # `python -m searchaas.diagnose` self-check CLI
+    └── diagnose.py           # `python -m AiSearch.diagnose` self-check CLI
 ```
 
 ## Setup
@@ -60,7 +60,7 @@ pip install -r requirements.txt
 cp .env.example .env         # fill in ATLAS_URI, provider keys, ...
 ```
 
-Edit `searchaas/config/searchaas.yaml` to pick providers/models/indexes. The
+Edit `AiSearch/config/AiSearch.yaml` to pick providers/models/indexes. The
 default build runs **server-side AutoEmbeddings** (Atlas embeds the query and
 document text internally, `embeddings.provider: auto`, `voyage-4` model) with
 **Gemini** as the planner LLM. Every value is `${VAR:-default}`-driven, so you
@@ -74,7 +74,7 @@ Two embedding modes are supported and cross-validated at startup:
 - **Mode A — client-side embeddings:** e.g. `provider: voyageai`, with
   `embedding_key`/`dimensions`/`relevance_score_fn` matching a `vector` index.
 
-The bootstrap layer (`searchaas/app/bootstrap.py`) refuses to start on a
+The bootstrap layer (`AiSearch/app/bootstrap.py`) refuses to start on a
 provider↔index-type mismatch.
 
 **Supported providers**
@@ -87,21 +87,21 @@ provider↔index-type mismatch.
 
 ```bash
 # REST API
-uvicorn searchaas.api.app:app --host 0.0.0.0 --port 8000
+uvicorn AiSearch.api.app:app --host 0.0.0.0 --port 8000
 
 # FastMCP server
-python -m searchaas.mcp_server.server
+python -m AiSearch.mcp_server.server
 
-# React UI (from searchaas/ui_react)
+# React UI (from AiSearch/ui_react)
 npm install && npm run dev
 
 # Self-check (Atlas ping, collection stats, embedder probe)
-python -m searchaas.diagnose
+python -m AiSearch.diagnose
 ```
 
 ## REST API
 
-FastAPI surface (`searchaas/api/app.py`). Every `/retrieve*` response includes
+FastAPI surface (`AiSearch/api/app.py`). Every `/retrieve*` response includes
 the chosen `strategy`, the `plan`, `results`, the `understood_query`, an LLM
 `summary`, per-stage `timings`, and the **real captured Atlas aggregation
 `pipeline`** that produced the results.
@@ -127,7 +127,7 @@ and optional per-request `atlas` / `retrieval` overrides.
 
 ## Retrieval strategies
 
-`RetrieverFactory` (`searchaas/retrieval/factory.py`) dispatches on the plan's
+`RetrieverFactory` (`AiSearch/retrieval/factory.py`) dispatches on the plan's
 strategy:
 
 | Strategy | What it does |
@@ -322,7 +322,7 @@ server is up; MCP requires `POST` with a valid JSON-RPC body. A plain
 
 ## React testing UI
 
-`searchaas/ui_react` is a Vite + TypeScript + React playground for both
+`AiSearch/ui_react` is a Vite + TypeScript + React playground for both
 backends. It shows conversation turns, per-turn results, the LLM summary, an
 understood-query intent panel (rewrite, entities, filters, chosen strategy),
 latency timings, and the real captured MongoDB aggregation pipeline. Backend
@@ -331,7 +331,7 @@ backend), falling back to `http://localhost:8000` and
 `http://localhost:8001/mcp`.
 
 ```bash
-cd searchaas/ui_react
+cd AiSearch/ui_react
 npm install
 npm run dev        # dev server
 npm run build      # production build → dist/
@@ -341,7 +341,7 @@ npm run build      # production build → dist/
 
 ```mermaid
 flowchart TD
-    YAML["searchaas.yaml"] --> AppConfig["AppConfig (loader)"]
+    YAML["AiSearch.yaml"] --> AppConfig["AppConfig (loader)"]
     AppConfig --> AtlasFactory["AtlasFactory"]
     AppConfig --> EmbeddingFactory["EmbeddingFactory"]
     AppConfig --> LLMFactory["LLMFactory"]
@@ -374,7 +374,7 @@ flowchart TD
 
 **Components**
 
-- **searchaas.yaml** — The single source of truth for providers, models,
+- **AiSearch.yaml** — The single source of truth for providers, models,
   indexes, and runtime options. Every value is `${VAR:-default}`-driven so the
   deployment can be retuned via environment variables without a rebuild.
 - **AppConfig (loader)** — Parses the YAML, expands environment variables, and
@@ -445,8 +445,8 @@ export ATLAS_DB='your_database_name'
 # 2. Deploy the UI to your existing S3 bucket, pointing at those URLs.
 ./deployment/aws/s3-ui/deploy.sh \
   --bucket my-existing-ui-bucket \
-  --api-url "https://searchaas-fastapi.ecs.${AWS_REGION}.on.aws" \
-  --mcp-url "https://searchaas-fastmcp.ecs.${AWS_REGION}.on.aws/mcp"
+  --api-url "https://AiSearch-fastapi.ecs.${AWS_REGION}.on.aws" \
+  --mcp-url "https://AiSearch-fastmcp.ecs.${AWS_REGION}.on.aws/mcp"
 
 # Optional: FastMCP on Bedrock AgentCore (requires typed confirmation)
 ./deployment/aws/agentcore/deploy.sh
@@ -462,16 +462,16 @@ provisioned by subscription-scope Bicep with a readiness gate. Full walkthrough:
 
 ```bash
 # 1. Create resource group + ACR
-az deployment sub create --name searchaas-acr --location centralindia \
+az deployment sub create --name AiSearch-acr --location centralindia \
   --template-file deployment/azure/infra/acr.bicep \
   --parameters deployment/azure/infra/main.parameters.json
-ACR_NAME=$(az deployment sub show -n searchaas-acr --query properties.outputs.acrName.value -o tsv)
+ACR_NAME=$(az deployment sub show -n AiSearch-acr --query properties.outputs.acrName.value -o tsv)
 
 # 2. Build & push all three images (server-side in ACR)
 ./deployment/azure/scripts/build-and-push.sh "$ACR_NAME" latest
 
 # 3. Deploy infra + Container Apps
-az deployment sub create --name searchaas --location centralindia \
+az deployment sub create --name AiSearch --location centralindia \
   --template-file deployment/azure/infra/main.bicep \
   --parameters deployment/azure/infra/main.parameters.json \
   --parameters atlasUri="$ATLAS_URI" voyageApiKey="$VOYAGE_API_KEY" \
@@ -515,22 +515,22 @@ chmod +x deployment/google/cloud_run/deploy.sh
 
 | Cloud Run service | URL path | Description |
 |---|---|---|
-| `searchaas-api` | `/retrieve*`, `/health`, `/docs` | FastAPI REST server |
-| `searchaas-mcp` | `/mcp` | FastMCP server |
-| `searchaas-frontend` | `/` | React SPA (pre-configured with backend URLs) |
+| `AiSearch-api` | `/retrieve*`, `/health`, `/docs` | FastAPI REST server |
+| `AiSearch-mcp` | `/mcp` | FastMCP server |
+| `AiSearch-frontend` | `/` | React SPA (pre-configured with backend URLs) |
 
 **Update frontend backend URLs after deploy:**
 
 ```bash
-gcloud run services update searchaas-frontend \
+gcloud run services update AiSearch-frontend \
   --region=<REGION> \
-  --update-env-vars="SEARCHAAS_API_URL=https://searchaas-api-xyz.run.app,SEARCHAAS_MCP_URL=https://searchaas-mcp-xyz.run.app/mcp"
+  --update-env-vars="AISEARCH_API_URL=https://AiSearch-api-xyz.run.app,AISEARCH_MCP_URL=https://AiSearch-mcp-xyz.run.app/mcp"
 ```
 
 **Update CORS allowed origins:**
 
 ```bash
-gcloud run services update searchaas-api \
+gcloud run services update AiSearch-api \
   --region=<REGION> \
-  --update-env-vars="CORS_ORIGINS=https://searchaas-frontend-xyz.run.app"
+  --update-env-vars="CORS_ORIGINS=https://AiSearch-frontend-xyz.run.app"
 ```

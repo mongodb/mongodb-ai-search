@@ -1,11 +1,11 @@
-# SearchaaS Documentation Index
+# AiSearch Documentation Index
 
 ## Overview
 
-This directory contains comprehensive documentation for the SearchaaS project - a MongoDB Atlas-backed retrieval platform with AI-driven query planning and multiple search strategies.
+This directory contains comprehensive documentation for the AiSearch project - a MongoDB Atlas-backed retrieval platform with AI-driven query planning and multiple search strategies.
 
 **Generated:** June 8, 2026  
-**Project:** SearchaaS Phase 1  
+**Project:** AiSearch Phase 1  
 **Focus:** React UI + TypeScript Frontend Analysis
 
 ---
@@ -167,7 +167,7 @@ AI-Search/
 ├── README.md                      (original project)
 ├── Instructions.md                (original architecture)
 │
-├── searchaas/                     (main project)
+├── AiSearch/                     (main project)
 │   ├── ui_react/                 (React frontend - focus of analysis)
 │   │   └── src/
 │   │       ├── App.tsx           (main component)
@@ -230,15 +230,15 @@ AI-Search/
 
 ```bash
 # Frontend (React)
-cd searchaas/ui_react
+cd AiSearch/ui_react
 npm install
 npm run dev           # Development server (localhost:5173)
 npm run build         # Production build
 npm run lint          # ESLint check
 
 # Backend (Python)
-uvicorn searchaas.api.app:app --host 0.0.0.0 --port 8000
-python -m searchaas.mcp_server.server
+uvicorn AiSearch.api.app:app --host 0.0.0.0 --port 8000
+python -m AiSearch.mcp_server.server
 ```
 
 ---
@@ -324,7 +324,7 @@ For detailed architecture questions, refer to:
 ---
 
 **Documentation Generated:** June 8, 2026  
-**Project:** SearchaaS Phase 1  
+**Project:** AiSearch Phase 1  
 **Focus Area:** React UI + TypeScript Frontend  
 **Total Documentation:** ~2,800 lines across 5 files
 

@@ -36,14 +36,14 @@ Atlas `$vectorSearch.filter` clause.
 
 The chain:
 
-1. `searchaas/query_understanding/layer.py:59-60` — the prompt asks the LLM for
+1. `AiSearch/query_understanding/layer.py:59-60` — the prompt asks the LLM for
    `metadata_filters : object of metadata field -> value filters you can confidently infer
    (geography, doc_type, department, date ranges, etc.)` with **no constraint on
    which fields actually exist**. The reproducing prompt above makes Haiku emit
    `{"company": "Amazon"}`.
-2. `searchaas/planning/engine.py:95-96` — the planner copies `uq.metadata_filters`
+2. `AiSearch/planning/engine.py:95-96` — the planner copies `uq.metadata_filters`
    into `plan.filters` unchanged.
-3. `searchaas/retrieval/factory.py:294` (`_build_hybrid`) — `plan.filters` is passed
+3. `AiSearch/retrieval/factory.py:294` (`_build_hybrid`) — `plan.filters` is passed
    as `pre_filter` to `MongoDBAtlasHybridSearchRetriever`, which embeds it in the
    `$vectorSearch.filter` clause. The vector (`factory.py:228`) and parent-doc
    (`factory.py:310`) builders do the same.
@@ -64,13 +64,13 @@ would still trigger the same error.
 ### Fix implemented
 
 The user's own Atlas index definitions are the source of truth. They are
-pasted verbatim into `searchaas/config/searchaas.yaml` under
+pasted verbatim into `AiSearch/config/AiSearch.yaml` under
 `atlas.vector_index_definition` and `atlas.search_index_definition` (Atlas UI
 → Search & Vector Search → index → JSON Editor; YAML is a superset of JSON,
 so the raw JSON works as-is). From these, the filter allowlists are derived —
 no separate field list to keep in sync:
 
-* `AtlasConfig.filter_fields` (`searchaas/config/loader.py`) — paths declared
+* `AtlasConfig.filter_fields` (`AiSearch/config/loader.py`) — paths declared
   with `{"type": "filter"}` in the vector index definition. These are the only
   paths `$vectorSearch.filter` accepts.
 * `AtlasConfig.search_filter_fields` — paths mapped in the Lucene index;
@@ -79,21 +79,21 @@ no separate field list to keep in sync:
 
 Enforcement happens at three layers:
 
-1. **Prompt constraint** (`searchaas/query_understanding/layer.py`) — the
+1. **Prompt constraint** (`AiSearch/query_understanding/layer.py`) — the
    Query Understanding prompt now tells the LLM exactly which metadata fields
    exist; with none configured it must return `{}`. Its output is additionally
    sanitized against the allowlist.
-2. **Retriever choke point** (`searchaas/retrieval/factory.py`) —
+2. **Retriever choke point** (`AiSearch/retrieval/factory.py`) —
    `RetrieverFactory.create()` reduces `plan.filters` to the allowlist for the
    chosen strategy (vector/hybrid/parent_doc use the vector-index allowlist,
    fulltext uses the Lucene one) and logs a warning for anything dropped. This
    also covers filters merged in from API callers via `req.filters`. The plan
    is mutated, so API responses report the filters that actually ran.
-3. **Startup preflight** (`searchaas/app/bootstrap.py`) — logs an error when
+3. **Startup preflight** (`AiSearch/app/bootstrap.py`) — logs an error when
    the configured definition declares filter fields the live Atlas index does
    not actually have (config/index drift).
 
-The shared sanitizer lives in `searchaas/filtering.py`. An LLM-invented filter
+The shared sanitizer lives in `AiSearch/filtering.py`. An LLM-invented filter
 now degrades to an unfiltered search with a warning instead of a 500.
 
 ### To enable real metadata filtering

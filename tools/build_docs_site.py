@@ -162,13 +162,13 @@ PAGE_TMPL = """<!DOCTYPE html>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>{title} · SearchaaS Docs</title>
+<title>{title} · AiSearch Docs</title>
 <link rel="stylesheet" href="{rel}pages/assets/style.css">
 <link rel="stylesheet" href="{rel}pages/assets/pygments.css">
 </head>
 <body>
 <header class="topbar">
-  <a class="brand" href="{rel}index.html">SearchaaS Docs</a>
+  <a class="brand" href="{rel}index.html">AiSearch Docs</a>
   <a class="back" href="{rel}index.html">← All docs</a>
 </header>
 <main class="content">
@@ -240,8 +240,8 @@ INDEX_TMPL = """<!DOCTYPE html>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>SearchaaS — One retrieval platform. Every cloud. Every agent.</title>
-<meta name="description" content="SearchaaS — MongoDB Atlas retrieval platform: architecture, agents, and deployment guides for Google Cloud, AWS, and Azure.">
+<title>AiSearch — One retrieval platform. Every cloud. Every agent.</title>
+<meta name="description" content="AiSearch — MongoDB Atlas retrieval platform: architecture, agents, and deployment guides for Google Cloud, AWS, and Azure.">
 <link rel="stylesheet" href="pages/assets/style.css">
 <link rel="stylesheet" href="pages/assets/landing.css">
 <script src="pages/assets/landing.js" defer></script>
@@ -249,7 +249,7 @@ INDEX_TMPL = """<!DOCTYPE html>
 <body>
 
 <header class="lnav">
-  <a class="logo" href="index.html"><span class="leaf">◈</span> SearchaaS</a>
+  <a class="logo" href="index.html"><span class="leaf">◈</span> AiSearch</a>
   <nav>
     <a href="#architecture">Architecture</a>
     <a href="#agents">Agents</a>
@@ -266,7 +266,7 @@ INDEX_TMPL = """<!DOCTYPE html>
     <div>
       <p class="kicker">MongoDB Atlas Retrieval Platform</p>
       <h1>One retrieval platform. <em>Every cloud. Every agent.</em></h1>
-      <p class="sub">SearchaaS turns MongoDB Atlas into an AI-planned search service —
+      <p class="sub">AiSearch turns MongoDB Atlas into an AI-planned search service —
          vector, full-text, hybrid, graph, parent-doc and metadata retrieval with query
          understanding and grounded summarization, exposed over REST and MCP on
          Google Cloud, AWS, and Azure.</p>
@@ -286,14 +286,14 @@ INDEX_TMPL = """<!DOCTYPE html>
     <!-- Live-style mock of the Employee Support Copilot agent -->
     <div class="chatdemo" aria-label="Chatbot demo">
       <div class="cd-head"><span class="dot"></span> Employee Support Copilot
-        <span class="sub">powered by SearchaaS</span></div>
+        <span class="sub">powered by AiSearch</span></div>
       <div class="cd-body" id="cd-body"></div>
       <div class="cd-suggests">
         <button type="button" data-ask="pto">How many PTO days do I get?</button>
         <button type="button" data-ask="vpn">VPN keeps disconnecting</button>
         <button type="button" data-ask="payroll">Update direct deposit</button>
       </div>
-      <div class="cd-note">Demo: the agent classifies the domain, calls SearchaaS
+      <div class="cd-note">Demo: the agent classifies the domain, calls AiSearch
         <code>/retrieve</code> with per-collection Atlas overrides, and renders a grounded answer.
         <a href="pages/demo.html" style="color:var(--mdb-forest);font-weight:700">Full interactive connection playground →</a></div>
     </div>
@@ -302,13 +302,13 @@ INDEX_TMPL = """<!DOCTYPE html>
 
 <!-- ── Clickable architecture ───────────────────────────────────────────── -->
 <section class="lsec" id="architecture">
-  <p class="kicker">How SearchaaS works</p>
+  <p class="kicker">How AiSearch works</p>
   <h2>The retrieval pipeline, end to end</h2>
   <p class="lead">Every box is clickable and jumps to the doc that covers it. A query flows
      left to right: an agent calls REST or MCP, the factory pipeline understands, plans and
      retrieves, and MongoDB Atlas does the heavy lifting.</p>
   <div class="archwrap">
-  <svg viewBox="0 0 1160 520" role="img" aria-label="SearchaaS architecture diagram">
+  <svg viewBox="0 0 1160 520" role="img" aria-label="AiSearch architecture diagram">
     <defs>
       <marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
         <path d="M0 0L10 5L0 10z" fill="#9aa4ad"/></marker>
@@ -320,7 +320,7 @@ INDEX_TMPL = """<!DOCTYPE html>
 
     <text class="achip-label" x="10" y="20">AGENTS &amp; APPS</text>
     <text class="achip-label" x="275" y="20">API SURFACES</text>
-    <text class="achip-label" x="530" y="20">SEARCHAAS CORE — FACTORY PIPELINE</text>
+    <text class="achip-label" x="530" y="20">AISEARCH CORE — FACTORY PIPELINE</text>
     <text class="achip-label" x="930" y="20">DATA &amp; MODELS</text>
 
     <!-- edges -->
@@ -432,7 +432,7 @@ INDEX_TMPL = """<!DOCTYPE html>
 <!-- ── How agents interact ──────────────────────────────────────────────── -->
 <div class="lsec-alt">
 <section class="lsec" id="agents">
-  <p class="kicker">Agents × SearchaaS</p>
+  <p class="kicker">Agents × AiSearch</p>
   <h2>How an agent answers a question</h2>
   <p class="lead">The Employee Support Copilot is the reference agent: five steps from
      user question to grounded, cited answer — each step links to its doc.</p>
@@ -446,7 +446,7 @@ INDEX_TMPL = """<!DOCTYPE html>
       <p>Keyword classifier routes to <code>IT_helpdesk</code> or <code>employee_support</code>.</p>
     </a>
     <a class="step" href="pages/README.html">
-      <span class="n">3</span><h3>Call SearchaaS</h3>
+      <span class="n">3</span><h3>Call AiSearch</h3>
       <p><code>POST /retrieve</code> with per-request <code>atlas</code> overrides — collection, indexes, weights.</p>
     </a>
     <a class="step" href="pages/docs/ARCHITECTURE_DIAGRAMS.html">
@@ -480,7 +480,7 @@ INDEX_TMPL = """<!DOCTYPE html>
         <span class="desc">Employee Support Copilot — Next.js chat + BFF</span></div>
       <div class="clayer"><span class="lbl">Agent runtime</span><span class="svc">Vertex AI Agent Engine</span>
         <span class="desc">Managed serverless agent host (Reasoning Engine)</span></div>
-      <div class="clayer"><span class="lbl">SearchaaS runtime</span><span class="svc">Cloud Run</span>
+      <div class="clayer"><span class="lbl">AiSearch runtime</span><span class="svc">Cloud Run</span>
         <span class="desc">FastAPI REST + FastMCP containers · Secret Manager</span></div>
       <div class="clayer const"><span class="lbl">Data — unchanged</span><span class="svc">MongoDB Atlas</span>
         <span class="desc">Same collections, indexes &amp; guardrails on every cloud</span></div>
@@ -499,7 +499,7 @@ INDEX_TMPL = """<!DOCTYPE html>
         <span class="desc">Copilot on Amplify Hosting · tester UI as static site</span></div>
       <div class="clayer"><span class="lbl">Agent runtime</span><span class="svc">Bedrock AgentCore</span>
         <span class="desc">AgentCore Runtime hosts the FastMCP surface</span></div>
-      <div class="clayer"><span class="lbl">SearchaaS runtime</span><span class="svc">ECS Express</span>
+      <div class="clayer"><span class="lbl">AiSearch runtime</span><span class="svc">ECS Express</span>
         <span class="desc">FastAPI REST + FastMCP services · Secrets Manager</span></div>
       <div class="clayer const"><span class="lbl">Data — unchanged</span><span class="svc">MongoDB Atlas</span>
         <span class="desc">Same collections, indexes &amp; guardrails on every cloud</span></div>
@@ -519,7 +519,7 @@ INDEX_TMPL = """<!DOCTYPE html>
         <span class="desc">Employee Support Copilot — Next.js chat + BFF</span></div>
       <div class="clayer"><span class="lbl">Agent runtime</span><span class="svc">AI Foundry</span>
         <span class="desc">Foundry agent wired to the MCP endpoint</span></div>
-      <div class="clayer"><span class="lbl">SearchaaS runtime</span><span class="svc">Container Apps</span>
+      <div class="clayer"><span class="lbl">AiSearch runtime</span><span class="svc">Container Apps</span>
         <span class="desc">FastAPI REST + FastMCP containers · Key Vault</span></div>
       <div class="clayer const"><span class="lbl">Data — unchanged</span><span class="svc">MongoDB Atlas</span>
         <span class="desc">Same collections, indexes &amp; guardrails on every cloud</span></div>
@@ -548,7 +548,7 @@ INDEX_TMPL = """<!DOCTYPE html>
 
 <footer class="lfooter">
   <div class="wrap">
-    <div><b>◈ SearchaaS</b><br>MongoDB Atlas retrieval platform — REST + MCP, on any cloud.</div>
+    <div><b>◈ AiSearch</b><br>MongoDB Atlas retrieval platform — REST + MCP, on any cloud.</div>
     <div>Generated from the repository's markdown docs by tools/build_docs_site.py</div>
   </div>
 </footer>

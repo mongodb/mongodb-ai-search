@@ -3,19 +3,19 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>SearchaaS Codebase Analysis · SearchaaS Docs</title>
+<title>AiSearch Codebase Analysis · AiSearch Docs</title>
 <link rel="stylesheet" href="../../pages/assets/style.css">
 <link rel="stylesheet" href="../../pages/assets/pygments.css">
 </head>
 <body>
 <header class="topbar">
-  <a class="brand" href="../../index.html">SearchaaS Docs</a>
+  <a class="brand" href="../../index.html">AiSearch Docs</a>
   <a class="back" href="../../index.html">← All docs</a>
 </header>
 <main class="content">
-<h1 id="searchaas-codebase-analysis">SearchaaS Codebase Analysis</h1>
+<h1 id="aisearch-codebase-analysis">AiSearch Codebase Analysis</h1>
 <h2 id="project-overview">Project Overview</h2>
-<p><strong>SearchaaS</strong> is a MongoDB Atlas-backed retrieval platform built around the <strong>Factory pattern</strong>. It's a Phase 1 implementation that provides a production-ready retrieval system with multiple search strategies and intelligent query planning.</p>
+<p><strong>AiSearch</strong> is a MongoDB Atlas-backed retrieval platform built around the <strong>Factory pattern</strong>. It's a Phase 1 implementation that provides a production-ready retrieval system with multiple search strategies and intelligent query planning.</p>
 <p><strong>Key Features:</strong>
 - Multi-strategy retrieval (Vector / Full-text / Hybrid / Graph / Parent-doc)
 - Query understanding &amp; entity extraction
@@ -27,7 +27,7 @@
 <h2 id="1-project-structure-layout">1. Project Structure &amp; Layout</h2>
 <h3 id="root-directory">Root Directory</h3>
 <div class="highlight"><pre><span></span><code>AI-Search/
-├── searchaas/                    # Main Python backend package
+├── AiSearch/                    # Main Python backend package
 ├── requirements.txt              # Python dependencies
 ├── README.md                     # Project documentation
 ├── Instructions.md               # Detailed architecture guide
@@ -35,11 +35,11 @@
 └── venv/                        # Python virtual environment
 </code></pre></div>
 
-<h3 id="python-backend-structure-searchaas">Python Backend Structure (<code>searchaas/</code>)</h3>
-<div class="highlight"><pre><span></span><code>searchaas/
+<h3 id="python-backend-structure-aisearch">Python Backend Structure (<code>AiSearch/</code>)</h3>
+<div class="highlight"><pre><span></span><code>AiSearch/
 ├── config/                      # YAML config + loader (single source of truth)
-│   ├── loader.py               # Load &amp; parse searchaas.yaml
-│   └── searchaas.yaml          # Configuration file
+│   ├── loader.py               # Load &amp; parse AiSearch.yaml
+│   └── AiSearch.yaml          # Configuration file
 ├── infrastructure/              # AtlasFactory for MongoDB connectivity
 │   └── factory.py              # MongoDB client management
 ├── domain/                      # Pydantic models
@@ -165,7 +165,7 @@
 <h4 id="key-components">Key Components</h4>
 <h5 id="1-headertsx">1. <strong>Header.tsx</strong></h5>
 <ul>
-<li>Displays project title: "SearchaaS — Retrieval Tester"</li>
+<li>Displays project title: "AiSearch — Retrieval Tester"</li>
 <li>Shows MongoDB Atlas info &amp; current backend (FastAPI or FastMCP)</li>
 <li>Minimal, informational component</li>
 </ul>
@@ -174,7 +174,7 @@
 - YAML configuration editor with tabs for different config sections
 - Live validation of required <code>atlas.*</code> fields per retrieval strategy
 - Visual indicators (chips) for missing required fields
-- Download <code>searchaas.yaml</code> functionality</p>
+- Download <code>AiSearch.yaml</code> functionality</p>
 <p><strong>Tabs:</strong>
 - <strong>Atlas:</strong> Connection URI, database, collection, indices, embedding configuration
 - <strong>Embeddings:</strong> Provider selection (Voyage AI, Gemini, OpenAI, etc.) + provider config
@@ -504,7 +504,7 @@ Display Results:
 <ol>
 <li><strong>Live Editing:</strong> ConfigPane allows editing all config sections with live YAML preview</li>
 <li><strong>Required Fields:</strong> Dynamically validated per strategy</li>
-<li><strong>YAML Export:</strong> Download current state as <code>searchaas.yaml</code></li>
+<li><strong>YAML Export:</strong> Download current state as <code>AiSearch.yaml</code></li>
 <li><strong>Provider Selection:</strong> Dropdown for embeddings &amp; LLM providers with nested config</li>
 </ol>
 <h3 id="retrieval-strategies">Retrieval Strategies</h3>
