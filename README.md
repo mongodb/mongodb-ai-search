@@ -1,5 +1,43 @@
 # AiSearch — Phase 1
 
+Modern applications contain valuable information, but making that information easy to use often requires customers to design, maintain, and tune complex search pipelines. MongoDB AI Search is designed to make that experience far simpler: customers can ask questions in natural language, while the system interprets the intent behind each request and performs the appropriate operations against MongoDB.
+
+Instead of requiring every customer to build the underlying retrieval logic themselves, AI Search provides an intelligent path from a user’s question to MongoDB data. It can analyze what the user is trying to accomplish, determine how the request should be handled, and translate that intent into the retrieval interaction needed to search MongoDB. This allows customers to focus on the experience they want to deliver rather than on the plumbing required to support it.
+
+The MongoDB AI Search demo illustrates this flow through an agent and AiSearch: a question is classified, a request is formed, AiSearch processes the retrieval, and MongoDB Atlas performs the underlying aggregation. The connection can be inspected hop by hop, helping customers understand how a natural-language request becomes an operation over their MongoDB data. The experience is exposed through REST and MCP, and the demo shows deployment options for local environments and major cloud platforms.
+
+## How customers can use it
+
+Customers can place AI Search behind an application, assistant, or agent and let users interact with MongoDB conversationally. A user asks a question using the language they already understand; AI Search analyzes the intent, selects the appropriate search and retrieval behavior, and returns a relevant answer or result without requiring the customer to hand-build a separate pipeline for every question type.
+
+This approach is especially useful when the same data must support many kinds of questions. A single application might need to handle direct lookups, semantic searches, policy questions, and ambiguous requests. AI Search can provide a consistent natural-language interface while MongoDB remains the system of record and the place where the relevant data is retrieved.
+
+## Example use cases
+
+- **Employee, IT, HR, and customer service automation:** Employees and customers can ask questions such as “How many PTO days do I have?”, “How do I set up MFA?”, “My VPN keeps disconnecting”, or “What has this customer already tried?” AiSearch can interpret each request and retrieve the relevant policies, case history, product information, troubleshooting guidance, account context, or next steps from MongoDB. It can distinguish between support issues and information requests, recognize ambiguous questions such as “What is the VPN policy?”, and help service teams respond more quickly and consistently.
+
+- **Knowledge search:** Customers can expose product documentation, service procedures, or internal knowledge through a conversational interface. Users search by meaning and intent rather than by guessing the exact keywords stored in the database.
+
+- **Agent-powered applications:** Developers can connect AI Search to an agent through REST or MCP, allowing the agent to use MongoDB retrieval as part of a broader workflow while avoiding bespoke retrieval pipelines for each new capability.
+
+- **Customer service and contact-center automation:** Support agents can ask questions such as, “What has this customer already tried?” or “Which resolution applies to this issue?” AiSearch can bring together relevant case history, product information, troubleshooting guidance, and account context to help reduce handling time and improve consistency.
+
+- **E-commerce product discovery:** Shoppers can search using natural language, for example, “Find lightweight waterproof jackets for a winter trip under $200.” AiSearch can interpret multiple constraints and retrieve products based on meaning, attributes, availability, and customer preferences.
+
+- **Financial services research and operations:** Analysts and service teams can query customer profiles, transaction context, product documentation, and internal policies using questions such as, “Why was this payment flagged?” or “Which account option fits this customer’s requirements?” Results can support investigation and assisted decision-making while MongoDB remains the operational data store.
+
+- **Healthcare and life sciences information access:** Care teams, operations staff, and researchers can search clinical, administrative, or product information using questions such as, “Which patients require follow-up this week?” or “Show the latest guidance for this procedure.” AiSearch can help users navigate complex information without requiring them to know the underlying data model.
+
+- **Fraud, risk, and compliance investigation:** Investigators can explore relationships across customers, accounts, transactions, devices, and events with questions such as, “Show activity that resembles this suspicious pattern.” AiSearch can accelerate the discovery of relevant records and supporting evidence for human review.
+
+- **Manufacturing and field-service assistance:** Technicians can ask, “What are the likely causes of this alarm on this model?” or “Which parts and service steps apply to this asset?” AiSearch can retrieve manuals, asset history, maintenance records, and service procedures in a single conversational workflow.
+
+- **Supply-chain and logistics visibility:** Operations teams can ask, “Which shipments are at risk of missing delivery this week?” or “What inventory is available near this customer?” AiSearch can help connect orders, inventory, suppliers, shipments, and operational events to support faster decisions.
+
+MongoDB AI Search therefore makes MongoDB more accessible to people and applications that think in questions rather than database operations. By handling the interpretation and retrieval path around the customer’s intent, it helps teams deliver useful, conversational experiences faster—while continuing to use MongoDB as the trusted foundation for their data.
+
+---
+
 MongoDB Atlas-backed retrieval platform built around the **Factory pattern**.
 Phase 1 ships: query understanding (rewriting, entity & typed-fact extraction,
 intent), AI-driven retrieval planning with Atlas-managed guardrails, six
