@@ -33,3 +33,5 @@ node_modules/
 out/
 dist/
 *.node
+deployment/aws/bedrock-agent/.build/
+BEDROCK_AGENTS_CLASSIC.md
