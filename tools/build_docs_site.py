@@ -24,6 +24,7 @@ PAGES_DIR = REPO_ROOT / "pages"
 DOCS: list[tuple[str, str]] = [
     # Getting started
     ("README.md", "Getting Started"),
+    ("docs/AI_SEARCH_VS_REMOTE_MCP.md", "Getting Started"),
     ("docs/Instructions.md", "Getting Started"),
     ("docs/QUICK_REFERENCE.md", "Getting Started"),
     # Architecture & internals
