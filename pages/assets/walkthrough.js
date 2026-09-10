@@ -10,68 +10,56 @@
 
   // ── Data ──────────────────────────────────────────────────────────────────
   var DRAWBACKS = {
-    retrieval: {
-      title: "It is not a retrieval or ranking layer",
-      body: "MCP brokers tool calls from an agent to MongoDB. It never defines your search indexes, hybrid ranking, relevance tuning, or the top-k grounding your LLM actually sees.",
-      impact: "If the product requirement is \u201cfind the most relevant documents\u201d, an MCP connection on its own gives you no answer quality \u2014 there is nothing to tune."
+    relevance: {
+      title: "It doesn\u2019t know which results are the good ones",
+      body: "Remote MCP can run a query and hand back rows. What it can\u2019t do is judge which of those rows actually answers the question \u2014 there\u2019s no ranking, and no way to make tomorrow\u2019s answers better than today\u2019s.",
+      impact: "Ask \u201cwhat\u2019s our refund policy?\u201d and you get back whatever the query happened to return first. When users say the answers are wrong, there\u2019s no dial to turn."
     },
-    policy: {
-      title: "The agent owns the query, not your application",
-      body: "With MCP the <b>agent</b> decides when and how to call tools. Your application cannot guarantee deterministic filters \u2014 tenant isolation, ACLs, region, product status, time range \u2014 or a ranking contract through an agent\u2019s judgment.",
-      impact: "For multi-tenant, regulated, or permission-scoped workloads this is a hard blocker: correctness depends on the model behaving."
+    control: {
+      title: "The AI decides how to search \u2014 not your application",
+      body: "The agent picks which tool to call and what to pass it. Your app can\u2019t force every single search to stay inside the right customer, the right region, or the right permission level \u2014 it can only hope the model remembers.",
+      impact: "One customer\u2019s question could surface another customer\u2019s data \u2014 not because of a bug, but because the model left out a filter."
     },
-    rag: {
-      title: "No predictable RAG contract",
-      body: "There is no built-in <code>query \u2192 retrieve \u2192 top-k grounded context \u2192 LLM</code> pipeline with latency, recall, and cost characteristics under your control.",
-      impact: "Every response varies with whichever tools the agent happened to pick, so you cannot put an SLO on relevance, latency, or spend."
+    repeatable: {
+      title: "The same question can give different answers",
+      body: "Because the agent chooses its own path each time, two identical questions can take two different routes and come back with two different results.",
+      impact: "You can\u2019t promise a response time, predict what a question costs, or write a test that keeps passing \u2014 quality drifts with the model."
     },
-    design: {
-      title: "Retrieval design is still entirely on you",
-      body: "Even when MCP exposes vector-search-related tools, you still design the indexes, filters, ranking, grounding, and evaluation strategy yourself.",
-      impact: "A tool contract is not a retrieval strategy \u2014 exposing $vectorSearch does not tell you how to chunk, embed, filter, fuse, or evaluate."
-    },
-    atlas: {
-      title: "Atlas Managed MCP is Atlas-only",
-      body: "The zero-hosting option covers Atlas-hosted deployments. Community Edition, Enterprise Advanced, or private deployments mean running and operating the self-managed MCP server yourself.",
-      impact: "Your connectivity story changes per deployment model \u2014 exactly the lock-in most platform teams are trying to avoid."
+    lockin: {
+      title: "The easy, managed version only works on Atlas",
+      body: "Atlas Managed MCP \u2014 the no-setup option MongoDB hosts for you \u2014 only covers databases running in Atlas. On Community Edition, Enterprise Advanced, or your own servers, you install and operate the MCP server yourself.",
+      impact: "How you connect changes depending on where your database happens to live."
     }
   };
 
   var GAP = [
     {
-      id: "retrieval",
-      limit: "Not a retrieval or ranking layer",
-      title: "Database-native retrieval is the product",
-      body: "AI Search gives you lexical, semantic, vector, and <b>hybrid</b> retrieval with relevance scores, ranking, and metadata \u2014 executed inside MongoDB. Six strategies ship out of the box, so \u201cwhich data is relevant\u201d has a real, tunable answer.",
-      chips: ["vector", "fulltext", "hybrid", "graph", "parent-doc", "metadata"]
+      id: "relevance",
+      limit: "Doesn\u2019t know which results are good",
+      title: "It ranks the results \u2014 and you can tune the ranking",
+      body: "AI Search scores every result and puts the best ones first. It can match on <b>keywords</b>, on <b>meaning</b>, or on <b>both at once</b>. And when answers aren\u2019t good enough, you have real dials to turn \u2014 which method to use, which fields matter, how much each one counts.",
+      chips: ["keywords", "meaning", "both combined", "scores you can tune"]
     },
     {
-      id: "policy",
-      limit: "The agent owns the query",
-      title: "Your application owns the query policy",
-      body: "Queries and aggregation pipelines are <b>application-controlled</b>. You define the query, the ranking, the filters, the grounding policy, and the response experience \u2014 tenant, region, ACL, status and time-range filters are applied <b>before</b> results ever reach the model.",
-      chips: ["tenant filters", "ACLs", "pre-filters", "deterministic"]
+      id: "control",
+      limit: "The AI decides how to search",
+      title: "Your application sets the rules \u2014 every time",
+      body: "Filters like <b>which customer</b>, <b>which region</b>, and <b>who\u2019s allowed to see this</b> are applied by your own code before anything reaches the AI. They\u2019re guarantees, not suggestions the model can skip.",
+      chips: ["always-on filters", "one customer never sees another\u2019s data"]
     },
     {
-      id: "rag",
-      limit: "No predictable RAG contract",
-      title: "A deterministic retrieval contract",
-      body: "AI Search gives you exactly one predictable path: <code>user query \u2192 search / vector / hybrid retrieval \u2192 top-k grounded context \u2192 LLM response</code>. Because the pipeline is fixed, latency, recall, throughput, and cost are measurable \u2014 and improvable.",
-      chips: ["top-k grounding", "measurable latency", "SLO-able"]
+      id: "repeatable",
+      limit: "Same question, different answers",
+      title: "Same question, same path, every time",
+      body: "Every request follows one fixed route: <code>question \u2192 search \u2192 best matches \u2192 answer</code>. Because the path never changes, you can measure it, test it, budget it, and improve it.",
+      chips: ["predictable speed", "testable", "repeatable"]
     },
     {
-      id: "design",
-      limit: "Retrieval design is on you",
-      title: "Production search behaviour, designed for you",
-      body: "Relevance, latency, filtering, ranking, recall, throughput and cost tuning are first-class concerns \u2014 with query understanding, an LLM planner that picks the strategy, Atlas guardrails, and grounded summarisation with citations. Operational data, metadata and embeddings stay <b>together in MongoDB</b>, so there is no separate vector store to sync.",
-      chips: ["query understanding", "planner", "guardrails", "citations"]
-    },
-    {
-      id: "atlas",
-      limit: "Atlas Managed MCP is Atlas-only",
-      title: "Cloud- and deployment-agnostic by design",
-      body: "AI Search runs wherever MongoDB runs \u2014 Atlas, Enterprise Advanced, Community Edition, or self-managed \u2014 and the platform deploys identically on Google Cloud, AWS, and Azure. Retrieval is application-owned query logic, so your search behaviour, indexes and guardrails travel with your data.",
-      chips: ["Atlas", "Enterprise Advanced", "Community", "self-managed"]
+      id: "lockin",
+      limit: "Managed version is Atlas-only",
+      title: "Works anywhere your data already lives",
+      body: "Atlas, Enterprise Advanced, Community Edition, or your own servers \u2014 and it deploys the same way on Google Cloud, AWS and Azure. Your search behaviour travels <b>with your data</b> instead of being tied to one host.",
+      chips: ["Atlas", "Enterprise Advanced", "Community", "any cloud"]
     }
   ];
 

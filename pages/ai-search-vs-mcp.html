@@ -108,40 +108,34 @@
   <section class="wt-panel" role="tabpanel" aria-label="Step 2: Where Remote MCP stops">
     <p class="kicker">Step 2 · the limits you need to know up front</p>
     <h2>Where Remote MCP stops</h2>
-    <p class="lead">None of these are bugs — MCP is an <b>access layer</b>, not a retrieval product.
-       But if you reach for it to solve a <b>search</b> problem, you will hit every one of them.
-       Click a card to see what it means for your application.</p>
+    <p class="lead">None of these are bugs. Remote MCP was built to <b>connect an agent to your database</b> —
+       not to run your search. But if you reach for it to solve a search problem, you'll hit all four.
+       <b>Click a card</b> to see what it means in practice.</p>
 
     <div class="wt-dbgrid">
-      <button type="button" class="wt-dbcard" data-db="retrieval" aria-expanded="false">
+      <button type="button" class="wt-dbcard" data-db="relevance" aria-expanded="false">
         <span class="ic">✕</span>
-        <span class="t">Not a retrieval or ranking layer</span>
-        <span class="d">Brokers tool calls — it doesn't define indexes, ranking, or grounding.</span>
-        <span class="more">See the impact →</span>
+        <span class="t">It doesn't know which results are good</span>
+        <span class="d">It can fetch rows. It can't tell you which one actually answers the question.</span>
+        <span class="more">See what this means →</span>
       </button>
-      <button type="button" class="wt-dbcard" data-db="policy" aria-expanded="false">
+      <button type="button" class="wt-dbcard" data-db="control" aria-expanded="false">
         <span class="ic">✕</span>
-        <span class="t">The agent owns the query</span>
-        <span class="d">No deterministic filters, tenant isolation, ACLs, or ranking guarantees.</span>
-        <span class="more">See the impact →</span>
+        <span class="t">The AI decides how to search, not you</span>
+        <span class="d">You can't guarantee every search stays inside the right customer or permissions.</span>
+        <span class="more">See what this means →</span>
       </button>
-      <button type="button" class="wt-dbcard" data-db="rag" aria-expanded="false">
+      <button type="button" class="wt-dbcard" data-db="repeatable" aria-expanded="false">
         <span class="ic">✕</span>
-        <span class="t">No predictable RAG contract</span>
-        <span class="d">No fixed query → retrieve → top-k → LLM pipeline you can put an SLO on.</span>
-        <span class="more">See the impact →</span>
+        <span class="t">The same question can give different answers</span>
+        <span class="d">The agent picks its own route each time, so results wander.</span>
+        <span class="more">See what this means →</span>
       </button>
-      <button type="button" class="wt-dbcard" data-db="design" aria-expanded="false">
+      <button type="button" class="wt-dbcard" data-db="lockin" aria-expanded="false">
         <span class="ic">✕</span>
-        <span class="t">Retrieval design is still on you</span>
-        <span class="d">Vector-search tools ≠ a retrieval, grounding and evaluation strategy.</span>
-        <span class="more">See the impact →</span>
-      </button>
-      <button type="button" class="wt-dbcard" data-db="atlas" aria-expanded="false">
-        <span class="ic">✕</span>
-        <span class="t">Atlas Managed MCP is Atlas-only</span>
-        <span class="d">Community, Enterprise Advanced or private deployments? You self-host.</span>
-        <span class="more">See the impact →</span>
+        <span class="t">The easy version only works on Atlas</span>
+        <span class="d">Community, Enterprise Advanced or your own servers? You host it yourself.</span>
+        <span class="more">See what this means →</span>
       </button>
     </div>
 
@@ -210,8 +204,8 @@
   <section class="wt-panel" role="tabpanel" aria-label="Step 4: How AI Search closes the gap">
     <p class="kicker">Step 4 · drawback → answer</p>
     <h2>How AI Search closes each gap</h2>
-    <p class="lead">Every limitation from step 2 has a direct answer. Click a limitation on the left
-       to see how the retrieval layer resolves it.</p>
+    <p class="lead">Each of the four limitations has a straightforward answer.
+       <b>Click one on the left</b> to see how AI Search solves it.</p>
 
     <div class="wt-map">
       <div class="wt-maplist" id="wt-maplist" role="listbox" aria-label="Remote MCP limitations"></div>

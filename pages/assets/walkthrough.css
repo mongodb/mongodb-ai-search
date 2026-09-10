@@ -100,7 +100,7 @@
 }
 
 /* ── Drawback cards (step 2) ─────────────────────────────────────────────── */
-.wt-dbgrid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 0.9rem; }
+.wt-dbgrid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 0.9rem; }
 .wt-dbcard {
   text-align: left; font: inherit; cursor: pointer;
   background: #fff; border: 1px solid var(--border); border-left: 4px solid #e8b4ae;
