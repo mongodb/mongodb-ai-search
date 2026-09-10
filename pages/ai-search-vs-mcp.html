@@ -83,19 +83,46 @@
       <div class="wt-card">
         <p class="wt-label">How the interaction flows</p>
         <div class="wt-flow">
-          <div class="wt-flowbox"><b>User or agent goal</b><span>natural language intent</span></div>
+          <div class="wt-flowbox"><b>User gives an instruction to an AI client</b></div>
           <div class="wt-arrow">▼</div>
-          <div class="wt-flowbox"><b>MCP tool discovery</b><span>the client lists available tools</span></div>
+          <div class="wt-flowbox"><b>AI client connects to Remote MCP</b><span>authenticates first</span></div>
           <div class="wt-arrow">▼</div>
-          <div class="wt-flowbox accent"><b>Tool calls</b><span>the <em>agent</em> chooses which tool, and when</span></div>
+          <div class="wt-flowbox"><b>AI client discovers the available tools</b></div>
           <div class="wt-arrow">▼</div>
-          <div class="wt-flowbox dark"><b>MongoDB result or action</b><span>data-plane and/or control-plane</span></div>
+          <div class="wt-flowbox accent"><b>The model chooses a tool</b><span>find, aggregate, schema discovery…</span></div>
           <div class="wt-arrow">▼</div>
-          <div class="wt-flowbox"><b>Agent response</b><span>whatever the model makes of it</span></div>
+          <div class="wt-flowbox dark"><b>Remote MCP runs it in MongoDB</b><span>after checking permissions</span></div>
+          <div class="wt-arrow">▼</div>
+          <div class="wt-flowbox"><b>The result goes back to the AI client</b></div>
+          <div class="wt-arrow">▼</div>
+          <div class="wt-flowbox"><b>The model explains it — or calls another tool</b></div>
         </div>
-        <p class="wt-flownote">Note who is in control: the MCP server defines the tool contract,
-           but the agent decides when to call tools. Hold onto that — it matters in step 2.</p>
+        <p class="wt-plain">
+          <span class="lbl">In plain English</span>
+          The user gives a goal, the AI picks a tool, MCP performs the MongoDB operation,
+          and the AI reports back. <b>Notice who chooses the tool — that matters in step 2.</b>
+        </p>
       </div>
+    </div>
+
+    <div class="wt-example">
+      <div class="wt-ex-head">
+        <span class="wt-ex-tag">Detailed example</span>
+        <b>A developer using an AI coding assistant</b>
+      </div>
+      <div class="wt-ex-q">💬 “Find products under $100 that are similar to hiking boots.”</div>
+      <ol class="wt-ex-steps">
+        <li>The AI client receives the developer's instruction.</li>
+        <li>The model works out that it needs to query MongoDB.</li>
+        <li>It <b>picks an MCP tool</b> — for example <code>aggregate</code>.</li>
+        <li>Remote MCP sends that tool request to MongoDB.</li>
+        <li>MongoDB runs the filter and vector-search logic.</li>
+        <li>Remote MCP returns the results to the AI client.</li>
+        <li>The assistant summarises the products, and may generate application code.</li>
+      </ol>
+      <p class="wt-ex-note"><b>The key point:</b> Remote MCP isn't primarily a ranking product.
+        It's the standardised bridge that lets an AI client use MongoDB tools — including
+        search-related tools, when they're available and authorised.</p>
     </div>
 
     <div class="wt-banner">
@@ -179,19 +206,46 @@
       </div>
 
       <div class="wt-card">
-        <p class="wt-label">The retrieval contract</p>
+        <p class="wt-label">How the interaction flows</p>
         <div class="wt-flow">
-          <div class="wt-flowbox"><b>User query</b><span>from your app, agent, or chatbot</span></div>
+          <div class="wt-flowbox"><b>Customer asks a question</b></div>
           <div class="wt-arrow">▼</div>
-          <div class="wt-flowbox accent"><b>Search / vector / hybrid retrieval</b><span>your query logic, your filters, your ranking</span></div>
+          <div class="wt-flowbox"><b>Your application receives the question</b></div>
           <div class="wt-arrow">▼</div>
-          <div class="wt-flowbox dark"><b>Top-k grounded context</b><span>permission-filtered, scored, cited</span></div>
+          <div class="wt-flowbox accent"><b>Your application builds the search</b><span>keyword, vector, or both together</span></div>
           <div class="wt-arrow">▼</div>
-          <div class="wt-flowbox"><b>LLM response</b><span>grounded in what you actually retrieved</span></div>
+          <div class="wt-flowbox dark"><b>MongoDB searches and ranks the matches</b></div>
+          <div class="wt-arrow">▼</div>
+          <div class="wt-flowbox"><b>Your application picks the best results</b></div>
+          <div class="wt-arrow">▼</div>
+          <div class="wt-flowbox"><b>The LLM turns them into a grounded answer</b></div>
         </div>
-        <p class="wt-flownote">Same shape every time — which is exactly what makes latency,
-           recall and cost measurable and improvable.</p>
+        <p class="wt-plain">
+          <span class="lbl">In plain English</span>
+          Your application controls the search, MongoDB finds the relevant data, and the LLM
+          explains it. <b>Your developers decide the fields, the filters, the ranking, and how
+          much context the LLM ever sees.</b>
+        </p>
       </div>
+    </div>
+
+    <div class="wt-example">
+      <div class="wt-ex-head">
+        <span class="wt-ex-tag">Detailed example</span>
+        <b>A customer-support chatbot</b>
+      </div>
+      <div class="wt-ex-q">💬 “Why is my payment failing, and how can I fix it?”</div>
+      <ol class="wt-ex-steps">
+        <li>The application turns the question into a search query.</li>
+        <li>MongoDB searches support articles, error codes, and product documentation.</li>
+        <li><b>Filters restrict the results</b> to this customer's product and language.</li>
+        <li>MongoDB returns the most relevant troubleshooting content.</li>
+        <li>The application sends <b>only those results</b> to the LLM.</li>
+        <li>The LLM replies with a grounded troubleshooting explanation.</li>
+      </ol>
+      <p class="wt-ex-note"><b>The customer just sees one answer.</b> Behind the scenes, AI Search
+        is responsible for finding the right context — not for deciding which database tool to
+        call, and not for changing anything in the database.</p>
     </div>
 
     <div class="wt-banner">
