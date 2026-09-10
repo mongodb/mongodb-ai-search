@@ -1,0 +1,385 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Remote MCP or AI Search? — Visual Walkthrough</title>
+<meta name="description" content="A clickable walkthrough: what the MongoDB Remote MCP Server is great at, where it stops, what MongoDB AI Search is, and how it closes the gap for real applications — on any cloud.">
+<link rel="stylesheet" href="assets/style.css">
+<link rel="stylesheet" href="assets/landing.css">
+<link rel="stylesheet" href="assets/walkthrough.css">
+<script src="assets/walkthrough.js" defer></script>
+</head>
+<body>
+
+<header class="lnav">
+  <a class="logo" href="../index.html"><span class="leaf">◈</span> AiSearch</a>
+  <nav>
+    <a href="../index.html#architecture">Architecture</a>
+    <a href="../index.html#agents">Agents</a>
+    <a href="../index.html#clouds">Clouds</a>
+    <a href="../index.html#docs">Docs</a>
+    <a href="demo.html">Playground</a>
+  </nav>
+  <a class="cta" href="../index.html">← Back to site</a>
+</header>
+
+<!-- ── Header strip + stepper ───────────────────────────────────────────── -->
+<section class="dhead">
+  <div class="wrap">
+    <p class="kicker">Visual walkthrough · 6 steps · positioning guide</p>
+    <h1>Remote MCP or AI Search?</h1>
+    <p class="sub">They solve <b>different layers</b> of the same stack. Click through the walkthrough:
+       what the MongoDB Remote MCP Server is genuinely great at, exactly where it stops,
+       what MongoDB AI Search is, and how it closes each gap when you are building
+       <b>applications</b> — on any cloud, on any deployment model.</p>
+
+    <div class="wt-steps" role="tablist" aria-label="Walkthrough steps">
+      <button type="button" class="wt-pill" role="tab" aria-selected="true"><span class="n">1</span> <span class="lbl">Remote MCP</span></button>
+      <button type="button" class="wt-pill" role="tab" aria-selected="false"><span class="n">2</span> <span class="lbl">Where it stops</span></button>
+      <button type="button" class="wt-pill" role="tab" aria-selected="false"><span class="n">3</span> <span class="lbl">AI Search</span></button>
+      <button type="button" class="wt-pill" role="tab" aria-selected="false"><span class="n">4</span> <span class="lbl">Closing the gap</span></button>
+      <button type="button" class="wt-pill" role="tab" aria-selected="false"><span class="n">5</span> <span class="lbl">Any cloud</span></button>
+      <button type="button" class="wt-pill" role="tab" aria-selected="false"><span class="n">6</span> <span class="lbl">Decide</span></button>
+    </div>
+    <div class="wt-progressbar"><i id="wt-bar"></i></div>
+  </div>
+</section>
+
+<main class="wt-main">
+
+  <!-- ── Step 1 — What Remote MCP is ────────────────────────────────────── -->
+  <section class="wt-panel active" role="tabpanel" aria-label="Step 1: Remote MCP">
+    <p class="kicker">Step 1 · the agent connectivity &amp; action layer</p>
+    <h2>Meet the MongoDB Remote MCP Server</h2>
+    <p class="lead">A protocol server that exposes MongoDB capabilities as standardized tools,
+       so any MCP-compatible AI client can discover and invoke them — securely and with governance.
+       This is a genuinely great fit for agent access.</p>
+
+    <div class="wt-grid">
+      <div class="wt-card">
+        <p class="wt-label">What it is</p>
+        <h3>A standardized tool interface for agents</h3>
+        <p>Instead of building custom API glue for every MongoDB operation, you expose one
+           governed surface an agent can call.</p>
+        <ul class="wt-list">
+          <li><b>Explore &amp; query</b> — schemas, collections, indexes, and data from an AI coding tool</li>
+          <li><b>Generate code</b> — MongoDB queries or application code using live database context</li>
+          <li><b>Operate</b> — indexing, deployment management and performance workflows, subject to permissions</li>
+          <li><b>Two access models</b> — user-delegated (runs as the user's Atlas identity) or programmatic (service account, non-interactive)</li>
+          <li><b>Two hosting options</b> — Atlas Managed MCP, or local / self-managed when you need direct control</li>
+        </ul>
+        <div class="wt-chips">
+          <span class="wt-chip-label">Typical consumers</span>
+          <span class="wt-chip">Claude</span>
+          <span class="wt-chip">ChatGPT</span>
+          <span class="wt-chip">Cursor</span>
+          <span class="wt-chip">VS Code</span>
+          <span class="wt-chip">Agent frameworks</span>
+          <span class="wt-chip">Custom MCP clients</span>
+        </div>
+      </div>
+
+      <div class="wt-card">
+        <p class="wt-label">How the interaction flows</p>
+        <div class="wt-flow">
+          <div class="wt-flowbox"><b>User or agent goal</b><span>natural language intent</span></div>
+          <div class="wt-arrow">▼</div>
+          <div class="wt-flowbox"><b>MCP tool discovery</b><span>the client lists available tools</span></div>
+          <div class="wt-arrow">▼</div>
+          <div class="wt-flowbox accent"><b>Tool calls</b><span>the <em>agent</em> chooses which tool, and when</span></div>
+          <div class="wt-arrow">▼</div>
+          <div class="wt-flowbox dark"><b>MongoDB result or action</b><span>data-plane and/or control-plane</span></div>
+          <div class="wt-arrow">▼</div>
+          <div class="wt-flowbox"><b>Agent response</b><span>whatever the model makes of it</span></div>
+        </div>
+        <p class="wt-flownote">Note who is in control: the MCP server defines the tool contract,
+           but the agent decides when to call tools. Hold onto that — it matters in step 2.</p>
+      </div>
+    </div>
+
+    <div class="wt-banner">
+      <span class="tag">Positioning</span>
+      <p class="q">Remote MCP answers: <em>“How can an AI agent securely use MongoDB?”</em></p>
+    </div>
+  </section>
+
+  <!-- ── Step 2 — Drawbacks ─────────────────────────────────────────────── -->
+  <section class="wt-panel" role="tabpanel" aria-label="Step 2: Where Remote MCP stops">
+    <p class="kicker">Step 2 · the limits you need to know up front</p>
+    <h2>Where Remote MCP stops</h2>
+    <p class="lead">None of these are bugs — MCP is an <b>access layer</b>, not a retrieval product.
+       But if you reach for it to solve a <b>search</b> problem, you will hit every one of them.
+       Click a card to see what it means for your application.</p>
+
+    <div class="wt-dbgrid">
+      <button type="button" class="wt-dbcard" data-db="retrieval" aria-expanded="false">
+        <span class="ic">✕</span>
+        <span class="t">Not a retrieval or ranking layer</span>
+        <span class="d">Brokers tool calls — it doesn't define indexes, ranking, or grounding.</span>
+        <span class="more">See the impact →</span>
+      </button>
+      <button type="button" class="wt-dbcard" data-db="policy" aria-expanded="false">
+        <span class="ic">✕</span>
+        <span class="t">The agent owns the query</span>
+        <span class="d">No deterministic filters, tenant isolation, ACLs, or ranking guarantees.</span>
+        <span class="more">See the impact →</span>
+      </button>
+      <button type="button" class="wt-dbcard" data-db="rag" aria-expanded="false">
+        <span class="ic">✕</span>
+        <span class="t">No predictable RAG contract</span>
+        <span class="d">No fixed query → retrieve → top-k → LLM pipeline you can put an SLO on.</span>
+        <span class="more">See the impact →</span>
+      </button>
+      <button type="button" class="wt-dbcard" data-db="design" aria-expanded="false">
+        <span class="ic">✕</span>
+        <span class="t">Retrieval design is still on you</span>
+        <span class="d">Vector-search tools ≠ a retrieval, grounding and evaluation strategy.</span>
+        <span class="more">See the impact →</span>
+      </button>
+      <button type="button" class="wt-dbcard" data-db="atlas" aria-expanded="false">
+        <span class="ic">✕</span>
+        <span class="t">Atlas Managed MCP is Atlas-only</span>
+        <span class="d">Community, Enterprise Advanced or private deployments? You self-host.</span>
+        <span class="more">See the impact →</span>
+      </button>
+    </div>
+
+    <div class="wt-drawer" id="wt-drawer"></div>
+
+    <div class="wt-note">
+      <span><b>The gap is by design.</b> Remote MCP was built to connect agents to MongoDB —
+        not to decide which data is relevant. That second question is a different layer.</span>
+      <button type="button" class="jump" data-goto="2">See how AI Search closes it →</button>
+    </div>
+  </section>
+
+  <!-- ── Step 3 — What AI Search is ─────────────────────────────────────── -->
+  <section class="wt-panel" role="tabpanel" aria-label="Step 3: MongoDB AI Search">
+    <p class="kicker">Step 3 · the retrieval layer</p>
+    <h2>Meet MongoDB AI Search</h2>
+    <p class="lead">A database-native search and retrieval capability — MongoDB Search, Vector Search
+       and hybrid retrieval — that lives <b>inside your application</b>, where retrieval decisions belong.</p>
+
+    <div class="wt-grid">
+      <div class="wt-card">
+        <p class="wt-label">What it is</p>
+        <h3>Retrieval and relevance, owned by your app</h3>
+        <p>You define the query, the ranking, the filters, the grounding policy, and the response
+           experience — deterministically, on every single request.</p>
+        <ul class="wt-list">
+          <li><b>Ranked results</b> — documents, relevance scores, metadata and application context</li>
+          <li><b>Strict pre-filters</b> — tenant, region, ACL, product status, time range, content type, applied before the model sees anything</li>
+          <li><b>Tunable</b> — relevance, ranking, recall, latency, throughput and cost are all yours to optimise</li>
+          <li><b>One datastore</b> — operational data, metadata and embeddings stay together in MongoDB; no separate vector store to synchronise</li>
+        </ul>
+        <div class="wt-chips">
+          <span class="wt-chip-label">Retrieval strategies</span>
+          <span class="wt-chip green">vector</span>
+          <span class="wt-chip green">full-text</span>
+          <span class="wt-chip green">hybrid</span>
+          <span class="wt-chip green">graph</span>
+          <span class="wt-chip green">parent-doc</span>
+          <span class="wt-chip green">metadata</span>
+        </div>
+      </div>
+
+      <div class="wt-card">
+        <p class="wt-label">The retrieval contract</p>
+        <div class="wt-flow">
+          <div class="wt-flowbox"><b>User query</b><span>from your app, agent, or chatbot</span></div>
+          <div class="wt-arrow">▼</div>
+          <div class="wt-flowbox accent"><b>Search / vector / hybrid retrieval</b><span>your query logic, your filters, your ranking</span></div>
+          <div class="wt-arrow">▼</div>
+          <div class="wt-flowbox dark"><b>Top-k grounded context</b><span>permission-filtered, scored, cited</span></div>
+          <div class="wt-arrow">▼</div>
+          <div class="wt-flowbox"><b>LLM response</b><span>grounded in what you actually retrieved</span></div>
+        </div>
+        <p class="wt-flownote">Same shape every time — which is exactly what makes latency,
+           recall and cost measurable and improvable.</p>
+      </div>
+    </div>
+
+    <div class="wt-banner">
+      <span class="tag">Positioning</span>
+      <p class="q">AI Search answers: <em>“Which data is relevant?”</em></p>
+    </div>
+  </section>
+
+  <!-- ── Step 4 — Closing the gap ───────────────────────────────────────── -->
+  <section class="wt-panel" role="tabpanel" aria-label="Step 4: How AI Search closes the gap">
+    <p class="kicker">Step 4 · drawback → answer</p>
+    <h2>How AI Search closes each gap</h2>
+    <p class="lead">Every limitation from step 2 has a direct answer. Click a limitation on the left
+       to see how the retrieval layer resolves it.</p>
+
+    <div class="wt-map">
+      <div class="wt-maplist" id="wt-maplist" role="listbox" aria-label="Remote MCP limitations"></div>
+      <div class="wt-answer" id="wt-answer"></div>
+    </div>
+
+    <div class="wt-note">
+      <span><b>Complementary, not competing.</b> AI Search doesn't replace Remote MCP —
+        it supplies the retrieval quality MCP was never designed to provide.</span>
+      <button type="button" class="jump" data-goto="5">When to use both →</button>
+    </div>
+  </section>
+
+  <!-- ── Step 5 — Cloud agnostic ────────────────────────────────────────── -->
+  <section class="wt-panel" role="tabpanel" aria-label="Step 5: Cloud agnostic">
+    <p class="kicker">Step 5 · no cloud lock-in, no deployment lock-in</p>
+    <h2>The same retrieval path — on every cloud</h2>
+    <p class="lead">A key differentiator for application builders: AI Search is not tied to one cloud
+       or one hosting model. The request path and the data layer are identical everywhere;
+       only the managed service names change. Pick a cloud to see the mapping.</p>
+
+    <div class="wt-cloudtabs" role="tablist" aria-label="Cloud providers">
+      <button type="button" role="tab" aria-selected="true"  aria-controls="wtc-gcp">Google Cloud</button>
+      <button type="button" role="tab" aria-selected="false" aria-controls="wtc-aws">AWS</button>
+      <button type="button" role="tab" aria-selected="false" aria-controls="wtc-azure">Azure</button>
+    </div>
+
+    <div class="wt-cloudpanel active" id="wtc-gcp" role="tabpanel">
+      <div class="clouddiag">
+        <div class="clayer"><span class="lbl">Experience</span><span class="svc">Cloud Run</span>
+          <span class="desc">Chat / search UI</span></div>
+        <div class="clayer"><span class="lbl">Agent runtime</span><span class="svc">Vertex AI Agent Engine</span>
+          <span class="desc">Managed serverless agent host</span></div>
+        <div class="clayer"><span class="lbl">AI Search runtime</span><span class="svc">Cloud Run</span>
+          <span class="desc">REST + MCP containers · Secret Manager</span></div>
+        <div class="clayer const"><span class="lbl">Data — unchanged</span><span class="svc">MongoDB</span>
+          <span class="desc">Same collections, indexes &amp; guardrails</span></div>
+      </div>
+      <div class="cloudlinks">
+        <a href="deployment/google/README.html">Google Cloud overview</a>
+        <a href="deployment/google/cloud_run/README.html">Cloud Run guide</a>
+        <a href="deployment/google/agent_runtime/README.html">Agent Engine guide</a>
+      </div>
+    </div>
+
+    <div class="wt-cloudpanel" id="wtc-aws" role="tabpanel">
+      <div class="clouddiag">
+        <div class="clayer"><span class="lbl">Experience</span><span class="svc">Amplify + S3</span>
+          <span class="desc">Hosted UI · static site</span></div>
+        <div class="clayer"><span class="lbl">Agent runtime</span><span class="svc">Bedrock AgentCore</span>
+          <span class="desc">Hosts the MCP surface</span></div>
+        <div class="clayer"><span class="lbl">AI Search runtime</span><span class="svc">ECS Express</span>
+          <span class="desc">REST + MCP services · Secrets Manager</span></div>
+        <div class="clayer const"><span class="lbl">Data — unchanged</span><span class="svc">MongoDB</span>
+          <span class="desc">Same collections, indexes &amp; guardrails</span></div>
+      </div>
+      <div class="cloudlinks">
+        <a href="deployment/aws/README.html">AWS overview</a>
+        <a href="deployment/aws/ecs/README.html">ECS Express guide</a>
+        <a href="deployment/aws/agentcore/README.html">Bedrock AgentCore guide</a>
+      </div>
+    </div>
+
+    <div class="wt-cloudpanel" id="wtc-azure" role="tabpanel">
+      <div class="clouddiag">
+        <div class="clayer"><span class="lbl">Experience</span><span class="svc">Container Apps</span>
+          <span class="desc">Chat / search UI</span></div>
+        <div class="clayer"><span class="lbl">Agent runtime</span><span class="svc">AI Foundry</span>
+          <span class="desc">Foundry agent wired to MCP</span></div>
+        <div class="clayer"><span class="lbl">AI Search runtime</span><span class="svc">Container Apps</span>
+          <span class="desc">REST + MCP containers · Key Vault</span></div>
+        <div class="clayer const"><span class="lbl">Data — unchanged</span><span class="svc">MongoDB</span>
+          <span class="desc">Same collections, indexes &amp; guardrails</span></div>
+      </div>
+      <div class="cloudlinks">
+        <a href="deployment/azure/DEPLOYMENT.html">Azure deployment guide</a>
+      </div>
+    </div>
+
+    <div class="wt-grid" style="margin-top:1.3rem">
+      <div class="wt-card">
+        <p class="wt-label">Runs wherever MongoDB runs</p>
+        <h3>Deployment-model agnostic</h3>
+        <p>Retrieval is application-owned query logic, so your search behaviour, indexes and
+           guardrails travel with your data — across clouds and across hosting models.</p>
+        <div class="wt-chips">
+          <span class="wt-chip green">Atlas</span>
+          <span class="wt-chip green">Enterprise Advanced</span>
+          <span class="wt-chip green">Community Edition</span>
+          <span class="wt-chip green">Local / self-managed</span>
+        </div>
+      </div>
+      <div class="wt-card">
+        <p class="wt-label">Compare: Remote MCP</p>
+        <h3>The managed option is Atlas-only</h3>
+        <p>Atlas Managed MCP — the zero-hosting, fully governed option — covers Atlas-hosted
+           deployments. Anything else means running and operating a self-managed MCP server.</p>
+        <div class="wt-chips">
+          <span class="wt-chip">Atlas → Atlas Managed MCP</span>
+          <span class="wt-chip">Everything else → self-managed MCP</span>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ── Step 6 — Decide ────────────────────────────────────────────────── -->
+  <section class="wt-panel" role="tabpanel" aria-label="Step 6: Decision guide">
+    <p class="kicker">Step 6 · decide in seconds</p>
+    <h2>Which layer should you lead with?</h2>
+    <p class="lead">Click what you are hearing from the customer — get the recommendation and the reason.</p>
+
+    <div class="wt-decide">
+      <div class="wt-asks" id="wt-asks" role="listbox" aria-label="Customer questions"></div>
+      <div class="wt-reco" id="wt-reco"></div>
+    </div>
+
+    <h3 style="margin:2rem 0 0.2rem;font-size:1.15rem">Using both — the agentic application pattern</h3>
+    <p class="lead" style="margin-bottom:1rem">Reliable retrieval <em>plus</em> agent actions, with guardrails in between.</p>
+    <div class="wt-both">
+      <div class="wt-bothcard">
+        <span class="n">1</span>
+        <b>AI Search retrieves</b>
+        <span>The application pulls relevant, permission-filtered context — ranked and grounded.</span>
+      </div>
+      <div class="wt-bothcard">
+        <span class="n">2</span>
+        <b>Remote MCP acts</b>
+        <span>The agent inspects data, invokes operational tools, or takes an approved action.</span>
+      </div>
+      <div class="wt-bothcard">
+        <span class="n">3</span>
+        <b>Your app governs</b>
+        <span>Approval gates, read-only mode, tool allowlists and audit policy wrap every action.</span>
+      </div>
+    </div>
+
+    <div class="wt-note" style="margin-top:1.3rem">
+      <span><b>Important caveat.</b> Remote MCP can expose MongoDB query tools — including
+        vector-search-related capabilities — but that does not make it a replacement for designing
+        your application's retrieval, ranking, filtering, grounding and evaluation strategy.</span>
+    </div>
+
+    <div class="wt-sources">
+      <a href="docs/AI_SEARCH_VS_REMOTE_MCP.html">📄 Full written comparison</a>
+      <a href="https://www.mongodb.com/docs/vector-search/">MongoDB Vector Search docs</a>
+      <a href="https://www.mongodb.com/products/platform/atlas-vector-search">Vector Search product page</a>
+      <a href="https://www.mongodb.com/docs/mcp-server/overview/">MCP Server overview</a>
+      <a href="https://www.mongodb.com/docs/mcp-server/tools/">MCP Server tools</a>
+      <a href="https://www.mongodb.com/docs/mcp-server/remote-mcp/access-models/">MCP access models</a>
+    </div>
+  </section>
+
+</main>
+
+<!-- ── Stepper nav ──────────────────────────────────────────────────────── -->
+<div class="wt-nav">
+  <button type="button" id="wt-prev">← Back</button>
+  <span class="count" id="wt-count">Step 1 of 6</span>
+  <button type="button" id="wt-next" class="primary">Next: where Remote MCP stops →</button>
+</div>
+
+<footer class="lfooter">
+  <div class="wrap">
+    <div><b>◈ AiSearch</b><br>MongoDB retrieval platform — REST + MCP, on any cloud.</div>
+    <div>Walkthrough companion to <a href="docs/AI_SEARCH_VS_REMOTE_MCP.html">AI Search vs. Remote MCP</a> ·
+      <a href="demo.html">Connection playground</a></div>
+  </div>
+</footer>
+
+</body>
+</html>

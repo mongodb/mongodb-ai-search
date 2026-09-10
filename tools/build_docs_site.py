@@ -53,6 +53,13 @@ DOCS: list[tuple[str, str]] = [
     ("searchaas/tests/LOAD_TEST_REPORT.md", "Components & Testing"),
 ]
 
+# Docs whose portal card should open a hand-built interactive page instead of
+# the generated markdown render. The markdown page is still generated (and
+# linked from the interactive page as the full written version).
+HREF_OVERRIDES: dict[str, str] = {
+    "docs/AI_SEARCH_VS_REMOTE_MCP.md": "pages/ai-search-vs-mcp.html",
+}
+
 SECTION_ORDER = [
     "Getting Started",
     "Architecture & Internals",
@@ -196,7 +203,8 @@ def build() -> None:
         out.parent.mkdir(parents=True, exist_ok=True)
         out.write_text(render_page(src, rewrite_links(text, src), title), encoding="utf-8")
         entries.append({"src": src, "section": section, "title": title,
-                        "blurb": blurb, "href": "pages/" + out_path_for(src)})
+                        "blurb": blurb,
+                        "href": HREF_OVERRIDES.get(src, "pages/" + out_path_for(src))})
         print(f"[page] {src} → {out.relative_to(REPO_ROOT)}")
 
     (REPO_ROOT / ".nojekyll").touch()
@@ -256,6 +264,7 @@ INDEX_TMPL = """<!DOCTYPE html>
     <a href="#agents">Agents</a>
     <a href="#clouds">Clouds</a>
     <a href="#docs">Docs</a>
+    <a href="pages/ai-search-vs-mcp.html">MCP vs AI Search</a>
     <a href="pages/demo.html">Playground</a>
   </nav>
   <a class="cta" href="pages/README.html">Get Started</a>
@@ -273,6 +282,7 @@ INDEX_TMPL = """<!DOCTYPE html>
          Google Cloud, AWS, and Azure.</p>
       <div class="actions">
         <a class="btn btn-primary" href="pages/demo.html">▶ Try the connection playground</a>
+        <a class="btn btn-ghost" href="pages/ai-search-vs-mcp.html">MCP vs AI Search walkthrough</a>
         <a class="btn btn-ghost" href="#architecture">Explore the architecture</a>
         <a class="btn btn-ghost" href="#docs">Read the docs ({count})</a>
       </div>
