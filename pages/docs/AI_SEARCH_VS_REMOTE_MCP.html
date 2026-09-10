@@ -1,0 +1,327 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MongoDB AI Search vs. Remote MCP Server · AiSearch Docs</title>
+<link rel="stylesheet" href="../../pages/assets/style.css">
+<link rel="stylesheet" href="../../pages/assets/pygments.css">
+</head>
+<body>
+<header class="topbar">
+  <a class="brand" href="../../index.html">AiSearch Docs</a>
+  <a class="back" href="../../index.html">← All docs</a>
+</header>
+<main class="content">
+<h1 id="mongodb-ai-search-vs-remote-mcp-server">MongoDB AI Search vs. Remote MCP Server</h1>
+<p>A positioning guide for builders: when the MongoDB Remote MCP Server is the right
+tool, where it stops, and how MongoDB AI Search fills the gap when you are
+building <strong>applications</strong> — not just wiring up agents.</p>
+<div class="toc">
+<ul>
+<li><a href="#mongodb-ai-search-vs-remote-mcp-server">MongoDB AI Search vs. Remote MCP Server</a><ul>
+<li><a href="#read-this-first-when-to-use-remote-mcp-and-what-it-cant-solve">⚠️ Read this first: when to use Remote MCP — and what it can't solve</a></li>
+<li><a href="#how-mongodb-ai-search-closes-the-gap">How MongoDB AI Search closes the gap</a><ul>
+<li><a href="#ai-search-is-cloud-agnostic">🌐 AI Search is cloud-agnostic</a></li>
+</ul>
+</li>
+<li><a href="#the-two-layers-side-by-side">The two layers, side by side</a></li>
+<li><a href="#when-to-use-mongodb-ai-search">When to use MongoDB AI Search</a></li>
+<li><a href="#when-to-use-remote-mcp-server">When to use Remote MCP Server</a></li>
+<li><a href="#when-to-use-both">When to use both</a></li>
+<li><a href="#decision-guide">Decision guide</a></li>
+<li><a href="#important-caveat">Important caveat</a></li>
+<li><a href="#sources">Sources</a></li>
+</ul>
+</li>
+</ul>
+</div>
+<hr />
+<h2 id="read-this-first-when-to-use-remote-mcp-and-what-it-cant-solve">⚠️ Read this first: when to use Remote MCP — and what it can't solve</h2>
+<p><strong>Use the MongoDB Remote MCP Server when your goal is agent connectivity:</strong> you
+want Claude, ChatGPT, Cursor, VS Code, or a custom agent to discover and invoke
+MongoDB tools — exploring schemas, running queries, generating code, or (when
+permitted) managing data and deployments — through a standardized, governed
+interface.</p>
+<p><strong>But Remote MCP does not solve application retrieval.</strong> Before you choose it as
+the answer to a search problem, be clear about what it cannot do for you:</p>
+<ul>
+<li><strong>It is not a retrieval or ranking layer.</strong> MCP brokers tool calls from an
+  agent to MongoDB — it does not define your search indexes, hybrid ranking,
+  relevance tuning, or top-k grounding contract.</li>
+<li><strong>It does not own your query policy.</strong> With MCP, the <em>agent</em> decides when and
+  how to call tools. Your application cannot guarantee deterministic filters,
+  tenant isolation, ACLs, or result ranking through an agent's judgment.</li>
+<li><strong>It does not give you a predictable RAG contract.</strong> There is no built-in
+  <code>query → retrieve → top-k grounded context → LLM</code> pipeline with latency,
+  recall, and cost SLOs under your control.</li>
+<li><strong>It does not replace retrieval design.</strong> Even when MCP exposes
+  vector-search-related tools, you still need to design indexes, filters,
+  ranking, grounding, and evaluation yourself.</li>
+<li><strong>Atlas Managed MCP is Atlas-only.</strong> If your deployment is Community Edition,
+  Enterprise Advanced, or otherwise non-Atlas, the managed option does not
+  apply — you self-host the MCP server instead.</li>
+</ul>
+<blockquote>
+<p><strong>The positioning line:</strong>
+<strong>Remote MCP answers: "How can an AI agent securely use MongoDB?"</strong>
+<strong>AI Search answers: "Which data is relevant?"</strong></p>
+</blockquote>
+<p>If you are building a search experience, a RAG pipeline, product discovery, or
+any application where <strong>relevance and retrieval control belong to the
+application</strong>, keep reading — that is the problem MongoDB AI Search solves.</p>
+<hr />
+<h2 id="how-mongodb-ai-search-closes-the-gap">How MongoDB AI Search closes the gap</h2>
+<p>MongoDB AI Search is the <strong>retrieval layer</strong> that Remote MCP deliberately does
+not try to be. It addresses each drawback above directly:</p>
+<table>
+<thead>
+<tr>
+<th>Remote MCP limitation</th>
+<th>How AI Search overcomes it</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>No retrieval/ranking layer</td>
+<td>Database-native lexical, semantic, vector, and <strong>hybrid</strong> retrieval with relevance scores, ranking, and metadata.</td>
+</tr>
+<tr>
+<td>Agent-controlled queries</td>
+<td><strong>Application-controlled</strong> queries and aggregation pipelines — you define the query, ranking, filters, grounding policy, and response experience.</td>
+</tr>
+<tr>
+<td>No predictable RAG contract</td>
+<td>A deterministic contract: <code>user query → search / vector / hybrid retrieval → top-k grounded context → LLM response</code>.</td>
+</tr>
+<tr>
+<td>No guaranteed filters</td>
+<td>Strict pre-filters — tenant, region, ACL, product status, time range, content type — applied <strong>before</strong> results reach the model.</td>
+</tr>
+<tr>
+<td>Retrieval design left to you</td>
+<td>Production search behavior is the product: relevance, latency, filtering, ranking, recall, throughput, and cost tuning are first-class.</td>
+</tr>
+<tr>
+<td>Separate vector store sprawl</td>
+<td>Operational data, metadata, and vector embeddings stay <strong>together in MongoDB</strong> — no external vector store to synchronize.</td>
+</tr>
+</tbody>
+</table>
+<p>This is exactly the layer AiSearch (this project) is built on: six retrieval
+strategies — vector, full-text, hybrid, graph, parent-doc, and metadata — with
+AI-driven query understanding and planning in front of MongoDB Atlas, exposed
+over REST and MCP for any agent or app.</p>
+<h3 id="ai-search-is-cloud-agnostic">🌐 AI Search is cloud-agnostic</h3>
+<p>A key differentiator for application builders: <strong>AI Search is not tied to one
+cloud or one hosting model.</strong></p>
+<ul>
+<li><strong>Runs wherever MongoDB runs</strong> — Atlas, Enterprise Advanced, Community
+  Edition, or local/self-managed deployments, depending on the search
+  capability.</li>
+<li><strong>Deploys on any cloud</strong> — the AiSearch retrieval platform runs identically
+  on Google Cloud (Cloud Run / Vertex AI Agent Engine), AWS (ECS Express /
+  Bedrock AgentCore), and Azure (Container Apps / AI Foundry). The request path
+  and the data layer are unchanged; only the managed service names differ. See
+  the <a href="../deployment/google/README.html">deployment guides</a> for each cloud.</li>
+<li><strong>No control-plane lock-in</strong> — because retrieval is application-owned query
+  logic (not an Atlas-hosted agent surface), your search behavior, indexes, and
+  guardrails move with your data, across clouds and across hosting models.</li>
+</ul>
+<p>By contrast, Remote MCP's most convenient form — Atlas Managed MCP — is
+available only for Atlas-hosted deployments; anything else requires a
+self-managed MCP server.</p>
+<hr />
+<h2 id="the-two-layers-side-by-side">The two layers, side by side</h2>
+<p>These are <strong>complementary, not competing</strong>, capabilities:</p>
+<ul>
+<li><strong>MongoDB AI Search</strong> is the <strong>retrieval layer</strong> inside an application. Use it
+  to find the most relevant documents, products, chunks, or records using
+  lexical, semantic, vector, or hybrid search.</li>
+<li><strong>MongoDB Remote MCP Server</strong> is the <strong>agent connectivity and action layer</strong>.
+  Use it to let an AI client or agent discover and invoke MongoDB tools for
+  querying, exploring, generating code, and — when permitted — managing data or
+  deployments.</li>
+</ul>
+<table>
+<thead>
+<tr>
+<th>Dimension</th>
+<th>MongoDB AI Search</th>
+<th>MongoDB Remote MCP Server</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Primary purpose</td>
+<td>Retrieve relevant data for an application, chatbot, RAG pipeline, recommendation engine, or search experience.</td>
+<td>Expose MongoDB capabilities to MCP-compatible AI clients, assistants, IDEs, and agents through standardized tools.</td>
+</tr>
+<tr>
+<td>What it is</td>
+<td>A database-native search and retrieval capability using MongoDB Search, Vector Search, and hybrid retrieval.</td>
+<td>A protocol server and access surface for agent-to-MongoDB interaction.</td>
+</tr>
+<tr>
+<td>Typical consumer</td>
+<td>Your application code, API, retriever, orchestration layer, or RAG pipeline.</td>
+<td>Claude, ChatGPT, Cursor, VS Code, agent frameworks, or custom MCP clients.</td>
+</tr>
+<tr>
+<td>Interaction model</td>
+<td>Usually deterministic application-controlled queries and pipelines.</td>
+<td>Natural-language or tool-calling interaction where the agent selects and invokes available tools.</td>
+</tr>
+<tr>
+<td>Output</td>
+<td>Ranked documents or records, relevance scores, metadata, and application context.</td>
+<td>Tool results such as query output, schema information, generated code, database actions, or administrative responses.</td>
+</tr>
+<tr>
+<td>Scope</td>
+<td>Primarily data retrieval and relevance.</td>
+<td>Data exploration, database operations, code generation, indexing, deployment management, and performance workflows, depending on enabled tools and permissions.</td>
+</tr>
+<tr>
+<td>Data path</td>
+<td>Searches live MongoDB data and can combine lexical, vector, metadata filters, aggregations, and other query logic.</td>
+<td>Brokers requests from an AI client to MongoDB data-plane and/or control-plane tools. It does not replace a search index or retrieval strategy.</td>
+</tr>
+<tr>
+<td>Control model</td>
+<td>You define the query, ranking, filters, grounding policy, and response experience.</td>
+<td>The MCP server defines the tool contract; the AI client or agent decides when to call tools.</td>
+</tr>
+<tr>
+<td>Deployment choice</td>
+<td>Atlas, Enterprise Advanced, Community Edition, or local/self-managed options depending on the search capability.</td>
+<td>Atlas Managed MCP for Atlas-hosted deployments, or Local/Self-managed MCP when you need direct control or access to non-Atlas deployments.</td>
+</tr>
+<tr>
+<td>Best differentiator</td>
+<td>Relevance, latency, filtering, ranking, and production search behavior.</td>
+<td>Low-friction, standardized, governed agent access to MongoDB capabilities.</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="when-to-use-mongodb-ai-search">When to use MongoDB AI Search</h2>
+<p>Choose AI Search when the product requirement is <strong>search or retrieval</strong>:</p>
+<ul>
+<li>Build semantic, full-text, or hybrid search in a customer-facing application.</li>
+<li>Implement RAG where the application must retrieve grounded context before
+  calling an LLM.</li>
+<li>Power product discovery, recommendations, support search, knowledge bases, or
+  conversational search.</li>
+<li>Apply strict filters such as tenant, region, ACL, product status, time range,
+  or content type before results reach the model.</li>
+<li>Optimize relevance, ranking, recall, latency, throughput, and cost with
+  application-owned query logic.</li>
+<li>Keep operational data, metadata, and vector embeddings together in MongoDB
+  rather than synchronizing a separate vector store.</li>
+</ul>
+<p>Use AI Search when you need a predictable retrieval contract such as:</p>
+<div class="highlight"><pre><span></span><code>user query -&gt; search / vector / hybrid retrieval -&gt; top-k grounded context -&gt; LLM response
+</code></pre></div>
+
+<h2 id="when-to-use-remote-mcp-server">When to use Remote MCP Server</h2>
+<p>Choose Remote MCP when the requirement is <strong>agent access to MongoDB
+capabilities</strong>:</p>
+<ul>
+<li>Let developers explore schemas, collections, indexes, and data from an AI
+  coding tool.</li>
+<li>Generate MongoDB queries or application code using live database context.</li>
+<li>Enable an interactive AI assistant to query or manage Atlas resources through
+  natural language.</li>
+<li>Give a programmatic agent a standardized tool interface without building
+  custom API glue for every MongoDB operation.</li>
+<li>Centralize hosting, authentication, governance, and upgrades with Atlas
+  Managed MCP for Atlas workloads.</li>
+<li>Use user-delegated access for interactive work where actions should run under
+  the user's Atlas identity and permissions.</li>
+<li>Use programmatic access for workflow agents that need service-account-based,
+  repeatable, non-interactive execution.</li>
+</ul>
+<p>Use Remote MCP when the interaction looks like:</p>
+<div class="highlight"><pre><span></span><code>user or agent goal -&gt; MCP tool discovery -&gt; tool calls -&gt; MongoDB result or action -&gt; agent response
+</code></pre></div>
+
+<h2 id="when-to-use-both">When to use both</h2>
+<p>Use both when building an agentic application that needs <strong>reliable retrieval
+plus agent actions</strong>:</p>
+<ol>
+<li>The application uses MongoDB AI Search to retrieve relevant,
+   permission-filtered context.</li>
+<li>The agent uses Remote MCP to inspect data, invoke operational tools, or take
+   an approved action.</li>
+<li>The application enforces approval, read-only mode, tool allowlists, and audit
+   policies around actions.</li>
+</ol>
+<p><strong>Example:</strong> a support agent can use AI Search to retrieve the best
+troubleshooting articles and customer records, then use Remote MCP to inspect
+the customer's current deployment or create an approved support query.</p>
+<h2 id="decision-guide">Decision guide</h2>
+<table>
+<thead>
+<tr>
+<th>If the customer asks…</th>
+<th>Lead with…</th>
+<th>Why</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>"How do I build semantic or hybrid search?"</td>
+<td>MongoDB AI Search</td>
+<td>It is the retrieval and ranking capability.</td>
+</tr>
+<tr>
+<td>"How do I build a RAG chatbot?"</td>
+<td>MongoDB AI Search</td>
+<td>RAG needs a retrieval layer; MCP may optionally help an agent access live tools.</td>
+</tr>
+<tr>
+<td>"How can Cursor/Claude/ChatGPT access my MongoDB?"</td>
+<td>Remote MCP Server</td>
+<td>MCP provides the standardized agent connection and tool interface.</td>
+</tr>
+<tr>
+<td>"How can an AI assistant inspect or manage my Atlas environment?"</td>
+<td>Remote MCP Server</td>
+<td>MCP exposes database and management tools subject to permissions.</td>
+</tr>
+<tr>
+<td>"How do I guarantee tenant filters and result ranking?"</td>
+<td>MongoDB AI Search</td>
+<td>The application owns the query and retrieval policy.</td>
+</tr>
+<tr>
+<td>"How can I avoid hosting MCP infrastructure for Atlas?"</td>
+<td>Atlas Managed Remote MCP</td>
+<td>MongoDB hosts and manages the MCP server in Atlas.</td>
+</tr>
+<tr>
+<td>"How do I connect to Community Edition, Enterprise Advanced, or a private deployment?"</td>
+<td>Local/self-managed MCP, with AI Search as needed</td>
+<td>Remote Atlas Managed MCP is for Atlas-hosted deployments; self-managed MCP provides direct deployment control.</td>
+</tr>
+</tbody>
+</table>
+<h2 id="important-caveat">Important caveat</h2>
+<p>Remote MCP and AI Search solve different layers of the architecture. Remote MCP
+can expose MongoDB query tools, including vector-search-related capabilities,
+but that does not make it a replacement for designing the application's
+retrieval, ranking, filtering, grounding, and evaluation strategy.</p>
+<h2 id="sources">Sources</h2>
+<ul>
+<li><a href="https://www.mongodb.com/docs/vector-search/">MongoDB Vector Search Overview</a></li>
+<li><a href="https://www.mongodb.com/products/platform/atlas-vector-search">MongoDB Vector Search product page</a></li>
+<li><a href="https://www.mongodb.com/docs/mcp-server/overview/">MongoDB MCP Server Overview</a></li>
+<li><a href="https://www.mongodb.com/docs/mcp-server/tools/">MongoDB MCP Server Tools</a></li>
+<li><a href="https://www.mongodb.com/docs/mcp-server/remote-mcp/access-models/">MCP Access Models for MongoDB Atlas</a></li>
+</ul>
+</main>
+<script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+<script>if (window.mermaid) mermaid.initialize({startOnLoad: true, theme: "neutral"});</script>
+</body>
+</html>
